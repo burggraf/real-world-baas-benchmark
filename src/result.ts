@@ -6,12 +6,14 @@ export interface Environment { runtime: string; runtimeVersion: string; os: stri
 export interface Correctness { findings: CorrectnessFinding[]; }
 export interface CorrectnessFinding { name: string; passed: boolean; message?: string; }
 export interface OperationMetric {
-  count: number; countUnit: "operations"; errors: number; errorUnit: "errors";
-  p50Milliseconds: number; p95Milliseconds: number; p99Milliseconds: number; minMilliseconds: number; maxMilliseconds: number;
+  operationCount: number; errorCount: number;
+  latencyP50Ms: number; latencyP95Ms: number; latencyP99Ms: number; latencyMinMs: number; latencyMaxMs: number;
 }
 export interface StageMetrics {
-  requestedUsers: number; achievedUsers: number; elapsedSeconds: number; workflowCounts: Record<string, number>;
-  sdkReadOperationsPerSecond: number; sdkWriteOperationsPerSecond: number; readOperationsPerSecond: number; writeOperationsPerSecond: number;
+  requestedUsers: number; achievedUsers: number; elapsedSeconds: number;
+  workflowTransactionsPerSecond: number; workflowTransactionsPerSecondByName: Record<string, number>;
+  sdkOperationsPerSecond: number; readOperationsPerSecond: number; writeOperationsPerSecond: number;
+  workflowCompletionCountByName?: Record<string, number>;
   operations: Record<string, OperationMetric>;
 }
 export interface ResourceMetrics { name: string; unit: string; samples: number[]; }

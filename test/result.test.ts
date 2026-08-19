@@ -17,12 +17,13 @@ test("benchmark results survive JSON round trip", () => {
 
 test("stage metrics expose units in field names and values", () => {
   const stage = {
-    requestedUsers: 2, achievedUsers: 2, elapsedSeconds: 1, workflowCounts: { dashboard: 2 },
-    sdkReadOperationsPerSecond: 3, sdkWriteOperationsPerSecond: 4, readOperationsPerSecond: 5, writeOperationsPerSecond: 6,
-    operations: { dashboard: { count: 2, countUnit: "operations" as const, errors: 0, errorUnit: "errors" as const, p50Milliseconds: 10, p95Milliseconds: 20, p99Milliseconds: 30, minMilliseconds: 5, maxMilliseconds: 40 } },
+    requestedUsers: 2, achievedUsers: 2, elapsedSeconds: 1,
+    workflowTransactionsPerSecond: 2, workflowTransactionsPerSecondByName: { dashboard: 2 },
+    sdkOperationsPerSecond: 3, readOperationsPerSecond: 5, writeOperationsPerSecond: 6,
+    operations: { dashboard: { operationCount: 2, errorCount: 0, latencyP50Ms: 10, latencyP95Ms: 20, latencyP99Ms: 30, latencyMinMs: 5, latencyMaxMs: 40 } },
   };
-  assert.equal(stage.operations.dashboard.p95Milliseconds, 20);
-  assert.equal(stage.sdkReadOperationsPerSecond, 3);
+  assert.equal(stage.operations.dashboard.latencyP95Ms, 20);
+  assert.equal(stage.sdkOperationsPerSecond, 3);
 });
 
 test("loads named stubs and they fail clearly", async () => {
