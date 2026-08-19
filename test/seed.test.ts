@@ -15,6 +15,20 @@ test("all profile metadata includes memberships without enumerating data", () =>
   assert.deepEqual(profileMetadata.large, { ...datasetProfiles.large, memberships: 100_000 });
 });
 
+test("entityId has stable boundaries for every profile and entity", () => {
+  const entities = ["organization", "user", "membership", "project", "task", "comment", "activity"] as const;
+  for (const [profile, definition] of Object.entries(datasetProfiles) as Array<[keyof typeof datasetProfiles, (typeof datasetProfiles)[keyof typeof datasetProfiles]]>) {
+    const totals = { ...definition, memberships: definition.users };
+    for (const entity of entities) {
+      const key = ({ organization: "organizations", user: "users", membership: "memberships", project: "projects", task: "tasks", comment: "comments", activity: "activities" } as const)[entity];
+      const last = totals[key];
+      assert.match(entityId(entity, profile, 0), /^[a-z]+-00000000$/);
+      assert.match(entityId(entity, profile, last - 1), /^[a-z]+-[0-9a-z]{8}$/);
+      assert.throws(() => entityId(entity, profile, last));
+    }
+  }
+});
+
 test("userForOrganization validates boundaries and wraps slots", () => {
   for (const [profile, counts] of Object.entries(datasetProfiles) as Array<[keyof typeof datasetProfiles, (typeof datasetProfiles)[keyof typeof datasetProfiles]]>) {
     const perOrg = counts.users / counts.organizations;
