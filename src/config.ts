@@ -24,9 +24,10 @@ const keys = (value: object, expected: readonly string[], label: string) => {
   const wanted = [...expected].sort();
   if (actual.length !== wanted.length || actual.some((key, i) => key !== wanted[i])) throw new Error(`Invalid ${label} keys`);
 };
+const isRecord = (value: unknown): value is Record<string, unknown> => value !== null && typeof value === "object" && !Array.isArray(value);
 const object = (value: unknown, label: string): Record<string, unknown> => {
-  if (value === null || typeof value !== "object" || Array.isArray(value)) throw new Error(`Expected ${label} object`);
-  return value as Record<string, unknown>;
+  if (!isRecord(value)) throw new Error(`Expected ${label} object`);
+  return value;
 };
 const string = (value: unknown, label: string): string => {
   if (typeof value !== "string") throw new Error(`Expected ${label} string`);
@@ -68,18 +69,27 @@ export function parseConfig(value: unknown): BenchmarkConfig {
   if (min < 0 || max < 0 || min > max) throw new Error("Invalid think-time range");
   const weightsRaw = object(raw.weights, "weights");
   keys(weightsRaw, workflows, "weights");
-  const weights = Object.fromEntries(workflows.map(name => [name, finite(weightsRaw[name], `weight ${name}`)])) as Record<WorkflowName, number>;
+  const weights: Record<WorkflowName, number> = {
+    dashboard: finite(weightsRaw.dashboard, "weight dashboard"), taskList: finite(weightsRaw.taskList, "weight taskList"),
+    taskDetail: finite(weightsRaw.taskDetail, "weight taskDetail"), createTask: finite(weightsRaw.createTask, "weight createTask"),
+    updateTask: finite(weightsRaw.updateTask, "weight updateTask"), addComment: finite(weightsRaw.addComment, "weight addComment"),
+    search: finite(weightsRaw.search, "weight search"), profileUpdate: finite(weightsRaw.profileUpdate, "weight profileUpdate"),
+    signIn: finite(weightsRaw.signIn, "weight signIn"),
+  };
   if (Object.values(weights).some(n => n < 0) || Object.values(weights).reduce((a, b) => a + b, 0) !== 100) throw new Error("Workflow weights must be nonnegative and total 100");
   const slosRaw = object(raw.slos, "slos");
   keys(slosRaw, operations, "SLO");
-  const slos = Object.fromEntries(operations.map(name => {
-    const slo = object(slosRaw[name], `SLO ${name}`);
-    keys(slo, ["p95Ms", "maxErrorRate"], `SLO ${name}`);
-    const p95Ms = positive(slo.p95Ms, `${name}.p95Ms`);
-    const maxErrorRate = finite(slo.maxErrorRate, `${name}.maxErrorRate`);
+  const slo = (name: OperationClass): { p95Ms: number; maxErrorRate: number } => {
+    const value = object(slosRaw[name], `SLO ${name}`);
+    keys(value, ["p95Ms", "maxErrorRate"], `SLO ${name}`);
+    const p95Ms = positive(value.p95Ms, `${name}.p95Ms`);
+    const maxErrorRate = finite(value.maxErrorRate, `${name}.maxErrorRate`);
     if (maxErrorRate < 0 || maxErrorRate > 1) throw new Error(`Invalid ${name}.maxErrorRate`);
-    return [name, { p95Ms, maxErrorRate }];
-  })) as Record<OperationClass, { p95Ms: number; maxErrorRate: number }>;
+    return { p95Ms, maxErrorRate };
+  };
+  const slos: Record<OperationClass, { p95Ms: number; maxErrorRate: number }> = {
+    read: slo("read"), write: slo("write"), authSearch: slo("authSearch"),
+  };
   return {
     name: string(raw.name, "name"), publishable: boolean(raw.publishable, "publishable"), dataset, seed: finite(raw.seed, "seed"),
     warmupSeconds: positive(raw.warmupSeconds, "warmupSeconds"), stageSeconds: positive(raw.stageSeconds, "stageSeconds"), concurrency,

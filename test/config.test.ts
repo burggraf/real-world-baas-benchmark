@@ -6,15 +6,17 @@ import { loadConfig, parseConfig } from "../src/config.js";
 const quick = loadConfig("configs/quick.json");
 const full = loadConfig("configs/full.json");
 
-test("loads the approved quick and full configurations", () => {
-  assert.equal(quick.name, "quick");
-  assert.equal(quick.publishable, false);
-  assert.deepEqual(quick.concurrency, [1, 5, 10]);
-  assert.equal(full.name, "full");
-  assert.equal(full.publishable, true);
-  assert.deepEqual(full.concurrency, [1, 5, 10, 25, 50]);
-  assert.deepEqual(quick.weights, full.weights);
-  assert.deepEqual(quick.slos, full.slos);
+test("loads every required value from the approved quick and full configurations", () => {
+  const weights = { dashboard: 20, taskList: 25, taskDetail: 15, createTask: 10, updateTask: 12, addComment: 10, search: 5, profileUpdate: 1, signIn: 2 };
+  const slos = { read: { p95Ms: 500, maxErrorRate: 0.01 }, write: { p95Ms: 750, maxErrorRate: 0.01 }, authSearch: { p95Ms: 1000, maxErrorRate: 0.01 } };
+  assert.deepEqual(quick, {
+    name: "quick", publishable: false, dataset: "small", seed: 42, warmupSeconds: 5, stageSeconds: 15,
+    concurrency: [1, 5, 10], maxConcurrency: 10, timeoutMs: 5000, thinkTimeMs: { min: 1000, max: 5000 }, weights, slos,
+  });
+  assert.deepEqual(full, {
+    name: "full", publishable: true, dataset: "medium", seed: 42, warmupSeconds: 120, stageSeconds: 300,
+    concurrency: [1, 5, 10, 25, 50], maxConcurrency: 1000, timeoutMs: 5000, thinkTimeMs: { min: 1000, max: 5000 }, weights, slos,
+  });
 });
 
 test("parses JSON text through the unknown boundary", () => {
