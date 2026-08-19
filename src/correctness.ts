@@ -1,7 +1,7 @@
 import type { Backend, AppSession } from "./backend.js";
 import type { Credentials, Id, Role } from "./domain.js";
 import type { FindingClassification, CorrectnessFinding } from "./result.js";
-export interface CorrectnessFixture { owner: Credentials; admin?: Credentials; member: Credentials; outsider: Credentials; organizationId: Id; projectId: Id; taskId?: Id; ownerMembershipId: Id; memberMembershipId: Id; adminMembershipId?: Id; }
+export interface CorrectnessFixture { owner: Credentials; admin: Credentials; member: Credentials; outsider: Credentials; organizationId: Id; projectId: Id; taskId?: Id; ownerMembershipId: Id; memberMembershipId: Id; adminMembershipId?: Id; }
 export interface CorrectnessResult { findings: CorrectnessFinding[]; aborted: boolean; abortReason?: string; }
 export class BenchmarkOperationError extends Error { readonly classification: FindingClassification; readonly code?: string; readonly status?: number; constructor(classification: FindingClassification, detail:{code?:string;status?:number}={}) { super(detail.code||classification); this.name="BenchmarkOperationError"; this.classification=classification; this.code=detail.code; this.status=detail.status; } }
 export function classifyOperationError(error: unknown): FindingClassification { const e=error as Partial<BenchmarkOperationError>&{code?:string;status?:number}; if(e instanceof BenchmarkOperationError)return e.classification; if(e.status===401)return "authentication"; if(e.status===403)return "authorization"; if(e.status===408||e.code==="timeout")return "timeout"; return "transport/sdk"; }
