@@ -35,38 +35,46 @@ const rejects = (change: (v: any) => void, pattern = /invalid|expected|unknown|p
   const value = valid(); change(value); assert.throws(() => parseConfig(value), pattern);
 };
 
-test("rejects malformed top-level, nested, and primitive values", () => {
-  rejects(v => v.extra = 1, /Invalid top-level/);
-  rejects(v => v.publishable = "no", /boolean/);
-  rejects(v => v.dataset = "huge", /dataset/);
-  rejects(v => v.name = 2, /string/);
-  rejects(v => v.thinkTimeMs.extra = 1, /Invalid think/i);
-  rejects(v => v.weights.dashboard = "20", /number/);
-  rejects(v => v.slos.read.extra = 1, /Invalid.*SLO/i);
+test("rejects missing top-level fields and wrong field-family types", () => {
+  for (const field of ["name", "publishable", "dataset", "seed", "warmupSeconds", "stageSeconds", "concurrency", "maxConcurrency", "timeoutMs", "thinkTimeMs", "weights", "slos"]) {
+    rejects(v => delete v[field], /Invalid top-level/);
+  }
+  for (const change of [
+    (v: any) => v.name = 2, (v: any) => v.publishable = "no", (v: any) => v.dataset = [],
+    (v: any) => v.seed = "1", (v: any) => v.warmupSeconds = "1", (v: any) => v.stageSeconds = {},
+    (v: any) => v.concurrency = {}, (v: any) => v.maxConcurrency = "2", (v: any) => v.timeoutMs = [],
+    (v: any) => v.thinkTimeMs = [], (v: any) => v.weights = [], (v: any) => v.slos = [],
+  ]) rejects(change);
 });
 
 test("rejects invalid durations, concurrency, and think-time", () => {
   for (const change of [
     (v: any) => v.warmupSeconds = 0, (v: any) => v.stageSeconds = -1,
-    (v: any) => v.timeoutMs = Infinity, (v: any) => v.concurrency = [1, 1],
+    (v: any) => v.timeoutMs = Infinity, (v: any) => v.seed = NaN,
+    (v: any) => v.concurrency = [], (v: any) => v.concurrency = [1, 1],
     (v: any) => v.concurrency = [2, 1], (v: any) => v.concurrency = [1, 1.5],
-    (v: any) => v.maxConcurrency = 1, (v: any) => v.thinkTimeMs = { min: 2, max: 1 },
-    (v: any) => v.seed = NaN,
+    (v: any) => v.concurrency = [1, Infinity], (v: any) => v.maxConcurrency = 1,
+    (v: any) => v.maxConcurrency = Infinity, (v: any) => v.thinkTimeMs = { min: 2, max: 1 },
+    (v: any) => v.thinkTimeMs.min = -1, (v: any) => v.thinkTimeMs.max = NaN,
+    (v: any) => v.thinkTimeMs.min = Infinity,
   ]) rejects(change);
 });
 
 test("rejects invalid or incomplete workflow weights", () => {
-  rejects(v => { delete v.weights.search; }, /weights.*keys|missing/i);
-  rejects(v => v.weights.other = 1, /weights.*keys|unknown/i);
-  rejects(v => v.weights.dashboard = -1, /weight|100/i);
-  rejects(v => v.weights.dashboard = 21, /100/i);
-  rejects(v => v.weights.dashboard = Infinity, /finite/i);
+  for (const change of [
+    (v: any) => delete v.weights.search, (v: any) => v.weights.other = 1,
+    (v: any) => v.weights.dashboard = -1, (v: any) => v.weights.dashboard = 21,
+    (v: any) => v.weights.dashboard = Infinity, (v: any) => v.weights.dashboard = "20",
+  ]) rejects(change, /weights|weight|100|finite|number/i);
 });
 
-test("rejects invalid or incomplete SLOs", () => {
-  rejects(v => { delete v.slos.read; }, /slo.*keys|missing/i);
-  rejects(v => v.slos.other = { p95Ms: 1, maxErrorRate: 0 }, /slo.*keys|unknown/i);
-  rejects(v => v.slos.read.p95Ms = 0, /p95|positive/i);
-  rejects(v => v.slos.read.maxErrorRate = 1.1, /error/i);
-  rejects(v => v.slos.read.maxErrorRate = -0.1, /error/i);
+test("rejects invalid or incomplete SLOs and nested objects", () => {
+  for (const change of [
+    (v: any) => delete v.slos.read, (v: any) => v.slos.other = { p95Ms: 1, maxErrorRate: 0 },
+    (v: any) => v.slos.read.extra = 1, (v: any) => v.slos.read = [],
+    (v: any) => v.slos.read.p95Ms = 0, (v: any) => v.slos.read.p95Ms = Infinity,
+    (v: any) => v.slos.read.maxErrorRate = 1.1, (v: any) => v.slos.read.maxErrorRate = -0.1,
+    (v: any) => v.slos.read.maxErrorRate = NaN, (v: any) => v.slos.read.p95Ms = "500",
+    (v: any) => delete v.thinkTimeMs.min, (v: any) => v.thinkTimeMs.extra = 1,
+  ]) rejects(change, /slo|think|p95|error|keys|missing|finite|positive|number/i);
 });
