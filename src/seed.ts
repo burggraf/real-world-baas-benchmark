@@ -49,7 +49,10 @@ export async function* seedDataset(profile: ProfileName, seed: number, batchSize
       yield { entity, records } as SeedBatch;
     }
   };
-  for await (const b of emit("user", c.users, i => ({ id: entityId("user", profile, i), email: `user${i}-${Math.floor(random() * 1_000_000).toString(36)}@example.test`, displayName: text("User", i, random()), createdAt: timestamp(i + Math.floor(random() * 1000)), updatedAt: timestamp(i + 1 + Math.floor(random() * 1000)) }))) yield b;
+  for await (const b of emit("user", c.users, i => {
+    const created = i + Math.floor(random() * 1000);
+    return { id: entityId("user", profile, i), email: `user${i}-${Math.floor(random() * 1_000_000).toString(36)}@example.test`, displayName: text("User", i, random()), createdAt: timestamp(created), updatedAt: timestamp(created + 1 + Math.floor(random() * 1000)) };
+  })) yield b;
   for await (const b of emit("organization", c.organizations, i => ({ id: entityId("organization", profile, i), name: text("Organization", i, random()), ownerId: entityId("user", profile, i % c.users), createdAt: timestamp(i) }))) yield b;
   for await (const b of emit("membership", c.memberships, i => ({ id: entityId("membership", profile, i), organizationId: entityId("organization", profile, i < c.organizations ? i : i % c.organizations), userId: entityId("user", profile, i), role: (i < c.organizations ? "owner" : i % 10 === 0 ? "admin" : "member") as Role, createdAt: timestamp(i) }))) yield b;
   for await (const b of emit("project", c.projects, i => ({ id: entityId("project", profile, i), organizationId: entityId("organization", profile, i % c.organizations), name: text("Project", i, random()), status: pick(["active", "archived"], random()), createdAt: timestamp(i), updatedAt: timestamp(i + 1) }))) yield b;

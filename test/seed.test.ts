@@ -39,13 +39,22 @@ test("small profile streams bounded batches in dependency order", async () => {
 test("representative records, IDs, foreign keys, and owners are stable", async () => {
   const first: Record<string, any> = {};
   for await (const batch of seedDataset("small", 42, 1000)) if (!(batch.entity in first)) first[batch.entity] = batch.records[0];
-  assert.deepEqual(first.user, { id: "usr-00000000", email: "user0-cvtb@example.test", displayName: "User 0 9lwi", createdAt: "2020-01-01T14:12:00.000Z", updatedAt: "2020-01-01T11:10:00.000Z" });
+  assert.deepEqual(first.user, { id: "usr-00000000", email: "user0-9lwi@example.test", displayName: "User 0 i9rl", createdAt: "2020-01-01T10:01:00.000Z", updatedAt: "2020-01-01T21:11:00.000Z" });
   assert.deepEqual(first.membership, { id: "mem-00000000", organizationId: "org-00000000", userId: "usr-00000000", role: "owner", createdAt: "2020-01-01T00:00:00.000Z" });
   assert.equal(entityId("organization", "small", 99), "org-0000002r");
   assert.equal(first.organization.ownerId, first.user.id);
   assert.equal(first.project.organizationId, first.organization.id);
   assert.equal(first.task.projectId, first.project.id);
   assert.equal(first.comment.taskId, first.task.id);
+});
+
+test("user timestamps never regress while streaming", async () => {
+  let checked = 0;
+  for await (const batch of seedDataset("small", 42, 257)) if (batch.entity === "user") for (const user of batch.records as Array<{ updatedAt: string; createdAt: string }>) {
+    assert.ok(new Date(user.updatedAt).getTime() >= new Date(user.createdAt).getTime());
+    checked++;
+  }
+  assert.equal(checked, 1_000);
 });
 
 test("seed changes non-IDs without materializing users", async () => {
