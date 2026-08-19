@@ -45,7 +45,11 @@ const text = (kind: string, ordinal: number, random: number) => {
   // ponytail: synthetic text is intentionally small; use a versioned corpus only if payload realism changes measured results.
   return `${kind} ${ordinal} ${Math.floor(random * 1_000_000).toString(36)}`;
 };
-const pick = <T>(values: readonly T[], random: number) => values[Math.floor(random * values.length)]!;
+const pick = <T>(values: readonly T[], random: number): T => values[Math.floor(random * values.length)]!;
+const PROJECT_STATUSES = ["active", "archived"] as const;
+const TASK_STATUSES: readonly Task["status"][] = ["todo", "in_progress", "done", "cancelled"];
+const TASK_PRIORITIES: readonly Task["priority"][] = ["low", "medium", "high", "urgent"];
+const ACTIVITY_ACTIONS = ["created", "updated", "completed"] as const;
 
 export async function* seedDataset(profile: ProfileName, seed: number, batchSize = 1_000): AsyncGenerator<SeedBatch> {
   checkProfile(profile);
@@ -66,10 +70,10 @@ export async function* seedDataset(profile: ProfileName, seed: number, batchSize
   })) yield b;
   for await (const b of emit("organization", c.organizations, i => ({ id: localId("organization", i), name: text("Organization", i, random()), ownerId: localId("user", i % c.users), createdAt: timestamp(i) }))) yield b;
   for await (const b of emit("membership", c.users, i => ({ id: localId("membership", i), organizationId: localId("organization", i < c.organizations ? i : i % c.organizations), userId: localId("user", i), role: (i < c.organizations ? "owner" : i % 10 === 0 ? "admin" : "member") as Role, createdAt: timestamp(i) }))) yield b;
-  for await (const b of emit("project", c.projects, i => ({ id: localId("project", i), organizationId: localId("organization", i % c.organizations), name: text("Project", i, random()), status: pick(["active", "archived"], random()), createdAt: timestamp(i), updatedAt: timestamp(i + 1) }))) yield b;
-  for await (const b of emit("task", c.tasks, i => ({ id: localId("task", i), projectId: localId("project", i % c.projects), creatorId: localId("user", i % c.users), assigneeId: i % 5 === 0 ? null : localId("user", localUser((i % c.projects) % c.organizations, i * 7)), title: text("Task", i, random()), description: text("Description", i, random()), status: pick(["todo", "in_progress", "done", "cancelled"], random()) as Task["status"], priority: pick(["low", "medium", "high", "urgent"], random()) as Task["priority"], dueDate: i % 3 === 0 ? timestamp(i + 100) : null, createdAt: timestamp(i), updatedAt: timestamp(i + 1) }))) yield b;
+  for await (const b of emit("project", c.projects, i => ({ id: localId("project", i), organizationId: localId("organization", i % c.organizations), name: text("Project", i, random()), status: pick(PROJECT_STATUSES, random()), createdAt: timestamp(i), updatedAt: timestamp(i + 1) }))) yield b;
+  for await (const b of emit("task", c.tasks, i => ({ id: localId("task", i), projectId: localId("project", i % c.projects), creatorId: localId("user", i % c.users), assigneeId: i % 5 === 0 ? null : localId("user", localUser((i % c.projects) % c.organizations, i * 7)), title: text("Task", i, random()), description: text("Description", i, random()), status: pick(TASK_STATUSES, random()), priority: pick(TASK_PRIORITIES, random()), dueDate: i % 3 === 0 ? timestamp(i + 100) : null, createdAt: timestamp(i), updatedAt: timestamp(i + 1) }))) yield b;
   for await (const b of emit("comment", c.comments, i => ({ id: localId("comment", i), taskId: localId("task", i % c.tasks), authorId: localId("user", localUser(((i % c.tasks) % c.projects) % c.organizations, i * 11)), body: text("Comment", i, random()), createdAt: timestamp(i), updatedAt: timestamp(i + 1) }))) yield b;
-  for await (const b of emit("activity", c.activities, i => ({ id: localId("activity", i), organizationId: localId("organization", i % c.organizations), projectId: i % 4 === 0 ? null : localId("project", i % c.projects), actorId: localId("user", localUser(i % c.organizations, i * 13)), action: pick(["created", "updated", "completed"], random()), subjectType: i % 2 === 0 ? "task" : "project", subjectId: i % 2 === 0 ? localId("task", i % c.tasks) : localId("project", i % c.projects), createdAt: timestamp(i) }))) yield b;
+  for await (const b of emit("activity", c.activities, i => ({ id: localId("activity", i), organizationId: localId("organization", i % c.organizations), projectId: i % 4 === 0 ? null : localId("project", i % c.projects), actorId: localId("user", localUser(i % c.organizations, i * 13)), action: pick(ACTIVITY_ACTIONS, random()), subjectType: i % 2 === 0 ? "task" : "project", subjectId: i % 2 === 0 ? localId("task", i % c.tasks) : localId("project", i % c.projects), createdAt: timestamp(i) }))) yield b;
 }
 
 export type { RecordType as SeedRecord };
