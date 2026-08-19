@@ -33,7 +33,7 @@ test("small profile streams bounded batches in dependency order", async () => {
   assert.deepEqual(order, ["user", "organization", "membership", "project", "task", "comment", "activity"]);
   assert.deepEqual([...counts.values()], [1000, 100, 1000, 500, 10000, 30000, 20000]);
   assert.equal(total, 62_600); assert.equal(finalSize, 20);
-  assert.deepEqual(finalActivity, { id: "act-00000ffj", organizationId: "org-0000002r", projectId: "prj-000000dv", actorId: "usr-000000rf", action: "created", subjectType: "project", subjectId: "prj-000000dv", createdAt: "2020-01-14T21:19:00.000Z" });
+  assert.deepEqual(finalActivity, { id: "act-00000ffj", organizationId: "org-0000002r", projectId: "prj-000000dv", actorId: "usr-000000m7", action: "created", subjectType: "project", subjectId: "prj-000000dv", createdAt: "2020-01-14T21:19:00.000Z" });
 });
 
 test("representative records, IDs, foreign keys, and owners are stable", async () => {
@@ -46,6 +46,22 @@ test("representative records, IDs, foreign keys, and owners are stable", async (
   assert.equal(first.project.organizationId, first.organization.id);
   assert.equal(first.task.projectId, first.project.id);
   assert.equal(first.comment.taskId, first.task.id);
+});
+
+test("tenant-scoped assignments and authors match memberships", async () => {
+  const membershipOrg = new Map<string, string>(), projectOrg = new Map<string, string>(), taskOrg = new Map<string, string>();
+  for await (const batch of seedDataset("small", 42, 1000)) {
+    if (batch.entity === "membership") for (const row of batch.records as Array<{ userId: string; organizationId: string }>) membershipOrg.set(row.userId, row.organizationId);
+    if (batch.entity === "project") for (const row of batch.records as Array<{ id: string; organizationId: string }>) projectOrg.set(row.id, row.organizationId);
+    if (batch.entity === "task") for (const row of batch.records as Array<{ id: string; projectId: string; creatorId: string; assigneeId: string | null }>) {
+      const org = projectOrg.get(row.projectId); assert.ok(org); taskOrg.set(row.id, org!);
+      assert.equal(membershipOrg.get(row.creatorId), org);
+      if (row.assigneeId) assert.equal(membershipOrg.get(row.assigneeId), org);
+    }
+    if (batch.entity === "comment") for (const row of batch.records as Array<{ taskId: string; authorId: string }>) assert.equal(membershipOrg.get(row.authorId), taskOrg.get(row.taskId));
+    if (batch.entity === "activity") for (const row of batch.records as Array<{ organizationId: string; actorId: string }>) assert.equal(membershipOrg.get(row.actorId), row.organizationId);
+  }
+  assert.equal(membershipOrg.size, 1_000); assert.equal(projectOrg.size, 500); assert.equal(taskOrg.size, 10_000);
 });
 
 test("user timestamps never regress while streaming", async () => {

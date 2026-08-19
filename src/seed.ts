@@ -20,6 +20,14 @@ export interface SeedBatch { entity: EntityName; records: RecordType[]; }
 const prefixes: Record<EntityName, string> = { organization: "org", user: "usr", membership: "mem", project: "prj", task: "tsk", comment: "cmt", activity: "act" };
 const entities = Object.keys(prefixes) as EntityName[];
 const counts = (profile: ProfileName) => ({ ...datasetProfiles[profile], memberships: datasetProfiles[profile].users });
+/** Select a stable user ordinal in an organization; users are evenly distributed. */
+export function userForOrganization(profile: ProfileName, organizationOrdinal: number, slot: number): number {
+  checkProfile(profile);
+  const c = counts(profile);
+  if (!Number.isInteger(organizationOrdinal) || organizationOrdinal < 0 || organizationOrdinal >= c.organizations) throw new RangeError("Invalid organization ordinal");
+  if (!Number.isInteger(slot) || slot < 0) throw new RangeError("Invalid user slot");
+  return organizationOrdinal + (slot % (c.users / c.organizations)) * c.organizations;
+}
 function checkProfile(profile: string): asserts profile is ProfileName {
   if (!Object.hasOwn(datasetProfiles, profile)) throw new RangeError(`Invalid profile: ${profile}`);
 }
@@ -56,9 +64,9 @@ export async function* seedDataset(profile: ProfileName, seed: number, batchSize
   for await (const b of emit("organization", c.organizations, i => ({ id: entityId("organization", profile, i), name: text("Organization", i, random()), ownerId: entityId("user", profile, i % c.users), createdAt: timestamp(i) }))) yield b;
   for await (const b of emit("membership", c.memberships, i => ({ id: entityId("membership", profile, i), organizationId: entityId("organization", profile, i < c.organizations ? i : i % c.organizations), userId: entityId("user", profile, i), role: (i < c.organizations ? "owner" : i % 10 === 0 ? "admin" : "member") as Role, createdAt: timestamp(i) }))) yield b;
   for await (const b of emit("project", c.projects, i => ({ id: entityId("project", profile, i), organizationId: entityId("organization", profile, i % c.organizations), name: text("Project", i, random()), status: pick(["active", "archived"], random()), createdAt: timestamp(i), updatedAt: timestamp(i + 1) }))) yield b;
-  for await (const b of emit("task", c.tasks, i => ({ id: entityId("task", profile, i), projectId: entityId("project", profile, i % c.projects), creatorId: entityId("user", profile, i % c.users), assigneeId: i % 5 === 0 ? null : entityId("user", profile, (i * 7) % c.users), title: text("Task", i, random()), description: text("Description", i, random()), status: pick(["todo", "in_progress", "done", "cancelled"], random()) as Task["status"], priority: pick(["low", "medium", "high", "urgent"], random()) as Task["priority"], dueDate: i % 3 === 0 ? timestamp(i + 100) : null, createdAt: timestamp(i), updatedAt: timestamp(i + 1) }))) yield b;
-  for await (const b of emit("comment", c.comments, i => ({ id: entityId("comment", profile, i), taskId: entityId("task", profile, i % c.tasks), authorId: entityId("user", profile, (i * 11) % c.users), body: text("Comment", i, random()), createdAt: timestamp(i), updatedAt: timestamp(i + 1) }))) yield b;
-  for await (const b of emit("activity", c.activities, i => ({ id: entityId("activity", profile, i), organizationId: entityId("organization", profile, i % c.organizations), projectId: i % 4 === 0 ? null : entityId("project", profile, i % c.projects), actorId: entityId("user", profile, (i * 13) % c.users), action: pick(["created", "updated", "completed"], random()), subjectType: i % 2 === 0 ? "task" : "project", subjectId: i % 2 === 0 ? entityId("task", profile, i % c.tasks) : entityId("project", profile, i % c.projects), createdAt: timestamp(i) }))) yield b;
+  for await (const b of emit("task", c.tasks, i => ({ id: entityId("task", profile, i), projectId: entityId("project", profile, i % c.projects), creatorId: entityId("user", profile, i % c.users), assigneeId: i % 5 === 0 ? null : entityId("user", profile, userForOrganization(profile, (i % c.projects) % c.organizations, i * 7)), title: text("Task", i, random()), description: text("Description", i, random()), status: pick(["todo", "in_progress", "done", "cancelled"], random()) as Task["status"], priority: pick(["low", "medium", "high", "urgent"], random()) as Task["priority"], dueDate: i % 3 === 0 ? timestamp(i + 100) : null, createdAt: timestamp(i), updatedAt: timestamp(i + 1) }))) yield b;
+  for await (const b of emit("comment", c.comments, i => ({ id: entityId("comment", profile, i), taskId: entityId("task", profile, i % c.tasks), authorId: entityId("user", profile, userForOrganization(profile, ((i % c.tasks) % c.projects) % c.organizations, i * 11)), body: text("Comment", i, random()), createdAt: timestamp(i), updatedAt: timestamp(i + 1) }))) yield b;
+  for await (const b of emit("activity", c.activities, i => ({ id: entityId("activity", profile, i), organizationId: entityId("organization", profile, i % c.organizations), projectId: i % 4 === 0 ? null : entityId("project", profile, i % c.projects), actorId: entityId("user", profile, userForOrganization(profile, i % c.organizations, i * 13)), action: pick(["created", "updated", "completed"], random()), subjectType: i % 2 === 0 ? "task" : "project", subjectId: i % 2 === 0 ? entityId("task", profile, i % c.tasks) : entityId("project", profile, i % c.projects), createdAt: timestamp(i) }))) yield b;
 }
 
 export type { RecordType as SeedRecord };
