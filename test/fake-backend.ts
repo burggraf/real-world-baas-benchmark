@@ -1,22 +1,247 @@
 import type { Backend, AppSession, BackendInfo } from "../src/backend.js";
-import type { Credentials, DatasetProfile, User, Organization, Project, Task, Comment, Membership, Page, TaskDetail, Role } from "../src/domain.js";
+import type { Comment, Credentials, DatasetProfile, Membership, Organization, Page, Project, Task, TaskDetail, User } from "../src/domain.js";
 import { BenchmarkOperationError } from "../src/correctness.js";
 
-export interface FakeFixture { owner: Credentials; admin: Credentials; member: Credentials; outsider: Credentials; organizationId: string; projectId: string; taskId: string; ownerMembershipId: string; memberMembershipId: string; }
-export interface FakeOptions { insecureTenantIsolation?: boolean; failures?: Partial<Record<"authentication"|"timeout"|"malformed"|"application"|"backend_health", number>>; }
-const now="2026-01-01T00:00:00.000Z";
-export function createFakeBackend(options: FakeOptions = {}): Backend & { fixture: FakeFixture; sessions: number; closedSessions: number } {
- const users: User[]=["owner","member","outsider"].map((x,i)=>({id:`u-${x}`,email:`${x}@example.test`,displayName:x,createdAt:now,updatedAt:now}));
- const org: Organization={id:"org-1",name:"Example",ownerId:"u-owner",createdAt:now}; const project: Project={id:"project-1",organizationId:org.id,name:"Project",status:"active",createdAt:now,updatedAt:now};
- const tasks: Task[]=[{id:"task-1",projectId:project.id,creatorId:"u-owner",assigneeId:"u-member",title:"Seed task",description:"seed",status:"todo",priority:"medium",dueDate:null,createdAt:now,updatedAt:now}]; const comments: Comment[]=[];
- const memberships: Membership[]=[{id:"membership-owner",organizationId:org.id,userId:"u-owner",role:"owner",createdAt:now},{id:"membership-member",organizationId:org.id,userId:"u-member",role:"member",createdAt:now}];
- let health=true, sessions=0, closedSessions=0, remaining={...(options.failures||{})}; const fixture:FakeFixture={owner:{email:"owner@example.test",password:"owner-pass"},admin:{email:"owner@example.test",password:"owner-pass"},member:{email:"member@example.test",password:"member-pass"},outsider:{email:"outsider@example.test",password:"outsider-pass"},organizationId:org.id,projectId:project.id,taskId:tasks[0]!.id,ownerMembershipId:memberships[0]!.id,memberMembershipId:memberships[1]!.id};
- const fail=(kind:"authentication"|"timeout"|"malformed"|"application"|"backend_health")=>{if(remaining[kind]){remaining[kind]!--;throw new BenchmarkOperationError(kind==="malformed"?"invalid_response":kind,{code:kind});}};
- const session=(cred:Credentials):AppSession=>{ fail("authentication"); const user=users.find(u=>u.email===cred.email); if(!user||cred.password!==`${user.email.split("@")[0]}-pass`) throw new BenchmarkOperationError("authentication",{code:"invalid_credentials"}); let active=true; sessions++;
-  const check=(write=false, orgId=org.id)=>{fail("backend_health"); if(!health)throw new BenchmarkOperationError("backend_health",{code:"unhealthy"}); if(!active)throw new BenchmarkOperationError("authentication",{code:"signed_out"}); const m=memberships.find(x=>x.userId===user.id&&x.organizationId===orgId); if(!m && !options.insecureTenantIsolation) throw new BenchmarkOperationError("authorization",{code:"tenant_denied"}); return m;};
-  const page=<T>(a:T[],p:{page:number,pageSize:number}):Page<T>=>({items:a.slice(p.page*p.pageSize,(p.page+1)*p.pageSize),page:p.page,pageSize:p.pageSize,total:a.length,hasNext:(p.page+1)*p.pageSize<a.length});
-  return { dashboard:async()=>{check();return {organization:org,projects:[project],recentActivity:[]}}, listTasks:async i=>{check(false,i.organizationId);return page(tasks.filter(t=>t.projectId===i.projectId&&(!i.status||t.status===i.status)&&(!i.assigneeId||t.assigneeId===i.assigneeId)),i)}, getTask:async i=>{check(false,i.organizationId);const t=tasks.find(t=>t.id===i.taskId);if(!t)throw new BenchmarkOperationError("application",{code:"not_found"}); return {task:t,creator:users.find(u=>u.id===t.creatorId)!,assignee:t.assigneeId?users.find(u=>u.id===t.assigneeId)||null:null,comments:page(comments.filter((c:Comment)=>c.taskId===t.id),i.comments)}}, createTask:async i=>{const m=check(true,i.organizationId);if(!m)throw new BenchmarkOperationError("authorization",{code:"tenant_denied"});const t={id:`task-${tasks.length+1}`,projectId:i.projectId,creatorId:user.id,assigneeId:i.assigneeId||null,title:i.title,description:i.description,status:"todo" as const,priority:i.priority,dueDate:i.dueDate||null,createdAt:now,updatedAt:now};tasks.push(t);return t}, updateTask:async i=>{check(true,i.organizationId);const t=tasks.find(t=>t.id===i.taskId);if(!t)throw new BenchmarkOperationError("application",{code:"not_found"});Object.assign(t,i);return t}, addComment:async i=>{check(true,i.organizationId);const c={id:`comment-${comments.length+1}`,taskId:i.taskId,authorId:user.id,body:i.body,createdAt:now,updatedAt:now};comments.push(c);return c}, updateComment:async i=>{check(true,i.organizationId);const c=comments.find(c=>c.id===i.commentId);if(!c)throw new BenchmarkOperationError("application",{code:"not_found"});c.body=i.body;return c}, updateMembershipRole:async i=>{const m=check(true,i.organizationId);if(!m||!(m.role==="owner"||m.role==="admin"))throw new BenchmarkOperationError("authorization",{code:"role_denied"});const target=memberships.find(x=>x.id===i.membershipId);if(!target)throw new BenchmarkOperationError("application",{code:"not_found"});if(target.organizationId!==i.organizationId)throw new BenchmarkOperationError("authorization",{code:"tenant_denied"});target.role=i.role;return target}, searchTasks:async i=>{check(false,i.organizationId);return page(tasks,i)}, getProfile:async()=>{check();fail("timeout");fail("application");if (options.failures?.malformed) return {} as User; return user}, updateProfile:async i=>{check(true);user.displayName=i.displayName;return user}, refreshSession:async()=>{check()}, signOut:async()=>{check();active=false}, close:async()=>{if(active)active=false;closedSessions++}, };
- };
- const backend:Backend&any={name:"pocketbase",doctor:async():Promise<BackendInfo>=>({name:"pocketbase",version:"fake",endpoint:"fake"}),start:async()=>{health=true},reset:async()=>{},seed:async(_p:DatasetProfile,_s:number)=>{},createSession:async (c:Credentials)=>session(c),stop:async()=>{health=false},fixture,sessions,closedSessions}; Object.defineProperties(backend,{sessions:{get:()=>sessions},closedSessions:{get:()=>closedSessions}}); return backend;
+export interface FakeFixture {
+  owner: Credentials;
+  admin: Credentials;
+  member: Credentials;
+  outsider: Credentials;
+  organizationId: string;
+  projectId: string;
+  taskId: string;
+  ownerMembershipId: string;
+  memberMembershipId: string;
+  foreignMembershipId: string;
 }
-export const fakeFixture = (b:ReturnType<typeof createFakeBackend>)=>b.fixture;
+
+export interface FakeOptions {
+  insecureTenantIsolation?: boolean;
+  acceptInvalidLogin?: boolean;
+  failures?: Partial<Record<"authentication" | "timeout" | "malformed" | "application" | "backend_health", number>>;
+}
+
+type FakeBackend = Backend & {
+  fixture: FakeFixture;
+  sessions: number;
+  closedSessions: number;
+};
+type FailureKind = "authentication" | "timeout" | "malformed" | "application" | "backend_health";
+
+const now = "2026-01-01T00:00:00.000Z";
+
+export function createFakeBackend(options: FakeOptions = {}): FakeBackend {
+  const users: User[] = ["owner", "member", "outsider"].map((name) => ({
+    id: `u-${name}`,
+    email: `${name}@example.test`,
+    displayName: name,
+    createdAt: now,
+    updatedAt: now,
+  }));
+  const organization: Organization = { id: "org-1", name: "Example", ownerId: "u-owner", createdAt: now };
+  const project: Project = { id: "project-1", organizationId: organization.id, name: "Project", status: "active", createdAt: now, updatedAt: now };
+  const tasks: Task[] = [{
+    id: "task-1",
+    projectId: project.id,
+    creatorId: "u-owner",
+    assigneeId: "u-member",
+    title: "Seed task",
+    description: "seed",
+    status: "todo",
+    priority: "medium",
+    dueDate: null,
+    createdAt: now,
+    updatedAt: now,
+  }];
+  const comments: Comment[] = [];
+  const memberships: Membership[] = [
+    { id: "membership-owner", organizationId: organization.id, userId: "u-owner", role: "owner", createdAt: now },
+    { id: "membership-member", organizationId: organization.id, userId: "u-member", role: "member", createdAt: now },
+    { id: "membership-foreign", organizationId: "org-foreign", userId: "u-owner", role: "member", createdAt: now },
+  ];
+  let health = true;
+  let sessions = 0;
+  let closedSessions = 0;
+  const remaining = { ...(options.failures || {}) };
+  const fixture: FakeFixture = {
+    owner: { email: "owner@example.test", password: "owner-pass" },
+    admin: { email: "owner@example.test", password: "owner-pass" },
+    member: { email: "member@example.test", password: "member-pass" },
+    outsider: { email: "outsider@example.test", password: "outsider-pass" },
+    organizationId: organization.id,
+    projectId: project.id,
+    taskId: tasks[0]!.id,
+    ownerMembershipId: memberships[0]!.id,
+    memberMembershipId: memberships[1]!.id,
+    foreignMembershipId: memberships[2]!.id,
+  };
+
+  const fail = (kind: FailureKind): void => {
+    if (remaining[kind]) {
+      remaining[kind]!--;
+      throw new BenchmarkOperationError(kind === "malformed" ? "invalid_response" : kind, { code: kind });
+    }
+  };
+
+  const createSession = (credentials: Credentials): AppSession => {
+    fail("authentication");
+    const user = users.find((candidate) => candidate.email === credentials.email);
+    if (!user || (!options.acceptInvalidLogin && credentials.password !== `${user.email.split("@")[0]}-pass`)) {
+      throw new BenchmarkOperationError("authentication", { code: "invalid_credentials" });
+    }
+    let active = true;
+    sessions++;
+
+    const check = (_write = false, organizationId = organization.id): Membership | undefined => {
+      fail("backend_health");
+      if (!health) throw new BenchmarkOperationError("backend_health", { code: "unhealthy" });
+      if (!active) throw new BenchmarkOperationError("authentication", { code: "signed_out" });
+      const membership = memberships.find((candidate) => candidate.userId === user.id && candidate.organizationId === organizationId);
+      if (!membership && !options.insecureTenantIsolation) throw new BenchmarkOperationError("authorization", { code: "tenant_denied" });
+      return membership;
+    };
+    const page = <T>(items: T[], pagination: { page: number; pageSize: number }): Page<T> => ({
+      items: items.slice(pagination.page * pagination.pageSize, (pagination.page + 1) * pagination.pageSize),
+      page: pagination.page,
+      pageSize: pagination.pageSize,
+      total: items.length,
+      hasNext: (pagination.page + 1) * pagination.pageSize < items.length,
+    });
+
+    return {
+      dashboard: async () => {
+        check();
+        return { organization, projects: [project], recentActivity: [] };
+      },
+      listTasks: async (input) => {
+        check(false, input.organizationId);
+        return page(tasks.filter((task) => task.projectId === input.projectId &&
+          (!input.status || task.status === input.status) &&
+          (!input.assigneeId || task.assigneeId === input.assigneeId)), input);
+      },
+      getTask: async (input): Promise<TaskDetail> => {
+        check(false, input.organizationId);
+        const task = tasks.find((candidate) => candidate.id === input.taskId);
+        if (!task) throw new BenchmarkOperationError("application", { code: "not_found" });
+        const creator = users.find((candidate) => candidate.id === task.creatorId);
+        if (!creator) throw new BenchmarkOperationError("application", { code: "missing_creator" });
+        return {
+          task,
+          creator,
+          assignee: task.assigneeId ? users.find((candidate) => candidate.id === task.assigneeId) || null : null,
+          comments: page(comments.filter((comment) => comment.taskId === task.id), input.comments),
+        };
+      },
+      createTask: async (input) => {
+        const membership = check(true, input.organizationId);
+        if (!membership) throw new BenchmarkOperationError("authorization", { code: "tenant_denied" });
+        const task: Task = {
+          id: `task-${tasks.length + 1}`,
+          projectId: input.projectId,
+          creatorId: user.id,
+          assigneeId: input.assigneeId || null,
+          title: input.title,
+          description: input.description,
+          status: "todo",
+          priority: input.priority,
+          dueDate: input.dueDate || null,
+          createdAt: now,
+          updatedAt: now,
+        };
+        tasks.push(task);
+        return task;
+      },
+      updateTask: async (input) => {
+        check(true, input.organizationId);
+        const task = tasks.find((candidate) => candidate.id === input.taskId);
+        if (!task) throw new BenchmarkOperationError("application", { code: "not_found" });
+        if (input.status !== undefined) task.status = input.status;
+        if (input.priority !== undefined) task.priority = input.priority;
+        if (input.assigneeId !== undefined) task.assigneeId = input.assigneeId;
+        if (input.dueDate !== undefined) task.dueDate = input.dueDate;
+        if (input.title !== undefined) task.title = input.title;
+        if (input.description !== undefined) task.description = input.description;
+        task.updatedAt = now;
+        return task;
+      },
+      addComment: async (input) => {
+        check(true, input.organizationId);
+        const comment: Comment = { id: `comment-${comments.length + 1}`, taskId: input.taskId, authorId: user.id, body: input.body, createdAt: now, updatedAt: now };
+        comments.push(comment);
+        return comment;
+      },
+      updateComment: async (input) => {
+        check(true, input.organizationId);
+        const comment = comments.find((candidate) => candidate.id === input.commentId);
+        if (!comment) throw new BenchmarkOperationError("application", { code: "not_found" });
+        if (comment.taskId !== input.taskId) throw new BenchmarkOperationError("authorization", { code: "task_mismatch" });
+        comment.body = input.body;
+        comment.updatedAt = now;
+        return comment;
+      },
+      updateMembershipRole: async (input) => {
+        const membership = check(true, input.organizationId);
+        if (!membership || (membership.role !== "owner" && membership.role !== "admin")) {
+          throw new BenchmarkOperationError("authorization", { code: "role_denied" });
+        }
+        const target = memberships.find((candidate) => candidate.id === input.membershipId);
+        if (!target) throw new BenchmarkOperationError("application", { code: "not_found" });
+        if (target.organizationId !== input.organizationId) throw new BenchmarkOperationError("authorization", { code: "tenant_denied" });
+        target.role = input.role;
+        return target;
+      },
+      searchTasks: async (input) => {
+        check(false, input.organizationId);
+        return page(tasks, input);
+      },
+      getProfile: async () => {
+        check();
+        fail("timeout");
+        fail("application");
+        if (remaining.malformed) {
+          remaining.malformed!--;
+          // ponytail: malformed fixture data is intentionally localized to this simulation.
+          return {} as User;
+        }
+        return user;
+      },
+      updateProfile: async (input) => {
+        check(true);
+        user.displayName = input.displayName;
+        user.updatedAt = now;
+        return user;
+      },
+      refreshSession: async () => {
+        check();
+      },
+      signOut: async () => {
+        check();
+        active = false;
+      },
+      close: async () => {
+        if (active) active = false;
+        closedSessions++;
+      },
+    };
+  };
+
+  const backend = {
+    name: "pocketbase" as const,
+    doctor: async (): Promise<BackendInfo> => ({ name: "pocketbase", version: "fake", endpoint: "fake" }),
+    start: async () => { health = true; },
+    reset: async () => {},
+    seed: async (_profile: DatasetProfile, _seed: number) => {},
+    createSession: async (credentials: Credentials) => createSession(credentials),
+    stop: async () => { health = false; },
+    fixture,
+    sessions,
+    closedSessions,
+  } as FakeBackend;
+  Object.defineProperties(backend, {
+    sessions: { get: () => sessions },
+    closedSessions: { get: () => closedSessions },
+  });
+  return backend;
+}
+
+export const fakeFixture = (backend: FakeBackend): FakeFixture => backend.fixture;
