@@ -1,4 +1,3 @@
-import type { BenchmarkConfig } from "./config.js";
 import type { Credentials, DatasetProfile, Dashboard, DashboardInput, ListTasksInput, GetTaskInput, CreateTaskInput, UpdateTaskInput, AddCommentInput, SearchTasksInput, UpdateProfileInput, Page, Task, TaskDetail, Comment, User } from "./domain.js";
 
 export type BackendName = "pocketbase" | "supabase" | "trailbase";
@@ -22,5 +21,3 @@ export async function loadBackend(name: BackendName | string): Promise<Backend> 
     default: throw new Error(`Unknown backend: ${name}`);
   }
 }
-
-export type BenchmarkInputs = { config: BenchmarkConfig };

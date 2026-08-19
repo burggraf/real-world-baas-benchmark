@@ -5,9 +5,13 @@ import type { DatasetProfile } from "./domain.js";
 export interface Environment { runtime: string; runtimeVersion: string; os: string; architecture: string; host?: string; cpu?: string; memoryBytes?: number; }
 export interface Correctness { findings: CorrectnessFinding[]; }
 export interface CorrectnessFinding { name: string; passed: boolean; message?: string; }
-export interface OperationMetric { count: number; errors: number; p50: number; p95: number; p99: number; min: number; max: number; unit: "milliseconds" | "seconds" | "requests"; }
+export interface OperationMetric {
+  count: number; countUnit: "operations"; errors: number; errorUnit: "errors";
+  p50Milliseconds: number; p95Milliseconds: number; p99Milliseconds: number; minMilliseconds: number; maxMilliseconds: number;
+}
 export interface StageMetrics {
-  requestedUsers: number; achievedUsers: number; elapsedSeconds: number; workflow: Record<string, number>; sdkReadTps: number; sdkWriteTps: number; readTps: number; writeTps: number;
+  requestedUsers: number; achievedUsers: number; elapsedSeconds: number; workflowCounts: Record<string, number>;
+  sdkReadOperationsPerSecond: number; sdkWriteOperationsPerSecond: number; readOperationsPerSecond: number; writeOperationsPerSecond: number;
   operations: Record<string, OperationMetric>;
 }
 export interface ResourceMetrics { name: string; unit: string; samples: number[]; }

@@ -15,6 +15,16 @@ test("benchmark results survive JSON round trip", () => {
   assert.equal(parsed.schemaVersion, 1); assert.equal(parsed.backend.name, "pocketbase"); assert.equal(parsed.dataset, "small"); assert.deepEqual(parsed.stages, []); assert.equal(parsed.valid, true); assert.equal(parsed.capacity.users, 1);
 });
 
+test("stage metrics expose units in field names and values", () => {
+  const stage = {
+    requestedUsers: 2, achievedUsers: 2, elapsedSeconds: 1, workflowCounts: { dashboard: 2 },
+    sdkReadOperationsPerSecond: 3, sdkWriteOperationsPerSecond: 4, readOperationsPerSecond: 5, writeOperationsPerSecond: 6,
+    operations: { dashboard: { count: 2, countUnit: "operations" as const, errors: 0, errorUnit: "errors" as const, p50Milliseconds: 10, p95Milliseconds: 20, p99Milliseconds: 30, minMilliseconds: 5, maxMilliseconds: 40 } },
+  };
+  assert.equal(stage.operations.dashboard.p95Milliseconds, 20);
+  assert.equal(stage.sdkReadOperationsPerSecond, 3);
+});
+
 test("loads named stubs and they fail clearly", async () => {
   for (const name of ["pocketbase", "supabase", "trailbase"] as const) {
     const backend = await loadBackend(name); assert.equal(backend.name, name);
