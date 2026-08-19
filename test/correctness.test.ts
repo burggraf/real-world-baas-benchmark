@@ -3,6 +3,22 @@ import assert from "node:assert/strict";
 import { createFakeBackend } from "./fake-backend.js";
 import { BenchmarkOperationError, runCorrectness } from "../src/correctness.js";
 
+test("admin fixture uses a distinct user and membership", async () => {
+  const backend = createFakeBackend();
+  const owner = await backend.createSession(backend.fixture.owner);
+  const admin = await backend.createSession(backend.fixture.admin);
+  const ownerProfile = await owner.getProfile();
+  const adminProfile = await admin.getProfile();
+  assert.notEqual(adminProfile.id, ownerProfile.id);
+  assert.notEqual(backend.fixture.adminMembershipId, backend.fixture.ownerMembershipId);
+  assert.notEqual(backend.fixture.adminMembershipId, backend.fixture.memberMembershipId);
+  const changed = await admin.updateMembershipRole({ organizationId: backend.fixture.organizationId, membershipId: backend.fixture.memberMembershipId, role: "admin" });
+  assert.equal(changed.userId, backend.fixture.memberUserId);
+  assert.equal(changed.role, "admin");
+  await admin.close();
+  await owner.close();
+});
+
 test("secure fake passes and insecure tenant isolation is found", async () => {
   const insecure = createFakeBackend({ insecureTenantIsolation: true });
   const bad = await runCorrectness(insecure, insecure.fixture);
@@ -154,10 +170,38 @@ test("cross-project operations are denied", async () => {
   await session.close();
 });
 
+test("outsider cannot update existing task or comment", async () => {
+  const backend = createFakeBackend();
+  const owner = await backend.createSession(backend.fixture.owner);
+  const comment = await owner.addComment({ organizationId: backend.fixture.organizationId, projectId: backend.fixture.projectId, taskId: backend.fixture.taskId, body: "existing" });
+  const outsider = await backend.createSession(backend.fixture.outsider);
+  await assert.rejects(outsider.updateTask({ organizationId: backend.fixture.organizationId, projectId: backend.fixture.projectId, taskId: backend.fixture.taskId, title: "bad" }), (error: unknown) => error instanceof BenchmarkOperationError && error.classification === "authorization");
+  await assert.rejects(outsider.updateComment({ organizationId: backend.fixture.organizationId, projectId: backend.fixture.projectId, taskId: backend.fixture.taskId, commentId: comment.id, body: "bad" }), (error: unknown) => error instanceof BenchmarkOperationError && error.classification === "authorization");
+  await outsider.close();
+  await owner.close();
+});
+
 test("malformed pages become invalid response findings", async () => {
   const backend = createFakeBackend({ malformedPage: true });
   const result = await runCorrectness(backend, backend.fixture);
   assert.ok(result.findings.some((finding) => finding.classification === "invalid_response"));
+});
+
+test("enum-like objects are rejected as malformed data", async () => {
+  for (const malformedEnum of ["task-status", "task-priority", "membership-role"] as const) {
+    const backend = createFakeBackend({ malformedEnum });
+    const result = await runCorrectness(backend, backend.fixture);
+    assert.ok(result.findings.some((finding) => finding.classification === "invalid_response"), malformedEnum);
+  }
+});
+
+test("comment correctness preserves pre-existing comments", async () => {
+  const backend = createFakeBackend();
+  const session = await backend.createSession(backend.fixture.owner);
+  await session.addComment({ organizationId: backend.fixture.organizationId, projectId: backend.fixture.projectId, taskId: backend.fixture.taskId, body: "baseline" });
+  await session.close();
+  const result = await runCorrectness(backend, backend.fixture);
+  assert.equal(result.findings.find((finding) => finding.name === "comments-crud-pagination")?.passed, true);
 });
 
 test("error details and aborts redact fixture passwords", async () => {

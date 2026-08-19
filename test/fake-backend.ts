@@ -15,12 +15,16 @@ export interface FakeFixture {
   foreignMembershipId: string;
   foreignProjectId: string;
   otherProjectId: string;
+  adminMembershipId: string;
+  adminUserId: string;
+  memberUserId: string;
 }
 
 export interface FakeOptions {
   insecureTenantIsolation?: boolean;
   acceptInvalidLogin?: boolean;
   malformedPage?: boolean;
+  malformedEnum?: "task-status" | "task-priority" | "membership-role";
   leakError?: "normal" | "health";
   failures?: Partial<Record<"authentication" | "timeout" | "malformed" | "application" | "backend_health", number>>;
 }
@@ -35,7 +39,7 @@ type FailureKind = "authentication" | "timeout" | "malformed" | "application" | 
 const now = "2026-01-01T00:00:00.000Z";
 
 export function createFakeBackend(options: FakeOptions = {}): FakeBackend {
-  const users: User[] = ["owner", "member", "outsider"].map((name) => ({
+  const users: User[] = ["owner", "member", "admin", "outsider"].map((name) => ({
     id: `u-${name}`,
     email: `${name}@example.test`,
     displayName: name,
@@ -64,6 +68,7 @@ export function createFakeBackend(options: FakeOptions = {}): FakeBackend {
   const memberships: Membership[] = [
     { id: "membership-owner", organizationId: organization.id, userId: "u-owner", role: "owner", createdAt: now },
     { id: "membership-member", organizationId: organization.id, userId: "u-member", role: "member", createdAt: now },
+    { id: "membership-admin", organizationId: organization.id, userId: "u-admin", role: "admin", createdAt: now },
     { id: "membership-foreign", organizationId: "org-foreign", userId: "u-owner", role: "member", createdAt: now },
   ];
   let health = true;
@@ -72,7 +77,7 @@ export function createFakeBackend(options: FakeOptions = {}): FakeBackend {
   const remaining = { ...(options.failures || {}) };
   const fixture: FakeFixture = {
     owner: { email: "owner@example.test", password: "owner-pass" },
-    admin: { email: "owner@example.test", password: "owner-pass" },
+    admin: { email: "admin@example.test", password: "admin-pass" },
     member: { email: "member@example.test", password: "member-pass" },
     outsider: { email: "outsider@example.test", password: "outsider-pass" },
     organizationId: organization.id,
@@ -80,9 +85,12 @@ export function createFakeBackend(options: FakeOptions = {}): FakeBackend {
     taskId: tasks[0]!.id,
     ownerMembershipId: memberships[0]!.id,
     memberMembershipId: memberships[1]!.id,
-    foreignMembershipId: memberships[2]!.id,
+    foreignMembershipId: memberships[3]!.id,
     foreignProjectId: foreignProject.id,
     otherProjectId: otherProject.id,
+    adminMembershipId: memberships[2]!.id,
+    adminUserId: "u-admin",
+    memberUserId: "u-member",
   };
 
   const fail = (kind: FailureKind): void => {
@@ -151,6 +159,10 @@ export function createFakeBackend(options: FakeOptions = {}): FakeBackend {
           // ponytail: malformed fixture data is intentionally localized to this simulation.
           return { ...result, items: [{} as Task] };
         }
+        if (options.malformedEnum === "task-status") {
+          // ponytail: malformed fixture data is intentionally localized to this simulation.
+          return { ...result, items: result.items.map((task) => ({ ...task, status: { toString: () => "todo" } } as Task)) };
+        }
         return result;
       },
       getTask: async (input): Promise<TaskDetail> => {
@@ -183,6 +195,10 @@ export function createFakeBackend(options: FakeOptions = {}): FakeBackend {
           updatedAt: now,
         };
         tasks.push(task);
+        if (options.malformedEnum === "task-priority") {
+          // ponytail: malformed fixture data is intentionally localized to this simulation.
+          return { ...task, priority: { toString: () => "low" } } as Task;
+        }
         return task;
       },
       updateTask: async (input) => {
@@ -225,6 +241,10 @@ export function createFakeBackend(options: FakeOptions = {}): FakeBackend {
         if (!target) throw new BenchmarkOperationError("application", { code: "not_found" });
         if (target.organizationId !== input.organizationId) throw new BenchmarkOperationError("authorization", { code: "tenant_denied" });
         target.role = input.role;
+        if (options.malformedEnum === "membership-role") {
+          // ponytail: malformed fixture data is intentionally localized to this simulation.
+          return { ...target, role: { toString: () => input.role } } as Membership;
+        }
         return target;
       },
       searchTasks: async (input) => {

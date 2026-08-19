@@ -12,7 +12,8 @@ export interface CorrectnessFixture {
   taskId?: Id;
   ownerMembershipId: Id;
   memberMembershipId: Id;
-  adminMembershipId?: Id;
+  memberUserId?: Id;
+  adminMembershipId: Id;
 }
 
 export interface CorrectnessResult {
@@ -90,8 +91,8 @@ function assertUser(user: unknown): asserts user is User {
 
 function assertTask(task: unknown, expected?: { id?: Id; projectId?: Id; creatorId?: Id; createdAt?: string }): asserts task is Task {
   if (!isRecord(task) || !requiredString(task.id) || !requiredString(task.projectId) || !requiredString(task.creatorId) ||
-      !requiredString(task.title) || !requiredString(task.description) || !taskStatuses.has(String(task.status)) ||
-      !taskPriorities.has(String(task.priority)) || (task.assigneeId !== null && !requiredString(task.assigneeId)) ||
+      !requiredString(task.title) || !requiredString(task.description) || typeof task.status !== "string" || !taskStatuses.has(task.status) ||
+      typeof task.priority !== "string" || !taskPriorities.has(task.priority) || (task.assigneeId !== null && !requiredString(task.assigneeId)) ||
       (task.dueDate !== null && !requiredString(task.dueDate)) || !requiredString(task.createdAt) || !requiredString(task.updatedAt) ||
       (expected?.id !== undefined && task.id !== expected.id) || (expected?.projectId !== undefined && task.projectId !== expected.projectId) ||
       (expected?.creatorId !== undefined && task.creatorId !== expected.creatorId) ||
@@ -108,7 +109,7 @@ function assertComment(comment: unknown, expected?: { id?: Id; taskId?: Id; auth
 
 function assertMembership(membership: unknown, expected: { id?: Id; organizationId?: Id; userId?: Id; role?: Membership["role"] } = {}): asserts membership is Membership {
   if (!isRecord(membership) || !requiredString(membership.id) || !requiredString(membership.organizationId) || !requiredString(membership.userId) ||
-      !membershipRoles.has(String(membership.role)) || !requiredString(membership.createdAt) ||
+      typeof membership.role !== "string" || !membershipRoles.has(membership.role) || !requiredString(membership.createdAt) ||
       (expected.id !== undefined && membership.id !== expected.id) || (expected.organizationId !== undefined && membership.organizationId !== expected.organizationId) ||
       (expected.userId !== undefined && membership.userId !== expected.userId) || (expected.role !== undefined && membership.role !== expected.role)) invalid("membership_fields");
 }
@@ -197,6 +198,9 @@ export async function runCorrectness(backend: Backend, fixture: CorrectnessFixtu
   let admin: AppSession | undefined;
   let member: AppSession | undefined;
   let outsider: AppSession | undefined;
+  let setupTaskId: Id | undefined;
+  let setupCommentId: Id | undefined;
+  let setupCommentTaskId: Id | undefined;
 
   const add = async (name: string, work: () => Promise<void>): Promise<void> => {
     if (aborted) return;
@@ -260,6 +264,7 @@ export async function runCorrectness(backend: Backend, fixture: CorrectnessFixtu
       const profile = await session.getProfile();
       assertUser(profile);
       assertTask(created, { id: created.id, projectId: fixture.projectId, creatorId: profile.id });
+      setupTaskId = created.id;
 
       const taskId = fixture.taskId || "task-1";
       const seededDetail = await session.getTask({ organizationId: fixture.organizationId, projectId: fixture.projectId, taskId, comments: { page: 0, pageSize: 10 } });
@@ -302,6 +307,12 @@ export async function runCorrectness(backend: Backend, fixture: CorrectnessFixtu
       const taskId = fixture.taskId || "task-1";
       const profile = await session.getProfile();
       assertUser(profile);
+      const fetchComments = async (page: number, pageSize: number): Promise<Page<Comment>> => {
+        const detail = await session.getTask({ organizationId: fixture.organizationId, projectId: fixture.projectId, taskId, comments: { page, pageSize } });
+        assertTaskDetail(detail, taskId, fixture.projectId);
+        return detail.comments;
+      };
+      const baselineComments = await collectStablePages(fetchComments, 1, (comment) => assertComment(comment, { taskId }));
       const createdComments: Comment[] = [];
       for (const body of ["check-0", "check-1", "check-2"]) {
         const created = await session.addComment({ organizationId: fixture.organizationId, projectId: fixture.projectId, taskId, body });
@@ -311,14 +322,17 @@ export async function runCorrectness(backend: Backend, fixture: CorrectnessFixtu
       const middle = createdComments[1] || invalid("comment_fields");
       const updated = await session.updateComment({ organizationId: fixture.organizationId, projectId: fixture.projectId, taskId, commentId: middle.id, body: "updated" });
       assertComment(updated, { id: middle.id, taskId, authorId: middle.authorId, body: "updated", createdAt: middle.createdAt });
-      const fetchComments = async (page: number, pageSize: number): Promise<Page<Comment>> => {
-        const detail = await session.getTask({ organizationId: fixture.organizationId, projectId: fixture.projectId, taskId, comments: { page, pageSize } });
-        assertTaskDetail(detail, taskId, fixture.projectId);
-        return detail.comments;
-      };
+      setupCommentId = updated.id;
+      setupCommentTaskId = taskId;
       const allComments = await collectStablePages(fetchComments, 1, (comment) => assertComment(comment, { taskId }));
-      if (allComments.length !== createdComments.length || allComments.some((comment, index) => comment.id !== createdComments[index]?.id ||
-          comment.taskId !== taskId || comment.authorId !== profile.id || comment.body !== (index === 1 ? "updated" : `check-${index}`))) invalid("comment_order");
+      const allCommentIds = new Set(allComments.map((comment) => comment.id));
+      if (allComments.length < baselineComments.length + createdComments.length ||
+          baselineComments.some((comment) => !allCommentIds.has(comment.id))) invalid("comment_order");
+      for (const [index, created] of createdComments.entries()) {
+        const returned = allComments.find((comment) => comment.id === created.id);
+        if (!returned || returned.taskId !== taskId || returned.authorId !== profile.id ||
+            returned.body !== (index === 1 ? "updated" : `check-${index}`)) invalid("comment_semantics");
+      }
     });
 
     await add("member-tenant-access", async () => {
@@ -340,27 +354,44 @@ export async function runCorrectness(backend: Backend, fixture: CorrectnessFixtu
     await add("outsider-write-isolated", async () => {
       const session = requireSession(outsider, "outsider");
       await expectRejected(() => session.createTask({ organizationId: fixture.organizationId, projectId: fixture.projectId, title: "x", description: "x", priority: "low" }), "authorization");
+      const taskId = setupTaskId;
+      if (taskId) {
+        await expectRejected(() => session.updateTask({ organizationId: fixture.organizationId, projectId: fixture.projectId, taskId, title: "outsider update" }), "authorization");
+      }
     });
     await add("outsider-comment-write-isolated", async () => {
       const session = requireSession(outsider, "outsider");
       await expectRejected(() => session.addComment({ organizationId: fixture.organizationId, projectId: fixture.projectId, taskId: fixture.taskId || "task-1", body: "x" }), "authorization");
+      const commentId = setupCommentId;
+      const commentTaskId = setupCommentTaskId;
+      if (commentId && commentTaskId) {
+        await expectRejected(() => session.updateComment({ organizationId: fixture.organizationId, projectId: fixture.projectId, taskId: commentTaskId, commentId, body: "outsider update" }), "authorization");
+      }
     });
     await add("member-role-denied", async () => {
       const session = requireSession(member, "member");
       await expectRejected(() => session.updateMembershipRole({ organizationId: fixture.organizationId, membershipId: fixture.memberMembershipId, role: "admin" }), "authorization");
     });
-    await add("admin-role-restore", async () => {
-      let session: AppSession;
-      if (fixture.admin) {
-        session = await backend.createSession(fixture.admin);
-        admin = session;
-      } else {
-        session = requireSession(owner, "owner");
-      }
+    await add("owner-role-restore", async () => {
+      const session = requireSession(owner, "owner");
       const before = await session.updateMembershipRole({ organizationId: fixture.organizationId, membershipId: fixture.memberMembershipId, role: "admin" });
-      assertMembership(before, { id: fixture.memberMembershipId, organizationId: fixture.organizationId, userId: before.userId, role: "admin" });
+      assertMembership(before, { id: fixture.memberMembershipId, organizationId: fixture.organizationId, userId: fixture.memberUserId || before.userId, role: "admin" });
       const restored = await session.updateMembershipRole({ organizationId: fixture.organizationId, membershipId: fixture.memberMembershipId, role: "member" });
-      assertMembership(restored, { id: before.id, organizationId: before.organizationId, userId: before.userId, role: "member" });
+      assertMembership(restored, { id: before.id, organizationId: before.organizationId, userId: fixture.memberUserId || before.userId, role: "member" });
+    });
+    await add("admin-role-restore", async () => {
+      const session = await backend.createSession(fixture.admin);
+      admin = session;
+      const profile = await session.getProfile();
+      assertUser(profile);
+      const ownerSession = requireSession(owner, "owner");
+      const ownerProfile = await ownerSession.getProfile();
+      assertUser(ownerProfile);
+      if (profile.id === ownerProfile.id) invalid("admin_identity");
+      const before = await session.updateMembershipRole({ organizationId: fixture.organizationId, membershipId: fixture.memberMembershipId, role: "admin" });
+      assertMembership(before, { id: fixture.memberMembershipId, organizationId: fixture.organizationId, userId: fixture.memberUserId || before.userId, role: "admin" });
+      const restored = await session.updateMembershipRole({ organizationId: fixture.organizationId, membershipId: fixture.memberMembershipId, role: "member" });
+      assertMembership(restored, { id: before.id, organizationId: fixture.organizationId, userId: fixture.memberUserId || before.userId, role: "member" });
     });
     await add("refresh-signout", async () => {
       const session = requireSession(owner, "owner");
@@ -369,7 +400,8 @@ export async function runCorrectness(backend: Backend, fixture: CorrectnessFixtu
       await expectRejected(() => session.getProfile(), "authentication");
     });
     await add("required-data", async () => {
-      if (!fixture.organizationId || !fixture.projectId || !fixture.memberMembershipId) invalid("fixture_ids");
+      if (!fixture.organizationId || !fixture.projectId || !fixture.memberMembershipId || !fixture.adminMembershipId ||
+          fixture.adminMembershipId === fixture.ownerMembershipId || fixture.adminMembershipId === fixture.memberMembershipId) invalid("fixture_ids");
     });
   } catch (error) {
     aborted = true;
