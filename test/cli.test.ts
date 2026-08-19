@@ -21,6 +21,13 @@ test("rejects duplicate options", () => {
   );
 });
 
+test("reserves the command name", () => {
+  assert.throws(
+    () => parseArgs(["run", "--command", "changed"]),
+    /duplicate option.*--command/i,
+  );
+});
+
 test("rejects duplicate __proto__ options", () => {
   assert.throws(
     () => parseArgs(["reset", "--__proto__", "1", "--__proto__", "2"]),

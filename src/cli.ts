@@ -12,7 +12,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
   }
 
   const parsed: ParsedArgs = { command };
-  const optionNames = new Set<string>();
+  const optionNames = new Set<string>(["command"]);
   for (let index = 0; index < options.length; index += 2) {
     const option = options[index];
     if (!option?.startsWith("--") || option.length === 2) {
