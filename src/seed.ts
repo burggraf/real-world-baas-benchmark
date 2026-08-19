@@ -8,6 +8,10 @@ export const datasetProfiles = Object.freeze({
   large: Object.freeze({ organizations: 10_000, users: 100_000, projects: 50_000, tasks: 1_000_000, comments: 3_000_000, activities: 2_000_000 }),
 } as const);
 export type ProfileName = keyof typeof datasetProfiles;
+export const profileMetadata = Object.freeze(Object.fromEntries(
+  Object.entries(datasetProfiles).map(([name, definition]) => [name, Object.freeze({ ...definition, memberships: definition.users })]),
+) as { [P in ProfileName]: typeof datasetProfiles[P] & { readonly memberships: number } });
+export const datasetCounts = profileMetadata;
 export const PROFILES = datasetProfiles;
 export const profiles = datasetProfiles;
 type RecordType = Organization | User | Membership | Project | Task | Comment | Activity;
@@ -43,8 +47,8 @@ export async function* seedDataset(profile: ProfileName, seed: number, batchSize
       yield { entity, records } as SeedBatch;
     }
   };
-  for await (const b of emit("organization", c.organizations, i => ({ id: entityId("organization", profile, i), name: text("Organization", i, random()), ownerId: entityId("user", profile, i % c.users), createdAt: timestamp(i) }))) yield b;
   for await (const b of emit("user", c.users, i => ({ id: entityId("user", profile, i), email: `user${i}-${Math.floor(random() * 1_000_000).toString(36)}@example.test`, displayName: text("User", i, random()), createdAt: timestamp(i + Math.floor(random() * 1000)), updatedAt: timestamp(i + 1 + Math.floor(random() * 1000)) }))) yield b;
+  for await (const b of emit("organization", c.organizations, i => ({ id: entityId("organization", profile, i), name: text("Organization", i, random()), ownerId: entityId("user", profile, i % c.users), createdAt: timestamp(i) }))) yield b;
   for await (const b of emit("membership", c.memberships, i => ({ id: entityId("membership", profile, i), organizationId: entityId("organization", profile, i < c.organizations ? i : i % c.organizations), userId: entityId("user", profile, i), role: (i < c.organizations ? "owner" : i % 10 === 0 ? "admin" : "member") as Role, createdAt: timestamp(i) }))) yield b;
   for await (const b of emit("project", c.projects, i => ({ id: entityId("project", profile, i), organizationId: entityId("organization", profile, i % c.organizations), name: text("Project", i, random()), status: pick(["active", "archived"], random()), createdAt: timestamp(i), updatedAt: timestamp(i + 1) }))) yield b;
   for await (const b of emit("task", c.tasks, i => ({ id: entityId("task", profile, i), projectId: entityId("project", profile, i % c.projects), creatorId: entityId("user", profile, i % c.users), assigneeId: i % 5 === 0 ? null : entityId("user", profile, (i * 7) % c.users), title: text("Task", i, random()), description: text("Description", i, random()), status: pick(["todo", "in_progress", "done", "cancelled"], random()) as Task["status"], priority: pick(["low", "medium", "high", "urgent"], random()) as Task["priority"], dueDate: i % 3 === 0 ? timestamp(i + 100) : null, createdAt: timestamp(i), updatedAt: timestamp(i + 1) }))) yield b;
