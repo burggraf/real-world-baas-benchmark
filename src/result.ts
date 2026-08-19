@@ -3,8 +3,9 @@ import type { BackendInfo } from "./backend.js";
 import type { DatasetProfile } from "./domain.js";
 
 export interface Environment { runtime: string; runtimeVersion: string; os: string; architecture: string; host?: string; cpu?: string; memoryBytes?: number; }
-export interface Correctness { findings: CorrectnessFinding[]; }
-export interface CorrectnessFinding { name: string; passed: boolean; message?: string; }
+export type FindingClassification = "authentication" | "authorization" | "timeout" | "transport/sdk" | "invalid_response" | "application" | "backend_health";
+export interface Correctness { findings: CorrectnessFinding[]; aborted?: boolean; abortReason?: string; }
+export interface CorrectnessFinding { name: string; passed: boolean; classification: FindingClassification; message?: string; evidence?: string; }
 export interface OperationMetric {
   operationCount: number; errorCount: number;
   latencyP50Ms: number; latencyP95Ms: number; latencyP99Ms: number; latencyMinMs: number; latencyMaxMs: number;

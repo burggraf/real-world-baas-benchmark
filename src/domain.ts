@@ -24,5 +24,7 @@ export interface GetTaskInput extends TenantProjectContext { taskId: Id; comment
 export interface CreateTaskInput extends TenantProjectContext { title: string; description: string; priority: TaskPriority; assigneeId?: Id | null; dueDate?: Timestamp | null; }
 export interface UpdateTaskInput extends TenantProjectContext { taskId: Id; status?: TaskStatus; priority?: TaskPriority; assigneeId?: Id | null; dueDate?: Timestamp | null; title?: string; description?: string; }
 export interface AddCommentInput extends TenantProjectContext { taskId: Id; body: string; }
+export interface UpdateCommentInput extends TenantProjectContext { taskId: Id; commentId: Id; body: string; }
+export interface UpdateMembershipRoleInput { organizationId: Id; membershipId: Id; role: Role; }
 export interface SearchTasksInput extends TenantProjectContext, Pagination { query: string; }
 export interface UpdateProfileInput { displayName: string; }
