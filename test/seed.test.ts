@@ -17,11 +17,12 @@ test("all profile metadata includes memberships without enumerating data", () =>
 
 test("small profile streams bounded batches in dependency order", async () => {
   const order: string[] = [], counts = new Map<string, number>();
-  let total = 0, finalSize = 0;
+  let total = 0, finalSize = 0, finalActivity: any;
   for await (const batch of seedDataset("small", 42, 333)) {
     if (order.at(-1) !== batch.entity) order.push(batch.entity);
     assert.ok(batch.records.length <= 333);
     finalSize = batch.records.length; total += batch.records.length;
+    if (batch.entity === "activity") finalActivity = batch.records.at(-1);
     counts.set(batch.entity, (counts.get(batch.entity) ?? 0) + batch.records.length);
     const record = batch.records[0] as unknown as Record<string, unknown>;
     for (const key of ["organizationId", "userId", "projectId", "taskId", "creatorId", "authorId", "actorId", "subjectId"]) {
@@ -32,6 +33,7 @@ test("small profile streams bounded batches in dependency order", async () => {
   assert.deepEqual(order, ["user", "organization", "membership", "project", "task", "comment", "activity"]);
   assert.deepEqual([...counts.values()], [1000, 100, 1000, 500, 10000, 30000, 20000]);
   assert.equal(total, 62_600); assert.equal(finalSize, 20);
+  assert.deepEqual(finalActivity, { id: "act-00000ffj", organizationId: "org-0000002r", projectId: "prj-000000dv", actorId: "usr-000000rf", action: "created", subjectType: "project", subjectId: "prj-000000dv", createdAt: "2020-01-14T21:19:00.000Z" });
 });
 
 test("representative records, IDs, foreign keys, and owners are stable", async () => {
@@ -59,9 +61,11 @@ test("invalid seed, profile, entity, ordinal, and batch inputs reject", async ()
   assert.throws(() => mulberry32(1.5));
   assert.throws(() => entityId("nope" as never, "small", 0));
   assert.throws(() => entityId("user", "nope" as never, 0));
+  for (const inherited of ["toString", "constructor", "hasOwnProperty"]) assert.throws(() => entityId("user", inherited as never, 0));
   assert.throws(() => entityId("user", "small", -1));
   assert.throws(() => entityId("user", "small", 1.5));
   await assert.rejects(async () => { for await (const _ of seedDataset("nope" as never, 42)) {} });
+  await assert.rejects(async () => { for await (const _ of seedDataset("constructor" as never, 42)) {} });
   await assert.rejects(async () => { for await (const _ of seedDataset("small", 42, 0)) {} });
   await assert.rejects(async () => { for await (const _ of seedDataset("small", 42, 1.5)) {} });
 });

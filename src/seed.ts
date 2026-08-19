@@ -20,7 +20,9 @@ export interface SeedBatch { entity: EntityName; records: RecordType[]; }
 const prefixes: Record<EntityName, string> = { organization: "org", user: "usr", membership: "mem", project: "prj", task: "tsk", comment: "cmt", activity: "act" };
 const entities = Object.keys(prefixes) as EntityName[];
 const counts = (profile: ProfileName) => ({ ...datasetProfiles[profile], memberships: datasetProfiles[profile].users });
-function checkProfile(profile: string): asserts profile is ProfileName { if (!(profile in datasetProfiles)) throw new RangeError(`Invalid profile: ${profile}`); }
+function checkProfile(profile: string): asserts profile is ProfileName {
+  if (!Object.hasOwn(datasetProfiles, profile)) throw new RangeError(`Invalid profile: ${profile}`);
+}
 /** Stable ASCII IDs: a short entity prefix and an eight-digit base36 ordinal. */
 export function entityId(entity: EntityName, profile: ProfileName, ordinal: number): Id {
   checkProfile(profile);
