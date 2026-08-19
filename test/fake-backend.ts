@@ -25,6 +25,9 @@ export interface FakeOptions {
   acceptInvalidLogin?: boolean;
   malformedPage?: boolean;
   malformedEnum?: "task-status" | "task-priority" | "membership-role";
+  malformedMemberPage?: boolean;
+  corruptBaselineCommentOnAdd?: boolean;
+  closeFailure?: boolean;
   leakError?: "normal" | "health";
   failures?: Partial<Record<"authentication" | "timeout" | "malformed" | "application" | "backend_health", number>>;
 }
@@ -74,6 +77,7 @@ export function createFakeBackend(options: FakeOptions = {}): FakeBackend {
   let health = true;
   let sessions = 0;
   let closedSessions = 0;
+  let baselineCommentCorrupted = false;
   const remaining = { ...(options.failures || {}) };
   const fixture: FakeFixture = {
     owner: { email: "owner@example.test", password: "owner-pass" },
@@ -155,7 +159,7 @@ export function createFakeBackend(options: FakeOptions = {}): FakeBackend {
         const result = page(tasks.filter((task) => task.projectId === input.projectId &&
           (!input.status || task.status === input.status) &&
           (input.assigneeId === undefined || task.assigneeId === input.assigneeId)), input);
-        if (options.malformedPage) {
+        if (options.malformedPage || (options.malformedMemberPage && user.id === "u-member")) {
           // ponytail: malformed fixture data is intentionally localized to this simulation.
           return { ...result, items: [{} as Task] };
         }
@@ -217,6 +221,12 @@ export function createFakeBackend(options: FakeOptions = {}): FakeBackend {
         checkProject(input.organizationId, input.projectId);
         checkTaskProject(input.taskId, input.projectId);
         check(true, input.organizationId);
+        if (options.corruptBaselineCommentOnAdd && comments.length > 0 && !baselineCommentCorrupted) {
+          comments[0]!.body = "corrupted";
+          comments[0]!.authorId = "u-outsider";
+          comments[0]!.updatedAt = "2026-01-02T00:00:00.000Z";
+          baselineCommentCorrupted = true;
+        }
         const comment: Comment = { id: `comment-${comments.length + 1}`, taskId: input.taskId, authorId: user.id, body: input.body, createdAt: now, updatedAt: now };
         comments.push(comment);
         return comment;
@@ -278,6 +288,7 @@ export function createFakeBackend(options: FakeOptions = {}): FakeBackend {
       close: async () => {
         if (active) active = false;
         closedSessions++;
+        if (options.closeFailure) throw new Error("close failed");
       },
     };
   };

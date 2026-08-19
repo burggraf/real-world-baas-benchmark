@@ -204,6 +204,33 @@ test("comment correctness preserves pre-existing comments", async () => {
   assert.equal(result.findings.find((finding) => finding.name === "comments-crud-pagination")?.passed, true);
 });
 
+test("comment correctness detects changed baseline semantics", async () => {
+  const backend = createFakeBackend({ corruptBaselineCommentOnAdd: true });
+  const session = await backend.createSession(backend.fixture.owner);
+  await session.addComment({ organizationId: backend.fixture.organizationId, projectId: backend.fixture.projectId, taskId: backend.fixture.taskId, body: "baseline" });
+  await session.close();
+  const result = await runCorrectness(backend, backend.fixture);
+  const finding = result.findings.find((item) => item.name === "comments-crud-pagination");
+  assert.equal(finding?.passed, false);
+  assert.equal(finding?.classification, "invalid_response");
+});
+
+test("member task response is runtime validated", async () => {
+  const backend = createFakeBackend({ malformedMemberPage: true });
+  const result = await runCorrectness(backend, backend.fixture);
+  const finding = result.findings.find((item) => item.name === "member-tenant-access");
+  assert.equal(finding?.passed, false);
+  assert.equal(finding?.classification, "invalid_response");
+});
+
+test("session close failures do not reject correctness results", async () => {
+  const backend = createFakeBackend({ acceptInvalidLogin: true, closeFailure: true });
+  const result = await runCorrectness(backend, backend.fixture);
+  assert.equal(result.aborted, false);
+  assert.equal(result.findings.find((item) => item.name === "invalid-sign-in")?.classification, "invalid_response");
+  assert.equal(backend.closedSessions, 6);
+});
+
 test("error details and aborts redact fixture passwords", async () => {
   const normal = createFakeBackend({ leakError: "normal", failures: { application: 1 } });
   const normalResult = await runCorrectness(normal, normal.fixture);

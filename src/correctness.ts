@@ -107,6 +107,11 @@ function assertComment(comment: unknown, expected?: { id?: Id; taskId?: Id; auth
       (expected?.createdAt !== undefined && comment.createdAt !== expected.createdAt)) invalid("comment_fields");
 }
 
+function sameComment(left: Comment, right: Comment): boolean {
+  return left.id === right.id && left.taskId === right.taskId && left.authorId === right.authorId &&
+    left.body === right.body && left.createdAt === right.createdAt && left.updatedAt === right.updatedAt;
+}
+
 function assertMembership(membership: unknown, expected: { id?: Id; organizationId?: Id; userId?: Id; role?: Membership["role"] } = {}): asserts membership is Membership {
   if (!isRecord(membership) || !requiredString(membership.id) || !requiredString(membership.organizationId) || !requiredString(membership.userId) ||
       typeof membership.role !== "string" || !membershipRoles.has(membership.role) || !requiredString(membership.createdAt) ||
@@ -190,6 +195,16 @@ function requireSession(session: AppSession | undefined, name: string): AppSessi
   return session || invalid(`${name}_session`);
 }
 
+async function closeSession(session: AppSession | undefined): Promise<boolean> {
+  if (!session) return true;
+  try {
+    await session.close();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export async function runCorrectness(backend: Backend, fixture: CorrectnessFixture): Promise<CorrectnessResult> {
   const findings: CorrectnessFinding[] = [];
   let aborted = false;
@@ -198,6 +213,7 @@ export async function runCorrectness(backend: Backend, fixture: CorrectnessFixtu
   let admin: AppSession | undefined;
   let member: AppSession | undefined;
   let outsider: AppSession | undefined;
+  let invalidLogin: AppSession | undefined;
   let setupTaskId: Id | undefined;
   let setupCommentId: Id | undefined;
   let setupCommentTaskId: Id | undefined;
@@ -231,14 +247,13 @@ export async function runCorrectness(backend: Backend, fixture: CorrectnessFixtu
       assertUser(profile);
     });
     await add("invalid-sign-in", async () => {
-      let invalidSession: AppSession | undefined;
       try {
-        invalidSession = await backend.createSession({ email: fixture.owner.email, password: "invalid" });
+        invalidLogin = await backend.createSession({ email: fixture.owner.email, password: "invalid" });
         throw new BenchmarkOperationError("invalid_response", { code: "accepted_invalid_password" });
       } catch (error) {
         if (classifyOperationError(error) !== "authentication") throw error;
       } finally {
-        await invalidSession?.close();
+        if (await closeSession(invalidLogin)) invalidLogin = undefined;
       }
     });
     if (aborted) return { findings, aborted, abortReason };
@@ -312,7 +327,8 @@ export async function runCorrectness(backend: Backend, fixture: CorrectnessFixtu
         assertTaskDetail(detail, taskId, fixture.projectId);
         return detail.comments;
       };
-      const baselineComments = await collectStablePages(fetchComments, 1, (comment) => assertComment(comment, { taskId }));
+      const baselineComments = (await collectStablePages(fetchComments, 1, (comment) => assertComment(comment, { taskId })))
+        .map((comment) => ({ ...comment }));
       const createdComments: Comment[] = [];
       for (const body of ["check-0", "check-1", "check-2"]) {
         const created = await session.addComment({ organizationId: fixture.organizationId, projectId: fixture.projectId, taskId, body });
@@ -325,9 +341,11 @@ export async function runCorrectness(backend: Backend, fixture: CorrectnessFixtu
       setupCommentId = updated.id;
       setupCommentTaskId = taskId;
       const allComments = await collectStablePages(fetchComments, 1, (comment) => assertComment(comment, { taskId }));
-      const allCommentIds = new Set(allComments.map((comment) => comment.id));
       if (allComments.length < baselineComments.length + createdComments.length ||
-          baselineComments.some((comment) => !allCommentIds.has(comment.id))) invalid("comment_order");
+          baselineComments.some((comment) => {
+            const returned = allComments.find((item) => item.id === comment.id);
+            return !returned || !sameComment(returned, comment);
+          })) invalid("comment_order");
       for (const [index, created] of createdComments.entries()) {
         const returned = allComments.find((comment) => comment.id === created.id);
         if (!returned || returned.taskId !== taskId || returned.authorId !== profile.id ||
@@ -340,7 +358,8 @@ export async function runCorrectness(backend: Backend, fixture: CorrectnessFixtu
       member = session;
       const profile = await session.getProfile();
       assertUser(profile);
-      await session.listTasks({ organizationId: fixture.organizationId, projectId: fixture.projectId, page: 0, pageSize: 10 });
+      const tasks = await session.listTasks({ organizationId: fixture.organizationId, projectId: fixture.projectId, page: 0, pageSize: 10 });
+      assertPage<Task>(tasks, (task) => assertTask(task, { projectId: fixture.projectId }));
     });
     await add("outsider-read-isolated", async () => {
       const session = await backend.createSession(fixture.outsider);
@@ -407,7 +426,7 @@ export async function runCorrectness(backend: Backend, fixture: CorrectnessFixtu
     aborted = true;
     abortReason = "correctness run aborted";
   } finally {
-    await Promise.all([owner?.close(), admin?.close(), member?.close(), outsider?.close()]);
+    await Promise.all([owner, admin, member, outsider, invalidLogin].map(closeSession));
   }
 
   return { findings, aborted, abortReason };
