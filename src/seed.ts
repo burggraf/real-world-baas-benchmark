@@ -19,14 +19,15 @@ export interface SeedBatch { entity: EntityName; records: RecordType[]; }
 
 const prefixes: Record<EntityName, string> = { organization: "org", user: "usr", membership: "mem", project: "prj", task: "tsk", comment: "cmt", activity: "act" };
 const entities = Object.keys(prefixes) as EntityName[];
-const counts = (profile: ProfileName) => ({ ...datasetProfiles[profile], memberships: datasetProfiles[profile].users });
+const userOrdinal = (organizationOrdinal: number, slot: number, organizations: number, usersPerOrganization: number) => organizationOrdinal + (slot % usersPerOrganization) * organizations;
+const formatId = (prefix: string, ordinal: number) => `${prefix}-${ordinal.toString(36).padStart(8, "0")}`;
 /** Select a stable user ordinal in an organization; users are evenly distributed. */
 export function userForOrganization(profile: ProfileName, organizationOrdinal: number, slot: number): number {
   checkProfile(profile);
-  const c = counts(profile);
+  const c = datasetProfiles[profile], usersPerOrganization = c.users / c.organizations;
   if (!Number.isInteger(organizationOrdinal) || organizationOrdinal < 0 || organizationOrdinal >= c.organizations) throw new RangeError("Invalid organization ordinal");
   if (!Number.isInteger(slot) || slot < 0) throw new RangeError("Invalid user slot");
-  return organizationOrdinal + (slot % (c.users / c.organizations)) * c.organizations;
+  return userOrdinal(organizationOrdinal, slot, c.organizations, usersPerOrganization);
 }
 function checkProfile(profile: string): asserts profile is ProfileName {
   if (!Object.hasOwn(datasetProfiles, profile)) throw new RangeError(`Invalid profile: ${profile}`);
@@ -35,9 +36,9 @@ function checkProfile(profile: string): asserts profile is ProfileName {
 export function entityId(entity: EntityName, profile: ProfileName, ordinal: number): Id {
   checkProfile(profile);
   if (!entities.includes(entity)) throw new RangeError(`Invalid entity: ${entity}`);
-  const limit = counts(profile)[({ organization: "organizations", user: "users", membership: "memberships", project: "projects", task: "tasks", comment: "comments", activity: "activities" } as const)[entity]];
-  if (!Number.isInteger(ordinal) || ordinal < 0 || (limit !== undefined && ordinal >= limit)) throw new RangeError("Invalid ordinal");
-  return `${prefixes[entity]}-${ordinal.toString(36).padStart(8, "0")}`;
+  const c = datasetProfiles[profile], limit = c[({ organization: "organizations", user: "users", membership: "users", project: "projects", task: "tasks", comment: "comments", activity: "activities" } as const)[entity]];
+  if (!Number.isInteger(ordinal) || ordinal < 0 || ordinal >= limit) throw new RangeError("Invalid ordinal");
+  return formatId(prefixes[entity], ordinal);
 }
 const timestamp = (n: number) => new Date(Date.UTC(2020, 0, 1) + n * 60_000).toISOString();
 const text = (kind: string, ordinal: number, random: number) => {
@@ -50,8 +51,8 @@ export async function* seedDataset(profile: ProfileName, seed: number, batchSize
   checkProfile(profile);
   if (!Number.isInteger(batchSize) || batchSize <= 0) throw new RangeError("batchSize must be a positive integer");
   const c = datasetProfiles[profile], usersPerOrganization = c.users / c.organizations, random = mulberry32(seed);
-  const localUser = (organization: number, slot: number) => organization + (slot % usersPerOrganization) * c.organizations;
-  const localId = (entity: EntityName, ordinal: number) => `${prefixes[entity]}-${ordinal.toString(36).padStart(8, "0")}`;
+  const localUser = (organization: number, slot: number) => userOrdinal(organization, slot, c.organizations, usersPerOrganization);
+  const localId = (entity: EntityName, ordinal: number) => formatId(prefixes[entity], ordinal);
   const emit = async function* <T extends RecordType>(entity: EntityName, total: number, make: (i: number) => T) {
     for (let start = 0; start < total; start += batchSize) {
       const records: T[] = [];
@@ -68,7 +69,7 @@ export async function* seedDataset(profile: ProfileName, seed: number, batchSize
   for await (const b of emit("project", c.projects, i => ({ id: entityId("project", profile, i), organizationId: entityId("organization", profile, i % c.organizations), name: text("Project", i, random()), status: pick(["active", "archived"], random()), createdAt: timestamp(i), updatedAt: timestamp(i + 1) }))) yield b;
   for await (const b of emit("task", c.tasks, i => ({ id: localId("task", i), projectId: localId("project", i % c.projects), creatorId: localId("user", i % c.users), assigneeId: i % 5 === 0 ? null : localId("user", localUser((i % c.projects) % c.organizations, i * 7)), title: text("Task", i, random()), description: text("Description", i, random()), status: pick(["todo", "in_progress", "done", "cancelled"], random()) as Task["status"], priority: pick(["low", "medium", "high", "urgent"], random()) as Task["priority"], dueDate: i % 3 === 0 ? timestamp(i + 100) : null, createdAt: timestamp(i), updatedAt: timestamp(i + 1) }))) yield b;
   for await (const b of emit("comment", c.comments, i => ({ id: localId("comment", i), taskId: localId("task", i % c.tasks), authorId: localId("user", localUser(((i % c.tasks) % c.projects) % c.organizations, i * 11)), body: text("Comment", i, random()), createdAt: timestamp(i), updatedAt: timestamp(i + 1) }))) yield b;
-  for await (const b of emit("activity", c.activities, i => ({ id: localId("activity", i), organizationId: localId("organization", i % c.organizations), projectId: i % 4 === 0 ? null : localId("project", i % c.projects), actorId: localId("user", localUser(i % c.organizations, i * 13)), action: pick(["created", "updated", "completed"], random()), subjectType: i % 2 === 0 ? "task" : "project", subjectId: i % 2 === 0 ? entityId("task", profile, i % c.tasks) : entityId("project", profile, i % c.projects), createdAt: timestamp(i) }))) yield b;
+  for await (const b of emit("activity", c.activities, i => ({ id: localId("activity", i), organizationId: localId("organization", i % c.organizations), projectId: i % 4 === 0 ? null : localId("project", i % c.projects), actorId: localId("user", localUser(i % c.organizations, i * 13)), action: pick(["created", "updated", "completed"], random()), subjectType: i % 2 === 0 ? "task" : "project", subjectId: i % 2 === 0 ? localId("task", i % c.tasks) : localId("project", i % c.projects), createdAt: timestamp(i) }))) yield b;
 }
 
 export type { RecordType as SeedRecord };

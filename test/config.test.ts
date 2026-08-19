@@ -55,6 +55,17 @@ test("rejects missing top-level fields and wrong field-family types", () => {
   ]) rejects(change);
 });
 
+test("accepts uint32 seed boundaries and rejects invalid seeds", () => {
+  for (const seed of [0, 0xffff_ffff]) {
+    const value = JSON.parse(JSON.stringify(quick)); value.seed = seed;
+    assert.equal(parseConfig(value).seed, seed);
+  }
+  for (const seed of [-1, 1.5, 0x1_0000_0000]) {
+    const value = JSON.parse(JSON.stringify(quick)); value.seed = seed;
+    assert.throws(() => parseConfig(value), /Seed must be an unsigned 32-bit integer/);
+  }
+});
+
 test("rejects invalid durations, concurrency, and think-time", () => {
   for (const change of [
     (v: any) => v.warmupSeconds = 0, (v: any) => v.stageSeconds = -1,

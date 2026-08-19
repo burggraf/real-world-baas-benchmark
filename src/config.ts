@@ -90,8 +90,10 @@ export function parseConfig(value: unknown): BenchmarkConfig {
   const slos: Record<OperationClass, { p95Ms: number; maxErrorRate: number }> = {
     read: slo("read"), write: slo("write"), authSearch: slo("authSearch"),
   };
+  const seed = finite(raw.seed, "seed");
+  if (!Number.isInteger(seed) || seed < 0 || seed > 0xffff_ffff) throw new Error("Seed must be an unsigned 32-bit integer");
   return {
-    name: string(raw.name, "name"), publishable: boolean(raw.publishable, "publishable"), dataset, seed: finite(raw.seed, "seed"),
+    name: string(raw.name, "name"), publishable: boolean(raw.publishable, "publishable"), dataset, seed,
     warmupSeconds: positive(raw.warmupSeconds, "warmupSeconds"), stageSeconds: positive(raw.stageSeconds, "stageSeconds"), concurrency,
     maxConcurrency, timeoutMs: positive(raw.timeoutMs, "timeoutMs"), thinkTimeMs: { min, max }, weights, slos,
   };
