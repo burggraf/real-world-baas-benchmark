@@ -1,13 +1,15 @@
 /// <reference path="../../../.data/pocketbase/types.d.ts" />
 
 migrate((app) => {
+  const setupEmail = "setup@pocketbase.bench.test"
+  const setupPassword = "PocketBase-setup-only-39!"
   const memberRule = '@request.auth.id != "" && @collection.memberships:requestMembership.user ?= @request.auth.id && @collection.memberships:requestMembership.organization ?= organization'
   const organizationMemberRule = '@request.auth.id != "" && @collection.memberships:requestMembership.user ?= @request.auth.id && @collection.memberships:requestMembership.organization ?= id'
   const bodyMemberRule = '@request.auth.id != "" && @collection.memberships:requestMembership.user ?= @request.auth.id && @collection.memberships:requestMembership.organization ?= @request.body.organization'
   const bodyAssigneeRule = '(@request.body.assignee = "" || (@collection.memberships:assigneeMembership.user ?= @request.body.assignee && @collection.memberships:assigneeMembership.organization ?= @request.body.organization))'
   const recordAssigneeRule = '(@request.body.assignee = "" || (@collection.memberships:assigneeMembership.user ?= @request.body.assignee && @collection.memberships:assigneeMembership.organization ?= organization))'
   const managerRule = `${memberRule} && (@collection.memberships:requestMembership.role ?= "owner" || @collection.memberships:requestMembership.role ?= "admin")`
-  const organizationManagerRule = `${organizationMemberRule} && (@collection.memberships:requestMembership.role ?= "owner" || @collection.memberships:requestMembership.role ?= "admin")`
+  const organizationManagerRule = `${organizationMemberRule} && (@collection.memberships:requestMembership.role ?= "owner" || @collection.memberships:requestMembership.role ?= "admin") && @request.body.owner:changed = false`
   const userPeerRule = '@request.auth.id != "" && (@request.auth.id = id || (@collection.memberships:subjectMembership.user ?= id && @collection.memberships:subjectMembership.organization ?= @collection.memberships:requestMembership.organization && @collection.memberships:requestMembership.user ?= @request.auth.id))'
 
   const users = app.findCollectionByNameOrId("users")
@@ -149,7 +151,7 @@ migrate((app) => {
     name: "activities",
     listRule: memberRule,
     viewRule: memberRule,
-    createRule: `${bodyMemberRule} && @request.body.actor = @request.auth.id`,
+    createRule: `${bodyMemberRule} && @request.body.actor = @request.auth.id && (@request.body.project = "" || (@request.body.project.organization = @request.body.organization))`,
     updateRule: null,
     deleteRule: null,
     fields: [
@@ -170,8 +172,23 @@ migrate((app) => {
   settings.batch.enabled = true
   settings.batch.maxRequests = 50
   settings.batch.timeout = 10
-  settings.batch.maxBodySize = 0
+  settings.batch.maxBodySize = 8 * 1024 * 1024
   app.save(settings)
+
+  const superusers = app.findCollectionByNameOrId("_superusers")
+  const existing = app.findRecordsByFilter("_superusers", `email = "${setupEmail}"`, "", 1, 0)
+  if (existing.length > 0) {
+    const setup = existing[0]
+    setup.set("password", setupPassword)
+    setup.set("passwordConfirm", setupPassword)
+    app.save(setup)
+  } else {
+    app.save(new Record(superusers, {
+      email: setupEmail,
+      password: setupPassword,
+      passwordConfirm: setupPassword,
+    }))
+  }
 }, (app) => {
   for (const name of ["activities", "comments", "tasks", "projects", "memberships", "organizations"]) {
     app.delete(app.findCollectionByNameOrId(name))

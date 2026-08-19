@@ -47,9 +47,10 @@ Defaults are `http://127.0.0.1:8090` and `.data/pocketbase`. Override them with
 adapter always supplies absolute `--dir` and `--migrationsDir` values and spawns
 without a shell.
 
-`reset()` stops only the process owned by this adapter, removes only the
-configured data directory, applies the committed migration, provisions the
-local setup superuser, and restarts. Server output is appended to
+`reset()` stops only the process owned by this adapter, refuses to remove
+unowned/in-use data, removes only the configured data directory, applies the
+committed migration (which provisions the setup superuser without putting its
+password in a process argument), and restarts. Server output is appended to
 `.data/logs/pocketbase.log`. Setup and benchmark users have separate local
 password constants; neither is included in adapter errors or result output.
 
@@ -59,7 +60,7 @@ The prebuilt v0.39.11 application supplies the `users` auth collection; the
 migration configures it for benchmark password auth and adds `displayName`.
 Organizations, memberships, projects, tasks, comments, and activities are
 created entirely by the migration. Batch requests are explicitly enabled and
-capped at 50 requests.
+capped at 50 requests with an 8 MiB maximum batch body.
 
 Tasks store `organization` in addition to `project`; comments store both
 `organization` and `project` in addition to `task`. This deliberate

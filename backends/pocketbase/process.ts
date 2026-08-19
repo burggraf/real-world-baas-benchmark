@@ -1,5 +1,5 @@
 import { closeSync, existsSync, openSync } from "node:fs";
-import { access, appendFile, mkdir, rm } from "node:fs/promises";
+import { access, appendFile, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
 import { dirname, isAbsolute, join, parse, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -10,6 +10,7 @@ export const POCKETBASE_VERSION = "0.39.11";
 export const LOCAL_SETUP_EMAIL = "setup@pocketbase.bench.test";
 export const LOCAL_SETUP_PASSWORD = "PocketBase-setup-only-39!";
 export const LOCAL_BENCHMARK_PASSWORD = "Benchmark-local-only-39!";
+const OWNER_FILE = ".bench-pocketbase-owner.json";
 const START_TIMEOUT_MS = 15_000;
 const STOP_TIMEOUT_MS = 5_000;
 
@@ -68,6 +69,19 @@ function running(child: ChildProcess | undefined): child is ChildProcess {
   return !!child && child.exitCode === null && child.signalCode === null;
 }
 
+function findPocketBaseProcessUsing(dataDir: string): number | undefined {
+  if (process.platform === "win32") return undefined;
+  const result = spawnSync("/bin/ps", ["-axo", "pid=,command="], { encoding: "utf8", shell: false });
+  if (result.error || result.status !== 0) return undefined;
+  const marker = `--dir=${resolve(dataDir)}`;
+  for (const line of result.stdout.split("\n")) {
+    if (!line.includes(marker) || !line.toLowerCase().includes("pocketbase")) continue;
+    const pid = Number.parseInt(line.trim().split(/\s+/, 1)[0] || "", 10);
+    if (Number.isInteger(pid) && pid !== process.pid) return pid;
+  }
+  return undefined;
+}
+
 async function health(endpoint: string): Promise<boolean> {
   try {
     const response = await fetch(`${endpoint}/api/health`, { signal: AbortSignal.timeout(750) });
@@ -90,10 +104,24 @@ async function portAvailable(listen: string): Promise<boolean> {
   });
 }
 
-function safeDataDirectory(options: PocketBaseProcessOptions): void {
-  const resolved = resolve(options.dataDir);
-  const forbidden = new Set([parse(resolved).root, resolve(options.repoRoot), resolve(process.env.HOME || parse(resolved).root)]);
-  if (forbidden.has(resolved)) throw new Error("Refusing to remove unsafe POCKETBASE_DATA_DIR");
+export function assertResetDataDirectorySafe(repoRoot: string, dataDir: string, owned: boolean): void {
+  const root = resolve(repoRoot);
+  const resolved = resolve(dataDir);
+  const home = resolve(process.env.HOME || parse(resolved).root);
+  const isAncestor = (parent: string, child: string): boolean => child === parent || child.startsWith(`${parent}/`);
+  if (resolved === parse(resolved).root || resolved === root || resolved === home || isAncestor(resolved, root)) {
+    throw new Error("Refusing to remove a filesystem root, repository, home, or ancestor path");
+  }
+  if (!owned) throw new Error("Refusing to remove data directory without verified ownership");
+}
+
+async function readOwner(dataDir: string): Promise<{ pid: number; binary: string } | undefined> {
+  try {
+    const value = JSON.parse(await readFile(join(dataDir, OWNER_FILE), "utf8")) as { pid?: unknown; binary?: unknown };
+    return typeof value.pid === "number" && typeof value.binary === "string" ? { pid: value.pid, binary: value.binary } : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 export class PocketBaseProcess {
@@ -141,6 +169,12 @@ export class PocketBaseProcess {
     });
     closeSync(log);
     this.child = child;
+    try {
+      await writeFile(join(this.options.dataDir, OWNER_FILE), JSON.stringify({ pid: child.pid, binary: this.options.binary }), { mode: 0o600 });
+    } catch (error) {
+      await this.stop();
+      throw error;
+    }
     let startupError: Error | undefined;
     child.once("error", (error) => { startupError = error; });
     child.once("exit", () => { if (this.child === child) this.child = undefined; });
@@ -160,12 +194,17 @@ export class PocketBaseProcess {
 
   async reset(): Promise<void> {
     await this.stop();
-    safeDataDirectory(this.options);
+    const externalPid = findPocketBaseProcessUsing(this.options.dataDir);
+    if (externalPid) throw new Error("Refusing to reset data directory used by an externally-owned PocketBase process");
+    const owner = await readOwner(this.options.dataDir);
+    const entries = await readdir(this.options.dataDir).catch(() => [] as string[]);
+    const ownerProcessAlive = owner ? (() => { try { process.kill(owner.pid, 0); return true; } catch { return false; } })() : false;
+    if (owner && resolve(owner.binary) !== resolve(this.options.binary)) throw new Error("Refusing to remove data directory owned by another binary");
+    assertResetDataDirectorySafe(this.options.repoRoot, this.options.dataDir, !entries.length || (!!owner && !ownerProcessAlive));
     await rm(this.options.dataDir, { recursive: true, force: true });
     await mkdir(this.options.dataDir, { recursive: true });
     await mkdir(dirname(this.options.logFile), { recursive: true });
     await this.runCommand(["migrate", "up"]);
-    await this.runCommand(["superuser", "upsert", LOCAL_SETUP_EMAIL, LOCAL_SETUP_PASSWORD], true);
     await this.start();
   }
 

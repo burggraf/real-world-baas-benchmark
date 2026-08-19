@@ -9,8 +9,10 @@ const live = process.env.BENCH_LIVE === "1";
 const denied = (error: unknown): boolean => error instanceof BenchmarkOperationError && error.classification === "authorization";
 
 test("PocketBase live correctness", { skip: live ? false : "set BENCH_LIVE=1 to run" }, async (t) => {
+  let started = false;
   try {
     await backend.reset();
+    started = true;
     const fixture = await seedPocketBaseCorrectnessFixture();
     const result = await runCorrectness(backend, fixture);
     assert.equal(result.aborted, false, result.abortReason);
@@ -67,6 +69,9 @@ test("PocketBase live correctness", { skip: live ? false : "set BENCH_LIVE=1 to 
         await assert.rejects(direct.collection("tasks").update(fixture.taskId!, {
           assignee: fixture.outsiderUserId,
         }), (error: unknown) => error instanceof ClientResponseError && error.status === 404);
+        await assert.rejects(direct.collection("organizations").update(fixture.organizationId, {
+          owner: fixture.outsiderUserId,
+        }), (error: unknown) => error instanceof ClientResponseError && error.status === 404);
       } finally {
         direct.authStore.clear();
         direct.cancelAllRequests();
@@ -74,18 +79,24 @@ test("PocketBase live correctness", { skip: live ? false : "set BENCH_LIVE=1 to 
     });
   } finally {
     await backend.stop();
-    await backend.stop();
+    if (started) {
+      const info = await backend.doctor();
+      assert.deepEqual(info.processIds, []);
+      await assert.rejects(fetch(`${process.env.POCKETBASE_URL || "http://127.0.0.1:8090"}/api/health`));
+    }
   }
 });
 
 test("PocketBase full small seed", {
   skip: live && process.env.BENCH_LIVE_SEED === "1" ? false : "set BENCH_LIVE=1 BENCH_LIVE_SEED=1 to run",
 }, async () => {
+  let started = false;
   try {
     await backend.reset();
+    started = true;
     await backend.seed({ name: "small", definition: { ...datasetProfiles.small } }, 42);
   } finally {
     await backend.stop();
-    await backend.stop();
+    if (started) assert.deepEqual((await backend.doctor()).processIds, []);
   }
 });

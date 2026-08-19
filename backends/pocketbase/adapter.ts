@@ -178,8 +178,9 @@ function mapPocketBaseMembership(value: unknown): Membership {
 }
 
 export function mapPocketBasePage<T, U>(result: PocketPage<T>, mapper: (item: T) => U): Page<U> {
-  if (!Number.isInteger(result.page) || result.page < 1 || !Number.isInteger(result.perPage) || result.perPage < 1 ||
-      !Number.isInteger(result.totalItems) || result.totalItems < 0 || !Array.isArray(result.items)) {
+  if (!result || !Number.isInteger(result.page) || result.page < 1 || !Number.isInteger(result.perPage) || result.perPage < 1 ||
+      !Number.isInteger(result.totalItems) || result.totalItems < 0 || !Number.isInteger(result.totalPages) || result.totalPages < 0 ||
+      result.totalPages !== (result.totalItems === 0 ? 0 : Math.ceil(result.totalItems / result.perPage)) || !Array.isArray(result.items) || result.items.length > result.perPage) {
     throw new BenchmarkOperationError("invalid_response", { code: "page_shape" });
   }
   return {
@@ -295,6 +296,21 @@ class PocketBaseSession implements AppSession {
     if (result.items.length !== 1) throw new BenchmarkOperationError("authorization", { code: "project_denied" });
   }
 
+  private async listProjects(organizationId: string): Promise<Project[]> {
+    const options = {
+      filter: this.pb.filter("organization = {:organization}", { organization: organizationId }),
+      sort: "created,id",
+      fields: PROJECT_FIELDS,
+    };
+    const first = await sdk(() => this.pb.collection("projects").getList(1, 100, options));
+    const projects = mapPocketBasePage(first, mapPocketBaseProject).items;
+    for (let page = 2; page <= first.totalPages; page++) {
+      const next = await sdk(() => this.pb.collection("projects").getList(page, 100, options));
+      projects.push(...mapPocketBasePage(next, mapPocketBaseProject).items);
+    }
+    return projects;
+  }
+
   private async requireTask(organizationId: string, projectId: string, taskId: string): Promise<void> {
     await this.requireProject(organizationId, projectId);
     const result = await sdk(() => this.pb.collection("tasks").getList(1, 1, {
@@ -314,11 +330,7 @@ class PocketBaseSession implements AppSession {
     const activity = input.activityPage || { page: 0, pageSize: 10 };
     const [organization, projects, recentActivity] = await Promise.all([
       sdk(() => this.pb.collection("organizations").getOne(input.organizationId, { fields: "id,name,owner,created" })),
-      sdk(() => this.pb.collection("projects").getList(1, 100, {
-        filter: this.pb.filter("organization = {:organization}", { organization: input.organizationId }),
-        sort: "created,id",
-        fields: PROJECT_FIELDS,
-      })),
+      this.listProjects(input.organizationId),
       sdk(() => this.pb.collection("activities").getList(activity.page + 1, activity.pageSize, {
         filter: this.pb.filter("organization = {:organization}", { organization: input.organizationId }),
         sort: "-created,-id",
@@ -327,7 +339,7 @@ class PocketBaseSession implements AppSession {
     ]);
     return {
       organization: mapPocketBaseOrganization(organization),
-      projects: projects.items.map(mapPocketBaseProject),
+      projects,
       recentActivity: recentActivity.items.map(mapPocketBaseActivity),
     };
   }
@@ -521,10 +533,10 @@ class PocketBaseSession implements AppSession {
   }
 }
 
-function batchRecord(results: Array<{ status: number; body: unknown }>, index: number): unknown {
+export function batchRecord(results: Array<{ status: number; body: unknown }>, index: number): unknown {
   const result = results[index];
   if (!result || result.status < 200 || result.status >= 300) {
-    throw new BenchmarkOperationError("application", { code: "batch_entry_failed", status: result?.status });
+    throw normalizePocketBaseError(new ClientResponseError({ status: result?.status || 0, response: {} }));
   }
   return result.body;
 }

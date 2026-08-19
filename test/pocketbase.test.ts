@@ -1,12 +1,18 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import PocketBase, { ClientResponseError } from "pocketbase";
-import { buildPocketBaseArgs, LOCAL_BENCHMARK_PASSWORD, LOCAL_SETUP_PASSWORD, resolvePocketBaseOptions } from "../backends/pocketbase/process.js";
-import { mapPocketBasePage, mapPocketBaseTask, normalizePocketBaseError, taskListFilter } from "../backends/pocketbase/adapter.js";
+import { buildPocketBaseArgs, LOCAL_BENCHMARK_PASSWORD, LOCAL_SETUP_PASSWORD, resolvePocketBaseOptions, assertResetDataDirectorySafe } from "../backends/pocketbase/process.js";
+import { batchRecord, mapPocketBasePage, mapPocketBaseTask, normalizePocketBaseError, taskListFilter } from "../backends/pocketbase/adapter.js";
 import { BenchmarkOperationError } from "../src/correctness.js";
 
 test("PocketBase setup and measured users use distinct passwords", () => {
   assert.notEqual(LOCAL_SETUP_PASSWORD, LOCAL_BENCHMARK_PASSWORD);
+});
+
+test("PocketBase reset refuses repository ancestors and unowned non-empty data", () => {
+  assert.throws(() => assertResetDataDirectorySafe("/tmp/repo", "/tmp", false), /ancestor/);
+  assert.throws(() => assertResetDataDirectorySafe("/tmp/repo", "/tmp/repo/.data/pocketbase", false), /ownership/);
+  assert.doesNotThrow(() => assertResetDataDirectorySafe("/tmp/repo", "/tmp/repo/.data/pocketbase", true));
 });
 
 test("PocketBase process options use absolute explicit paths and listener arguments", () => {
@@ -62,6 +68,17 @@ test("PocketBase filters quote untrusted search values", () => {
   });
   assert.match(filter, /organization = "org000000000001"/);
   assert.match(filter, /x\\" \|\| id != \\"/);
+});
+
+test("PocketBase page mapping rejects malformed pagination metadata", () => {
+  assert.throws(() => mapPocketBasePage({ page: 1, perPage: 10, totalItems: 2, totalPages: 0, items: [] }, (item: unknown) => item), /page_shape/);
+  assert.throws(() => mapPocketBasePage({ page: 1, perPage: 10, totalItems: 2, totalPages: 3, items: [] }, (item: unknown) => item), /page_shape/);
+});
+
+test("PocketBase batch entry errors retain auth and authorization classifications", () => {
+  assert.throws(() => batchRecord([{ status: 401, body: {} }], 0), (error: unknown) => error instanceof BenchmarkOperationError && error.classification === "authentication");
+  assert.throws(() => batchRecord([{ status: 403, body: {} }], 0), (error: unknown) => error instanceof BenchmarkOperationError && error.classification === "authorization");
+  assert.throws(() => batchRecord([{ status: 404, body: {} }], 0), (error: unknown) => error instanceof BenchmarkOperationError && error.classification === "authorization");
 });
 
 test("PocketBase errors preserve safe status and conceal denied not-found", () => {
