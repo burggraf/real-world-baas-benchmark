@@ -123,6 +123,53 @@ test("task and comment updates return semantic records", async () => {
   await session.close();
 });
 
+test("unassigned filter returns only unassigned tasks", async () => {
+  const backend = createFakeBackend();
+  const session = await backend.createSession(backend.fixture.owner);
+  await session.createTask({ organizationId: backend.fixture.organizationId, projectId: backend.fixture.projectId, title: "unassigned", description: "unassigned", priority: "low" });
+  const page = await session.listTasks({ organizationId: backend.fixture.organizationId, projectId: backend.fixture.projectId, assigneeId: null, page: 0, pageSize: 10 });
+  assert.ok(page.items.length > 0);
+  assert.equal(page.items.every((task) => task.assigneeId === null), true);
+  await session.close();
+});
+
+test("cross-project operations are denied", async () => {
+  const backend = createFakeBackend();
+  const session = await backend.createSession(backend.fixture.owner);
+  const input = { organizationId: backend.fixture.organizationId, projectId: backend.fixture.foreignProjectId };
+  await assert.rejects(session.dashboard(input), (error: unknown) => error instanceof BenchmarkOperationError && error.classification === "authorization");
+  await assert.rejects(session.listTasks({ ...input, page: 0, pageSize: 10 }), (error: unknown) => error instanceof BenchmarkOperationError && error.classification === "authorization");
+  await assert.rejects(session.getTask({ ...input, taskId: backend.fixture.taskId, comments: { page: 0, pageSize: 1 } }), (error: unknown) => error instanceof BenchmarkOperationError && error.classification === "authorization");
+  await assert.rejects(session.createTask({ ...input, title: "bad", description: "bad", priority: "low" }), (error: unknown) => error instanceof BenchmarkOperationError && error.classification === "authorization");
+  await assert.rejects(session.updateTask({ ...input, taskId: backend.fixture.taskId, title: "bad" }), (error: unknown) => error instanceof BenchmarkOperationError && error.classification === "authorization");
+  await assert.rejects(session.addComment({ ...input, taskId: backend.fixture.taskId, body: "bad" }), (error: unknown) => error instanceof BenchmarkOperationError && error.classification === "authorization");
+  await assert.rejects(session.updateComment({ ...input, taskId: backend.fixture.taskId, commentId: "comment-1", body: "bad" }), (error: unknown) => error instanceof BenchmarkOperationError && error.classification === "authorization");
+  await assert.rejects(session.searchTasks({ ...input, query: "", page: 0, pageSize: 10 }), (error: unknown) => error instanceof BenchmarkOperationError && error.classification === "authorization");
+  const comment = await session.addComment({ organizationId: backend.fixture.organizationId, projectId: backend.fixture.projectId, taskId: backend.fixture.taskId, body: "valid" });
+  const sameOrganizationProject = { organizationId: backend.fixture.organizationId, projectId: backend.fixture.otherProjectId };
+  await assert.rejects(session.getTask({ ...sameOrganizationProject, taskId: backend.fixture.taskId, comments: { page: 0, pageSize: 1 } }), (error: unknown) => error instanceof BenchmarkOperationError && error.classification === "authorization");
+  await assert.rejects(session.updateTask({ ...sameOrganizationProject, taskId: backend.fixture.taskId, title: "bad" }), (error: unknown) => error instanceof BenchmarkOperationError && error.classification === "authorization");
+  await assert.rejects(session.addComment({ ...sameOrganizationProject, taskId: backend.fixture.taskId, body: "bad" }), (error: unknown) => error instanceof BenchmarkOperationError && error.classification === "authorization");
+  await assert.rejects(session.updateComment({ ...sameOrganizationProject, taskId: backend.fixture.taskId, commentId: comment.id, body: "bad" }), (error: unknown) => error instanceof BenchmarkOperationError && error.classification === "authorization");
+  await session.close();
+});
+
+test("malformed pages become invalid response findings", async () => {
+  const backend = createFakeBackend({ malformedPage: true });
+  const result = await runCorrectness(backend, backend.fixture);
+  assert.ok(result.findings.some((finding) => finding.classification === "invalid_response"));
+});
+
+test("error details and aborts redact fixture passwords", async () => {
+  const normal = createFakeBackend({ leakError: "normal", failures: { application: 1 } });
+  const normalResult = await runCorrectness(normal, normal.fixture);
+  assert.equal(JSON.stringify(normalResult).includes("owner-pass"), false);
+  const health = createFakeBackend({ leakError: "health" });
+  const healthResult = await runCorrectness(health, health.fixture);
+  assert.equal(JSON.stringify(healthResult).includes("owner-pass"), false);
+  assert.equal(healthResult.aborted, true);
+});
+
 test("results never contain passwords", async () => {
   const backend = createFakeBackend();
   const result = await runCorrectness(backend, backend.fixture);

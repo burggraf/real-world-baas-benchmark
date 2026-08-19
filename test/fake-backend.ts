@@ -13,11 +13,15 @@ export interface FakeFixture {
   ownerMembershipId: string;
   memberMembershipId: string;
   foreignMembershipId: string;
+  foreignProjectId: string;
+  otherProjectId: string;
 }
 
 export interface FakeOptions {
   insecureTenantIsolation?: boolean;
   acceptInvalidLogin?: boolean;
+  malformedPage?: boolean;
+  leakError?: "normal" | "health";
   failures?: Partial<Record<"authentication" | "timeout" | "malformed" | "application" | "backend_health", number>>;
 }
 
@@ -40,6 +44,9 @@ export function createFakeBackend(options: FakeOptions = {}): FakeBackend {
   }));
   const organization: Organization = { id: "org-1", name: "Example", ownerId: "u-owner", createdAt: now };
   const project: Project = { id: "project-1", organizationId: organization.id, name: "Project", status: "active", createdAt: now, updatedAt: now };
+  const otherProject: Project = { id: "project-2", organizationId: organization.id, name: "Other", status: "active", createdAt: now, updatedAt: now };
+  const foreignProject: Project = { id: "project-foreign", organizationId: "org-foreign", name: "Foreign", status: "active", createdAt: now, updatedAt: now };
+  const projects = [project, otherProject, foreignProject];
   const tasks: Task[] = [{
     id: "task-1",
     projectId: project.id,
@@ -74,11 +81,19 @@ export function createFakeBackend(options: FakeOptions = {}): FakeBackend {
     ownerMembershipId: memberships[0]!.id,
     memberMembershipId: memberships[1]!.id,
     foreignMembershipId: memberships[2]!.id,
+    foreignProjectId: foreignProject.id,
+    otherProjectId: otherProject.id,
   };
 
   const fail = (kind: FailureKind): void => {
+    if (options.leakError === "health" && kind === "backend_health") {
+      throw new BenchmarkOperationError("backend_health", { code: `backend-${fixture.owner.password}` });
+    }
     if (remaining[kind]) {
       remaining[kind]!--;
+      if (options.leakError === "normal" && kind === "application") {
+        throw new BenchmarkOperationError("application", { code: `backend-${fixture.owner.password}` });
+      }
       throw new BenchmarkOperationError(kind === "malformed" ? "invalid_response" : kind, { code: kind });
     }
   };
@@ -100,6 +115,20 @@ export function createFakeBackend(options: FakeOptions = {}): FakeBackend {
       if (!membership && !options.insecureTenantIsolation) throw new BenchmarkOperationError("authorization", { code: "tenant_denied" });
       return membership;
     };
+    const checkProject = (organizationId: string, projectId: string): Project => {
+      check(false, organizationId);
+      const target = projects.find((candidate) => candidate.id === projectId);
+      if (!target || target.organizationId !== organizationId) {
+        throw new BenchmarkOperationError("authorization", { code: "project_tenant_denied" });
+      }
+      return target;
+    };
+    const checkTaskProject = (taskId: string, projectId: string): Task => {
+      const task = tasks.find((candidate) => candidate.id === taskId);
+      if (!task) throw new BenchmarkOperationError("application", { code: "not_found" });
+      if (task.projectId !== projectId) throw new BenchmarkOperationError("authorization", { code: "task_project_denied" });
+      return task;
+    };
     const page = <T>(items: T[], pagination: { page: number; pageSize: number }): Page<T> => ({
       items: items.slice(pagination.page * pagination.pageSize, (pagination.page + 1) * pagination.pageSize),
       page: pagination.page,
@@ -109,20 +138,24 @@ export function createFakeBackend(options: FakeOptions = {}): FakeBackend {
     });
 
     return {
-      dashboard: async () => {
-        check();
-        return { organization, projects: [project], recentActivity: [] };
+      dashboard: async (input) => {
+        checkProject(input.organizationId, input.projectId);
+        return { organization, projects: projects.filter((candidate) => candidate.organizationId === input.organizationId), recentActivity: [] };
       },
       listTasks: async (input) => {
-        check(false, input.organizationId);
-        return page(tasks.filter((task) => task.projectId === input.projectId &&
+        checkProject(input.organizationId, input.projectId);
+        const result = page(tasks.filter((task) => task.projectId === input.projectId &&
           (!input.status || task.status === input.status) &&
-          (!input.assigneeId || task.assigneeId === input.assigneeId)), input);
+          (input.assigneeId === undefined || task.assigneeId === input.assigneeId)), input);
+        if (options.malformedPage) {
+          // ponytail: malformed fixture data is intentionally localized to this simulation.
+          return { ...result, items: [{} as Task] };
+        }
+        return result;
       },
       getTask: async (input): Promise<TaskDetail> => {
-        check(false, input.organizationId);
-        const task = tasks.find((candidate) => candidate.id === input.taskId);
-        if (!task) throw new BenchmarkOperationError("application", { code: "not_found" });
+        checkProject(input.organizationId, input.projectId);
+        const task = checkTaskProject(input.taskId, input.projectId);
         const creator = users.find((candidate) => candidate.id === task.creatorId);
         if (!creator) throw new BenchmarkOperationError("application", { code: "missing_creator" });
         return {
@@ -133,6 +166,7 @@ export function createFakeBackend(options: FakeOptions = {}): FakeBackend {
         };
       },
       createTask: async (input) => {
+        checkProject(input.organizationId, input.projectId);
         const membership = check(true, input.organizationId);
         if (!membership) throw new BenchmarkOperationError("authorization", { code: "tenant_denied" });
         const task: Task = {
@@ -152,9 +186,8 @@ export function createFakeBackend(options: FakeOptions = {}): FakeBackend {
         return task;
       },
       updateTask: async (input) => {
-        check(true, input.organizationId);
-        const task = tasks.find((candidate) => candidate.id === input.taskId);
-        if (!task) throw new BenchmarkOperationError("application", { code: "not_found" });
+        checkProject(input.organizationId, input.projectId);
+        const task = checkTaskProject(input.taskId, input.projectId);
         if (input.status !== undefined) task.status = input.status;
         if (input.priority !== undefined) task.priority = input.priority;
         if (input.assigneeId !== undefined) task.assigneeId = input.assigneeId;
@@ -165,12 +198,16 @@ export function createFakeBackend(options: FakeOptions = {}): FakeBackend {
         return task;
       },
       addComment: async (input) => {
+        checkProject(input.organizationId, input.projectId);
+        checkTaskProject(input.taskId, input.projectId);
         check(true, input.organizationId);
         const comment: Comment = { id: `comment-${comments.length + 1}`, taskId: input.taskId, authorId: user.id, body: input.body, createdAt: now, updatedAt: now };
         comments.push(comment);
         return comment;
       },
       updateComment: async (input) => {
+        checkProject(input.organizationId, input.projectId);
+        checkTaskProject(input.taskId, input.projectId);
         check(true, input.organizationId);
         const comment = comments.find((candidate) => candidate.id === input.commentId);
         if (!comment) throw new BenchmarkOperationError("application", { code: "not_found" });
@@ -191,8 +228,8 @@ export function createFakeBackend(options: FakeOptions = {}): FakeBackend {
         return target;
       },
       searchTasks: async (input) => {
-        check(false, input.organizationId);
-        return page(tasks, input);
+        checkProject(input.organizationId, input.projectId);
+        return page(tasks.filter((task) => task.projectId === input.projectId), input);
       },
       getProfile: async () => {
         check();

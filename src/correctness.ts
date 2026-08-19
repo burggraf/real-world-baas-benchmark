@@ -1,5 +1,5 @@
 import type { Backend, AppSession } from "./backend.js";
-import type { Comment, Credentials, Id, Membership, Task, TaskDetail } from "./domain.js";
+import type { Comment, Credentials, Id, Membership, Page, Task, TaskDetail, User } from "./domain.js";
 import type { CorrectnessFinding, FindingClassification } from "./result.js";
 
 export interface CorrectnessFixture {
@@ -51,6 +51,11 @@ function errorField(error: unknown, field: "code" | "status"): string | undefine
   return typeof value === "string" || typeof value === "number" ? String(value) : undefined;
 }
 
+function safeStatus(error: unknown): string | undefined {
+  const status = errorField(error, "status");
+  return status && /^\d{3}$/.test(status) ? status : undefined;
+}
+
 export function classifyOperationError(error: unknown): FindingClassification {
   if (error instanceof BenchmarkOperationError) return error.classification;
   if (errorField(error, "status") === "401") return "authentication";
@@ -74,46 +79,110 @@ const invalid = (code: string): never => {
 };
 
 const requiredString = (value: unknown): value is string => typeof value === "string" && value.length > 0;
+const taskStatuses = new Set(["todo", "in_progress", "done", "cancelled"]);
+const taskPriorities = new Set(["low", "medium", "high", "urgent"]);
+const membershipRoles = new Set(["owner", "admin", "member"]);
 
-function assertTask(task: Task, expected: { id: Id; projectId: Id; creatorId?: Id; createdAt?: string }): void {
+function assertUser(user: unknown): asserts user is User {
+  if (!isRecord(user) || !requiredString(user.id) || !requiredString(user.email) || !requiredString(user.displayName) ||
+      !requiredString(user.createdAt) || !requiredString(user.updatedAt)) invalid("profile_fields");
+}
+
+function assertTask(task: unknown, expected?: { id?: Id; projectId?: Id; creatorId?: Id; createdAt?: string }): asserts task is Task {
   if (!isRecord(task) || !requiredString(task.id) || !requiredString(task.projectId) || !requiredString(task.creatorId) ||
-      !requiredString(task.createdAt) || !requiredString(task.updatedAt) || !requiredString(task.title) ||
-      (task.assigneeId !== null && !requiredString(task.assigneeId)) || task.id !== expected.id ||
-      task.projectId !== expected.projectId || (expected.creatorId !== undefined && task.creatorId !== expected.creatorId) ||
-      (expected.createdAt !== undefined && task.createdAt !== expected.createdAt)) {
-    invalid("task_fields");
-  }
+      !requiredString(task.title) || !requiredString(task.description) || !taskStatuses.has(String(task.status)) ||
+      !taskPriorities.has(String(task.priority)) || (task.assigneeId !== null && !requiredString(task.assigneeId)) ||
+      (task.dueDate !== null && !requiredString(task.dueDate)) || !requiredString(task.createdAt) || !requiredString(task.updatedAt) ||
+      (expected?.id !== undefined && task.id !== expected.id) || (expected?.projectId !== undefined && task.projectId !== expected.projectId) ||
+      (expected?.creatorId !== undefined && task.creatorId !== expected.creatorId) ||
+      (expected?.createdAt !== undefined && task.createdAt !== expected.createdAt)) invalid("task_fields");
 }
 
-function assertTaskDetail(detail: TaskDetail, taskId: Id, projectId: Id): void {
-  if (!isRecord(detail) || !isRecord(detail.task) || !isRecord(detail.creator) || !isRecord(detail.comments)) invalid("task_detail_fields");
-  assertTask(detail.task, { id: taskId, projectId: projectId });
-  if (!requiredString(detail.creator.id) || detail.creator.id !== detail.task.creatorId) invalid("task_creator");
-  if (detail.task.assigneeId === null) {
-    if (detail.assignee !== null) invalid("task_assignee");
-  } else if (detail.assignee?.id !== detail.task.assigneeId) {
-    invalid("task_assignee");
-  }
-  if (detail.comments.page < 0 || detail.comments.pageSize <= 0 || detail.comments.total < 0) invalid("task_comments");
-}
-
-function assertComment(comment: Comment, expected: { id?: Id; taskId: Id; authorId?: Id; body?: string; createdAt?: string }): void {
+function assertComment(comment: unknown, expected?: { id?: Id; taskId?: Id; authorId?: Id; body?: string; createdAt?: string }): asserts comment is Comment {
   if (!isRecord(comment) || !requiredString(comment.id) || !requiredString(comment.taskId) || !requiredString(comment.authorId) ||
-      !requiredString(comment.createdAt) || !requiredString(comment.updatedAt) || comment.taskId !== expected.taskId ||
-      (expected.id !== undefined && comment.id !== expected.id) ||
-      (expected.authorId !== undefined && comment.authorId !== expected.authorId) ||
-      (expected.body !== undefined && comment.body !== expected.body) ||
-      (expected.createdAt !== undefined && comment.createdAt !== expected.createdAt)) {
-    invalid("comment_fields");
-  }
+      !requiredString(comment.body) || !requiredString(comment.createdAt) || !requiredString(comment.updatedAt) ||
+      (expected?.id !== undefined && comment.id !== expected.id) || (expected?.taskId !== undefined && comment.taskId !== expected.taskId) ||
+      (expected?.authorId !== undefined && comment.authorId !== expected.authorId) || (expected?.body !== undefined && comment.body !== expected.body) ||
+      (expected?.createdAt !== undefined && comment.createdAt !== expected.createdAt)) invalid("comment_fields");
 }
 
-function assertMembership(membership: Membership, expected: { id: Id; organizationId: Id; userId: Id; role: Membership["role"] }): void {
-  if (!isRecord(membership) || !requiredString(membership.id) || !requiredString(membership.organizationId) ||
-      !requiredString(membership.userId) || !requiredString(membership.createdAt) || membership.id !== expected.id || membership.organizationId !== expected.organizationId ||
-      membership.userId !== expected.userId || membership.role !== expected.role) {
-    invalid("membership_fields");
+function assertMembership(membership: unknown, expected: { id?: Id; organizationId?: Id; userId?: Id; role?: Membership["role"] } = {}): asserts membership is Membership {
+  if (!isRecord(membership) || !requiredString(membership.id) || !requiredString(membership.organizationId) || !requiredString(membership.userId) ||
+      !membershipRoles.has(String(membership.role)) || !requiredString(membership.createdAt) ||
+      (expected.id !== undefined && membership.id !== expected.id) || (expected.organizationId !== undefined && membership.organizationId !== expected.organizationId) ||
+      (expected.userId !== undefined && membership.userId !== expected.userId) || (expected.role !== undefined && membership.role !== expected.role)) invalid("membership_fields");
+}
+
+function integerValue(value: unknown, code: string): number {
+  return typeof value === "number" && Number.isInteger(value) ? value : invalid(code);
+}
+
+function arrayValue(value: unknown, code: string): unknown[] {
+  return Array.isArray(value) ? value : invalid(code);
+}
+
+function assertPage<T>(page: unknown, validateItem: (item: unknown) => void): asserts page is Page<T> {
+  const record = isRecord(page) ? page : invalid("page_fields");
+  const items = arrayValue(record.items, "page_fields");
+  const pageNumber = integerValue(record.page, "page_fields");
+  const pageSize = integerValue(record.pageSize, "page_fields");
+  const total = integerValue(record.total, "page_fields");
+  if (pageNumber < 0 || pageSize <= 0 || total < 0 || typeof record.hasNext !== "boolean" || items.length > pageSize || items.length > total ||
+      record.hasNext !== (pageNumber + 1) * pageSize < total) invalid("page_fields");
+  for (const item of items) validateItem(item);
+}
+
+function itemId(item: unknown): Id {
+  return isRecord(item) && requiredString(item.id) ? item.id : invalid("page_item_id");
+}
+
+const maxCorrectnessPages = 100;
+
+async function collectPages<T>(fetchPage: (page: number, pageSize: number) => Promise<Page<T>>, pageSize: number, validateItem: (item: unknown) => void): Promise<T[]> {
+  const collected: T[] = [];
+  const seen = new Set<Id>();
+  let total: number | undefined;
+  for (let pageNumber = 0; pageNumber < maxCorrectnessPages; pageNumber++) {
+    const page = await fetchPage(pageNumber, pageSize);
+    assertPage<T>(page, validateItem);
+    if (total === undefined) total = page.total;
+    if (page.total !== total || page.page !== pageNumber || page.pageSize !== pageSize) invalid("page_sequence");
+    for (const item of page.items) {
+      const id = itemId(item);
+      if (seen.has(id)) invalid("page_duplicates");
+      seen.add(id);
+      collected.push(item);
+    }
+    if (!page.hasNext) {
+      if (collected.length !== page.total) invalid("page_total");
+      return collected;
+    }
   }
+  return invalid("page_limit");
+}
+
+async function collectStablePages<T>(fetchPage: (page: number, pageSize: number) => Promise<Page<T>>, pageSize: number, validateItem: (item: unknown) => void): Promise<T[]> {
+  const first = await collectPages(fetchPage, pageSize, validateItem);
+  const repeat = await collectPages(fetchPage, pageSize, validateItem);
+  if (first.length !== repeat.length || first.some((item, index) => itemId(item) !== itemId(repeat[index]))) invalid("page_order");
+  return first;
+}
+
+function assertTaskDetail(detail: unknown, taskId: Id, projectId: Id): asserts detail is TaskDetail {
+  const record = isRecord(detail) ? detail : invalid("task_detail_fields");
+  const task = isRecord(record.task) ? record.task : invalid("task_detail_fields");
+  const creator = isRecord(record.creator) ? record.creator : invalid("task_detail_fields");
+  const comments = isRecord(record.comments) ? record.comments : invalid("task_detail_fields");
+  assertTask(task, { id: taskId, projectId });
+  assertUser(creator);
+  if (creator.id !== task.creatorId) invalid("task_creator");
+  if (task.assigneeId === null) {
+    if (record.assignee !== null) invalid("task_assignee");
+  } else {
+    assertUser(record.assignee);
+    if (record.assignee.id !== task.assigneeId) invalid("task_assignee");
+  }
+  assertPage<Comment>(comments, (comment) => assertComment(comment, { taskId }));
 }
 
 function requireSession(session: AppSession | undefined, name: string): AppSession {
@@ -141,7 +210,7 @@ export async function runCorrectness(backend: Backend, fixture: CorrectnessFixtu
         passed: false,
         classification,
         message: "check failed",
-        evidence: errorField(error, "code") || errorField(error, "status"),
+        evidence: safeStatus(error) ? `status:${safeStatus(error)}` : undefined,
       });
       if (classification === "backend_health") {
         aborted = true;
@@ -155,9 +224,7 @@ export async function runCorrectness(backend: Backend, fixture: CorrectnessFixtu
       const session = await backend.createSession(fixture.owner);
       owner = session;
       const profile = await session.getProfile();
-      if (!isRecord(profile) || !requiredString(profile.id) || !requiredString(profile.email) || !requiredString(profile.createdAt) || !requiredString(profile.updatedAt)) {
-        invalid("profile_fields");
-      }
+      assertUser(profile);
     });
     await add("invalid-sign-in", async () => {
       let invalidSession: AppSession | undefined;
@@ -175,14 +242,10 @@ export async function runCorrectness(backend: Backend, fixture: CorrectnessFixtu
     await add("profile-read-update", async () => {
       const session = requireSession(owner, "owner");
       const profile = await session.getProfile();
-      if (!isRecord(profile) || !requiredString(profile.id) || !requiredString(profile.email) || !requiredString(profile.createdAt) || !requiredString(profile.updatedAt)) {
-        invalid("profile_fields");
-      }
+      assertUser(profile);
       const updated = await session.updateProfile({ displayName: "Owner checked" });
-      if (updated.id !== profile.id || updated.displayName !== "Owner checked" ||
-          !requiredString(updated.email) || !requiredString(updated.createdAt) || !requiredString(updated.updatedAt)) {
-        invalid("profile_update");
-      }
+      assertUser(updated);
+      if (updated.id !== profile.id || updated.displayName !== "Owner checked") invalid("profile_update");
     });
 
     await add("task-crud-pagination", async () => {
@@ -194,7 +257,9 @@ export async function runCorrectness(backend: Backend, fixture: CorrectnessFixtu
         description: "check",
         priority: "low",
       });
-      assertTask(created, { id: created.id, projectId: fixture.projectId, creatorId: (await session.getProfile()).id });
+      const profile = await session.getProfile();
+      assertUser(profile);
+      assertTask(created, { id: created.id, projectId: fixture.projectId, creatorId: profile.id });
 
       const taskId = fixture.taskId || "task-1";
       const seededDetail = await session.getTask({ organizationId: fixture.organizationId, projectId: fixture.projectId, taskId, comments: { page: 0, pageSize: 10 } });
@@ -206,23 +271,28 @@ export async function runCorrectness(backend: Backend, fixture: CorrectnessFixtu
       assertTask(updated, { id: created.id, projectId: created.projectId, creatorId: created.creatorId, createdAt: created.createdAt });
       if (updated.title !== "updated") invalid("update_return");
 
-      const first = await session.listTasks({ organizationId: fixture.organizationId, projectId: fixture.projectId, page: 0, pageSize: 1 });
-      const second = await session.listTasks({ organizationId: fixture.organizationId, projectId: fixture.projectId, page: 1, pageSize: 1 });
-      const combined = await session.listTasks({ organizationId: fixture.organizationId, projectId: fixture.projectId, page: 0, pageSize: 2 });
-      const repeat = await session.listTasks({ organizationId: fixture.organizationId, projectId: fixture.projectId, page: 0, pageSize: 2 });
-      const firstPageIds = [...first.items, ...second.items].map((task) => task.id);
+      const fetchTasks = (page: number, pageSize: number) => session.listTasks({ organizationId: fixture.organizationId, projectId: fixture.projectId, page, pageSize });
+      const allTasks = await collectStablePages(fetchTasks, 1, (task) => assertTask(task, { projectId: fixture.projectId }));
+      const first = await fetchTasks(0, 1);
+      const second = await fetchTasks(1, 1);
+      const combined = await fetchTasks(0, 2);
+      assertPage<Task>(first, (task) => assertTask(task, { projectId: fixture.projectId }));
+      assertPage<Task>(second, (task) => assertTask(task, { projectId: fixture.projectId }));
+      assertPage<Task>(combined, (task) => assertTask(task, { projectId: fixture.projectId }));
+      const splitIds = [...first.items, ...second.items].map((task) => task.id);
       const combinedIds = combined.items.map((task) => task.id);
-      if (first.page !== 0 || first.pageSize !== 1 || first.total < first.items.length ||
-          first.hasNext !== (first.total > 1) || second.page !== 1 || new Set(firstPageIds).size !== firstPageIds.length ||
-          firstPageIds.length !== combinedIds.length || firstPageIds.some((id, index) => id !== combinedIds[index]) ||
-          combinedIds.length !== repeat.items.length || combinedIds.some((id, index) => id !== repeat.items[index]?.id) || combined.total !== first.total) {
-        invalid("pagination_order");
-      }
+      if (splitIds.length !== combinedIds.length || splitIds.some((id, index) => id !== combinedIds[index]) ||
+          allTasks.slice(0, combined.items.length).some((task, index) => task.id !== combinedIds[index])) invalid("pagination_order");
 
       const done = await session.listTasks({ organizationId: fixture.organizationId, projectId: fixture.projectId, status: "done", page: 0, pageSize: 10 });
-      if (done.items.some((task) => task.status !== "done") || done.total !== done.items.length) invalid("pagination_status_filter");
+      assertPage<Task>(done, (task) => assertTask(task, { projectId: fixture.projectId }));
+      if (done.items.some((task) => task.status !== "done")) invalid("pagination_status_filter");
+      const unassigned = await session.listTasks({ organizationId: fixture.organizationId, projectId: fixture.projectId, assigneeId: null, page: 0, pageSize: 10 });
+      assertPage<Task>(unassigned, (task) => assertTask(task, { projectId: fixture.projectId }));
+      if (unassigned.items.some((task) => task.assigneeId !== null)) invalid("pagination_assignee_filter");
       if (seededDetail.task.assigneeId !== null) {
         const assigned = await session.listTasks({ organizationId: fixture.organizationId, projectId: fixture.projectId, assigneeId: seededDetail.task.assigneeId, page: 0, pageSize: 10 });
+        assertPage<Task>(assigned, (task) => assertTask(task, { projectId: fixture.projectId }));
         if (assigned.items.some((task) => task.assigneeId !== seededDetail.task.assigneeId)) invalid("pagination_assignee_filter");
       }
     });
@@ -231,19 +301,31 @@ export async function runCorrectness(backend: Backend, fixture: CorrectnessFixtu
       const session = requireSession(owner, "owner");
       const taskId = fixture.taskId || "task-1";
       const profile = await session.getProfile();
-      const created = await session.addComment({ organizationId: fixture.organizationId, projectId: fixture.projectId, taskId, body: "check" });
-      assertComment(created, { taskId, authorId: profile.id, body: "check" });
-      const updated = await session.updateComment({ organizationId: fixture.organizationId, projectId: fixture.projectId, taskId, commentId: created.id, body: "updated" });
-      assertComment(updated, { id: created.id, taskId, authorId: created.authorId, body: "updated", createdAt: created.createdAt });
-      const detail = await session.getTask({ organizationId: fixture.organizationId, projectId: fixture.projectId, taskId, comments: { page: 0, pageSize: 10 } });
-      assertTaskDetail(detail, taskId, fixture.projectId);
-      if (!detail.comments.items.some((comment) => comment.id === updated.id && comment.body === "updated")) invalid("comment_missing");
+      assertUser(profile);
+      const createdComments: Comment[] = [];
+      for (const body of ["check-0", "check-1", "check-2"]) {
+        const created = await session.addComment({ organizationId: fixture.organizationId, projectId: fixture.projectId, taskId, body });
+        assertComment(created, { taskId, authorId: profile.id, body });
+        createdComments.push(created);
+      }
+      const middle = createdComments[1] || invalid("comment_fields");
+      const updated = await session.updateComment({ organizationId: fixture.organizationId, projectId: fixture.projectId, taskId, commentId: middle.id, body: "updated" });
+      assertComment(updated, { id: middle.id, taskId, authorId: middle.authorId, body: "updated", createdAt: middle.createdAt });
+      const fetchComments = async (page: number, pageSize: number): Promise<Page<Comment>> => {
+        const detail = await session.getTask({ organizationId: fixture.organizationId, projectId: fixture.projectId, taskId, comments: { page, pageSize } });
+        assertTaskDetail(detail, taskId, fixture.projectId);
+        return detail.comments;
+      };
+      const allComments = await collectStablePages(fetchComments, 1, (comment) => assertComment(comment, { taskId }));
+      if (allComments.length !== createdComments.length || allComments.some((comment, index) => comment.id !== createdComments[index]?.id ||
+          comment.taskId !== taskId || comment.authorId !== profile.id || comment.body !== (index === 1 ? "updated" : `check-${index}`))) invalid("comment_order");
     });
 
     await add("member-tenant-access", async () => {
       const session = await backend.createSession(fixture.member);
       member = session;
-      await session.getProfile();
+      const profile = await session.getProfile();
+      assertUser(profile);
       await session.listTasks({ organizationId: fixture.organizationId, projectId: fixture.projectId, page: 0, pageSize: 10 });
     });
     await add("outsider-read-isolated", async () => {
@@ -291,7 +373,7 @@ export async function runCorrectness(backend: Backend, fixture: CorrectnessFixtu
     });
   } catch (error) {
     aborted = true;
-    abortReason = error instanceof Error ? error.message : String(error);
+    abortReason = "correctness run aborted";
   } finally {
     await Promise.all([owner?.close(), admin?.close(), member?.close(), outsider?.close()]);
   }
