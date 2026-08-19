@@ -1,0 +1,16 @@
+node_modules/
+dist/
+.tools/
+.data/
+
+# Backend runtime data and downloaded binaries
+backends/**/.temp/
+backends/**/pb_data/
+backends/**/data/
+backends/**/bin/
+backends/pocketbase/pocketbase
+backends/trailbase/trail
+backends/trailbase/trailbase
+
+results/*
+!results/.gitkeep
