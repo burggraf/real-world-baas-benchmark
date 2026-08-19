@@ -35,6 +35,14 @@ const rejects = (change: (v: any) => void, pattern = /invalid|expected|unknown|p
   const value = valid(); change(value); assert.throws(() => parseConfig(value), pattern);
 };
 
+test("rejects an extra top-level key", () => {
+  assert.throws(() => parseConfig({ ...valid(), backend: "pocketbase" }), /Invalid top-level/);
+});
+
+test("rejects a dataset outside the approved enum", () => {
+  assert.throws(() => parseConfig({ ...valid(), dataset: "huge" }), /Invalid dataset/);
+});
+
 test("rejects missing top-level fields and wrong field-family types", () => {
   for (const field of ["name", "publishable", "dataset", "seed", "warmupSeconds", "stageSeconds", "concurrency", "maxConcurrency", "timeoutMs", "thinkTimeMs", "weights", "slos"]) {
     rejects(v => delete v[field], /Invalid top-level/);
