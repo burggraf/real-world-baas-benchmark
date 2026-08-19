@@ -1,0 +1,14 @@
+{
+  "name": "quick",
+  "publishable": false,
+  "dataset": "small",
+  "seed": 42,
+  "warmupSeconds": 5,
+  "stageSeconds": 15,
+  "concurrency": [1, 5, 10],
+  "maxConcurrency": 10,
+  "timeoutMs": 5000,
+  "thinkTimeMs": { "min": 1000, "max": 5000 },
+  "weights": { "dashboard": 20, "taskList": 25, "taskDetail": 15, "createTask": 10, "updateTask": 12, "addComment": 10, "search": 5, "profileUpdate": 1, "signIn": 2 },
+  "slos": { "read": { "p95Ms": 500, "maxErrorRate": 0.01 }, "write": { "p95Ms": 750, "maxErrorRate": 0.01 }, "authSearch": { "p95Ms": 1000, "maxErrorRate": 0.01 } }
+}
