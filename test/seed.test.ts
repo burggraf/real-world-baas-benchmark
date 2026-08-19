@@ -1,7 +1,7 @@
 import { strict as assert } from "node:assert";
 import test from "node:test";
 import { mulberry32 } from "../src/random.js";
-import { datasetProfiles, entityId, profileMetadata, seedDataset } from "../src/seed.js";
+import { datasetProfiles, entityId, profileMetadata, seedDataset, userForOrganization } from "../src/seed.js";
 
 test("Mulberry32 has the documented deterministic sequence", () => {
   const a = mulberry32(42), b = mulberry32(42);
@@ -13,6 +13,19 @@ test("all profile metadata includes memberships without enumerating data", () =>
   assert.deepEqual(profileMetadata.small, { ...datasetProfiles.small, memberships: 1_000 });
   assert.deepEqual(profileMetadata.medium, { ...datasetProfiles.medium, memberships: 10_000 });
   assert.deepEqual(profileMetadata.large, { ...datasetProfiles.large, memberships: 100_000 });
+});
+
+test("userForOrganization validates boundaries and wraps slots", () => {
+  for (const [profile, counts] of Object.entries(datasetProfiles) as Array<[keyof typeof datasetProfiles, (typeof datasetProfiles)[keyof typeof datasetProfiles]]>) {
+    const perOrg = counts.users / counts.organizations;
+    assert.equal(userForOrganization(profile, 0, 0), 0);
+    assert.equal(userForOrganization(profile, counts.organizations - 1, perOrg - 1), counts.users - 1);
+    assert.equal(userForOrganization(profile, 3 % counts.organizations, perOrg), 3 % counts.organizations);
+    assert.throws(() => userForOrganization(profile, -1, 0));
+    assert.throws(() => userForOrganization(profile, counts.organizations, 0));
+    assert.throws(() => userForOrganization(profile, 0, -1));
+    assert.throws(() => userForOrganization(profile, 0, 1.5));
+  }
 });
 
 test("small profile streams bounded batches in dependency order", async () => {
@@ -62,6 +75,20 @@ test("tenant-scoped assignments and authors match memberships", async () => {
     if (batch.entity === "activity") for (const row of batch.records as Array<{ organizationId: string; actorId: string }>) assert.equal(membershipOrg.get(row.actorId), row.organizationId);
   }
   assert.equal(membershipOrg.size, 1_000); assert.equal(projectOrg.size, 500); assert.equal(taskOrg.size, 10_000);
+});
+
+test("assignment outputs are deterministic across runs and batch sizes", async () => {
+  const collect = async (batchSize: number, seed: number) => {
+    const selected: string[] = [], seen = new Map<string, number>();
+    for await (const batch of seedDataset("small", seed, batchSize)) if (["task", "comment", "activity"].includes(batch.entity)) for (const row of batch.records as unknown as Array<Record<string, unknown>>) {
+      const values = [row.id, row.assigneeId, row.authorId, row.actorId].filter((value): value is string => typeof value === "string");
+      const ordinal = seen.get(batch.entity) ?? 0; seen.set(batch.entity, ordinal + 1);
+      if (ordinal < 2) selected.push(`${batch.entity}:${values.join(",")}`);
+    }
+    return selected;
+  };
+  assert.deepEqual(await collect(257, 42), await collect(1000, 42));
+  assert.deepEqual(await collect(257, 42), await collect(257, 42));
 });
 
 test("user timestamps never regress while streaming", async () => {
