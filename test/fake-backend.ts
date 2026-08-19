@@ -22,6 +22,7 @@ export interface FakeFixture {
 
 export interface FakeOptions {
   insecureTenantIsolation?: boolean;
+  emptyListDenial?: boolean;
   acceptInvalidLogin?: boolean;
   malformedPage?: boolean;
   malformedEnum?: "task-status" | "task-priority" | "membership-role";
@@ -155,6 +156,7 @@ export function createFakeBackend(options: FakeOptions = {}): FakeBackend {
         return { organization, projects: projects.filter((candidate) => candidate.organizationId === input.organizationId), recentActivity: [] };
       },
       listTasks: async (input) => {
+        if (options.emptyListDenial && user.id === "u-outsider" && !options.insecureTenantIsolation) return page([], input);
         checkProject(input.organizationId, input.projectId);
         const result = page(tasks.filter((task) => task.projectId === input.projectId &&
           (!input.status || task.status === input.status) &&

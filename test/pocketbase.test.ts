@@ -1,0 +1,70 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import PocketBase, { ClientResponseError } from "pocketbase";
+import { buildPocketBaseArgs, resolvePocketBaseOptions } from "../backends/pocketbase/process.js";
+import { mapPocketBasePage, mapPocketBaseTask, normalizePocketBaseError, taskListFilter } from "../backends/pocketbase/adapter.js";
+import { BenchmarkOperationError } from "../src/correctness.js";
+
+test("PocketBase process options use absolute explicit paths and listener arguments", () => {
+  const root = "/tmp/benchmark repository";
+  const options = resolvePocketBaseOptions({
+    POCKETBASE_BIN: ".tools/pocketbase",
+    POCKETBASE_URL: "http://127.0.0.1:8190",
+    POCKETBASE_DATA_DIR: ".data/pb-test",
+  }, root);
+
+  assert.equal(options.binary, "/tmp/benchmark repository/.tools/pocketbase");
+  assert.equal(options.dataDir, "/tmp/benchmark repository/.data/pb-test");
+  assert.equal(options.migrationsDir, "/tmp/benchmark repository/backends/pocketbase/pb_migrations");
+  assert.deepEqual(buildPocketBaseArgs(options, ["serve", "--http=127.0.0.1:8190"]), [
+    "--dir=/tmp/benchmark repository/.data/pb-test",
+    "--migrationsDir=/tmp/benchmark repository/backends/pocketbase/pb_migrations",
+    "serve",
+    "--http=127.0.0.1:8190",
+  ]);
+});
+
+test("PocketBase process options reject non-local or path-bearing endpoints", () => {
+  assert.throws(() => resolvePocketBaseOptions({ POCKETBASE_URL: "https://example.test:8090" }, "/tmp/repo"), /local HTTP/);
+  assert.throws(() => resolvePocketBaseOptions({ POCKETBASE_URL: "http://127.0.0.1:8090/base" }, "/tmp/repo"), /path/);
+});
+
+test("PocketBase record and page mapping preserves nulls and zero-based pages", () => {
+  const task = mapPocketBaseTask({
+    id: "tsk000000000001",
+    project: "prj000000000001",
+    creator: "usr000000000001",
+    assignee: "",
+    title: "Task",
+    description: "Description",
+    status: "todo",
+    priority: "low",
+    dueDate: "",
+    created: "2026-01-01 00:00:00.000Z",
+    updated: "2026-01-01 00:01:00.000Z",
+  });
+  assert.equal(task.assigneeId, null);
+  assert.equal(task.dueDate, null);
+  const page = mapPocketBasePage({ page: 2, perPage: 1, totalItems: 3, totalPages: 3, items: [task] }, (item) => item);
+  assert.deepEqual(page, { items: [task], page: 1, pageSize: 1, total: 3, hasNext: true });
+});
+
+test("PocketBase filters quote untrusted search values", () => {
+  const pb = new PocketBase("http://127.0.0.1:8090");
+  const filter = taskListFilter(pb, {
+    organizationId: "org000000000001",
+    projectId: "prj000000000001",
+    query: 'x" || id != "',
+  });
+  assert.match(filter, /organization = "org000000000001"/);
+  assert.match(filter, /x\\" \|\| id != \\"/);
+});
+
+test("PocketBase errors preserve safe status and conceal denied not-found", () => {
+  const error = normalizePocketBaseError(new ClientResponseError({ status: 404, response: { message: "secret response" } }));
+  assert.ok(error instanceof BenchmarkOperationError);
+  assert.equal(error.classification, "authorization");
+  assert.equal(error.status, 404);
+  assert.equal(error.code, "not_found_or_denied");
+  assert.equal(error.message.includes("secret"), false);
+});

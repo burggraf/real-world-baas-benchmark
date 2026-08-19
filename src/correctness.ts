@@ -60,7 +60,7 @@ function safeStatus(error: unknown): string | undefined {
 export function classifyOperationError(error: unknown): FindingClassification {
   if (error instanceof BenchmarkOperationError) return error.classification;
   if (errorField(error, "status") === "401") return "authentication";
-  if (errorField(error, "status") === "403") return "authorization";
+  if (errorField(error, "status") === "403" || errorField(error, "status") === "404") return "authorization";
   if (errorField(error, "status") === "408" || errorField(error, "code") === "timeout") return "timeout";
   return "transport/sdk";
 }
@@ -72,6 +72,16 @@ export async function expectRejected<T>(fn: () => Promise<T>, expectedClassifica
     throw new BenchmarkOperationError("invalid_response", { code: "unexpected_success" });
   } catch (error) {
     if (classifyOperationError(error) !== expectedClassification) throw error;
+  }
+}
+
+async function expectListDenied<T>(fn: () => Promise<Page<T>>): Promise<void> {
+  try {
+    const page = await fn();
+    assertPage<T>(page, () => undefined);
+    if (page.items.length !== 0) invalid("unexpected_visible_records");
+  } catch (error) {
+    if (classifyOperationError(error) !== "authorization") throw error;
   }
 }
 
@@ -364,7 +374,7 @@ export async function runCorrectness(backend: Backend, fixture: CorrectnessFixtu
     await add("outsider-read-isolated", async () => {
       const session = await backend.createSession(fixture.outsider);
       outsider = session;
-      await expectRejected(() => session.listTasks({ organizationId: fixture.organizationId, projectId: fixture.projectId, page: 0, pageSize: 10 }), "authorization");
+      await expectListDenied(() => session.listTasks({ organizationId: fixture.organizationId, projectId: fixture.projectId, page: 0, pageSize: 10 }));
     });
     await add("outsider-comment-read-isolated", async () => {
       const session = requireSession(outsider, "outsider");

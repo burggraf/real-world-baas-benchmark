@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createFakeBackend } from "./fake-backend.js";
-import { BenchmarkOperationError, runCorrectness } from "../src/correctness.js";
+import { BenchmarkOperationError, classifyOperationError, expectRejected, runCorrectness } from "../src/correctness.js";
 
 test("admin fixture uses a distinct user and membership", async () => {
   const backend = createFakeBackend();
@@ -30,6 +30,21 @@ test("secure fake passes and insecure tenant isolation is found", async () => {
   assert.equal(good.findings.some((x) => !x.passed), false);
   assert.equal(new Set(good.findings.map((x) => x.name)).size, good.findings.length);
   assert.equal(secure.closedSessions, 4);
+});
+
+test("PocketBase-style empty list is accepted as outsider denial but insecure data is not", async () => {
+  const secure = createFakeBackend({ emptyListDenial: true });
+  const good = await runCorrectness(secure, secure.fixture);
+  assert.equal(good.findings.find((finding) => finding.name === "outsider-read-isolated")?.passed, true);
+
+  const insecure = createFakeBackend({ emptyListDenial: true, insecureTenantIsolation: true });
+  const bad = await runCorrectness(insecure, insecure.fixture);
+  assert.equal(bad.findings.find((finding) => finding.name === "outsider-read-isolated")?.passed, false);
+});
+
+test("concealed 404 is accepted as authorization denial and keeps its status", async () => {
+  assert.equal(classifyOperationError({ status: 404 }), "authorization");
+  await expectRejected(async () => { throw { status: 404 }; }, "authorization");
 });
 
 test("accepted invalid sign-in closes the returned session", async () => {

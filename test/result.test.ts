@@ -26,8 +26,9 @@ test("stage metrics expose units in field names and values", () => {
   assert.equal(stage.sdkOperationsPerSecond, 3);
 });
 
-test("loads named stubs and they fail clearly", async () => {
-  for (const name of ["pocketbase", "supabase", "trailbase"] as const) {
+test("loads the PocketBase adapter and remaining named stubs fail clearly", async () => {
+  assert.equal((await loadBackend("pocketbase")).name, "pocketbase");
+  for (const name of ["supabase", "trailbase"] as const) {
     const backend = await loadBackend(name); assert.equal(backend.name, name);
     await assert.rejects(backend.doctor(), /NotImplemented/);
     await assert.rejects(backend.start(), /NotImplemented/);
