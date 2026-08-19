@@ -12,12 +12,14 @@ export function parseArgs(argv: string[]): ParsedArgs {
   }
 
   const parsed: ParsedArgs = { command };
+  const optionNames = new Set<string>();
   for (let index = 0; index < options.length; index += 2) {
     const option = options[index];
     if (!option?.startsWith("--") || option.length === 2) {
       throw new Error(`Expected an option, received ${option ?? "nothing"}`);
     }
-    if (Object.hasOwn(parsed, option.slice(2))) {
+    const optionName = option.slice(2);
+    if (optionNames.has(optionName)) {
       throw new Error(`Duplicate option: ${option}`);
     }
 
@@ -25,7 +27,13 @@ export function parseArgs(argv: string[]): ParsedArgs {
     if (value === undefined || value.startsWith("--")) {
       throw new Error(`Missing value for ${option}`);
     }
-    parsed[option.slice(2)] = value;
+    optionNames.add(optionName);
+    Object.defineProperty(parsed, optionName, {
+      value,
+      enumerable: true,
+      writable: true,
+      configurable: true,
+    });
   }
 
   return parsed;

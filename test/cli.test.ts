@@ -21,6 +21,13 @@ test("rejects duplicate options", () => {
   );
 });
 
+test("rejects duplicate __proto__ options", () => {
+  assert.throws(
+    () => parseArgs(["reset", "--__proto__", "1", "--__proto__", "2"]),
+    /duplicate option.*--__proto__/i,
+  );
+});
+
 test("help lists every command and exits successfully", () => {
   const result = spawnSync(process.execPath, ["dist/src/cli.js", "--help"], {
     encoding: "utf8",
