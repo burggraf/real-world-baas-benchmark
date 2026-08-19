@@ -4,6 +4,8 @@ migrate((app) => {
   const memberRule = '@request.auth.id != "" && @collection.memberships:requestMembership.user ?= @request.auth.id && @collection.memberships:requestMembership.organization ?= organization'
   const organizationMemberRule = '@request.auth.id != "" && @collection.memberships:requestMembership.user ?= @request.auth.id && @collection.memberships:requestMembership.organization ?= id'
   const bodyMemberRule = '@request.auth.id != "" && @collection.memberships:requestMembership.user ?= @request.auth.id && @collection.memberships:requestMembership.organization ?= @request.body.organization'
+  const bodyAssigneeRule = '(@request.body.assignee = "" || (@collection.memberships:assigneeMembership.user ?= @request.body.assignee && @collection.memberships:assigneeMembership.organization ?= @request.body.organization))'
+  const recordAssigneeRule = '(@request.body.assignee = "" || (@collection.memberships:assigneeMembership.user ?= @request.body.assignee && @collection.memberships:assigneeMembership.organization ?= organization))'
   const managerRule = `${memberRule} && (@collection.memberships:requestMembership.role ?= "owner" || @collection.memberships:requestMembership.role ?= "admin")`
   const organizationManagerRule = `${organizationMemberRule} && (@collection.memberships:requestMembership.role ?= "owner" || @collection.memberships:requestMembership.role ?= "admin")`
   const userPeerRule = '@request.auth.id != "" && (@request.auth.id = id || (@collection.memberships:subjectMembership.user ?= id && @collection.memberships:subjectMembership.organization ?= @collection.memberships:requestMembership.organization && @collection.memberships:requestMembership.user ?= @request.auth.id))'
@@ -97,8 +99,8 @@ migrate((app) => {
     name: "tasks",
     listRule: memberRule,
     viewRule: memberRule,
-    createRule: `${bodyMemberRule} && @request.body.creator = @request.auth.id && @request.body.project.organization = @request.body.organization`,
-    updateRule: `${memberRule} && @request.body.organization:changed = false && @request.body.project:changed = false && @request.body.creator:changed = false`,
+    createRule: `${bodyMemberRule} && ${bodyAssigneeRule} && @request.body.creator = @request.auth.id && @request.body.project.organization = @request.body.organization`,
+    updateRule: `${memberRule} && ${recordAssigneeRule} && @request.body.organization:changed = false && @request.body.project:changed = false && @request.body.creator:changed = false`,
     deleteRule: memberRule,
     fields: [
       { name: "organization", type: "relation", required: true, collectionId: organizations.id, maxSelect: 1, cascadeDelete: true },

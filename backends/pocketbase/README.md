@@ -50,8 +50,8 @@ without a shell.
 `reset()` stops only the process owned by this adapter, removes only the
 configured data directory, applies the committed migration, provisions the
 local setup superuser, and restarts. Server output is appended to
-`.data/logs/pocketbase.log`. Setup and benchmark user passwords are local
-constants and are never included in adapter errors or result output.
+`.data/logs/pocketbase.log`. Setup and benchmark users have separate local
+password constants; neither is included in adapter errors or result output.
 
 ## Schema and authorization notes
 
@@ -64,8 +64,10 @@ capped at 50 requests.
 Tasks store `organization` in addition to `project`; comments store both
 `organization` and `project` in addition to `task`. This deliberate
 denormalization keeps tenant rules and their indexes direct and measurable.
-Write rules freeze those tenant keys. Members can CRUD tasks and comments;
-only organization owners/admins can change membership roles. Activity creation
+Write rules freeze those tenant keys and require every non-empty task assignee
+to have a membership in the task organization. Members can CRUD tasks and
+comments; only organization owners/admins can change roles for memberships in
+the organization supplied to the adapter. Activity creation
 is included transactionally in each measured task/comment workflow.
 
 PocketBase applies non-empty list rules as filters, so an unauthorized list is

@@ -1,9 +1,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import PocketBase, { ClientResponseError } from "pocketbase";
-import { buildPocketBaseArgs, resolvePocketBaseOptions } from "../backends/pocketbase/process.js";
+import { buildPocketBaseArgs, LOCAL_BENCHMARK_PASSWORD, LOCAL_SETUP_PASSWORD, resolvePocketBaseOptions } from "../backends/pocketbase/process.js";
 import { mapPocketBasePage, mapPocketBaseTask, normalizePocketBaseError, taskListFilter } from "../backends/pocketbase/adapter.js";
 import { BenchmarkOperationError } from "../src/correctness.js";
+
+test("PocketBase setup and measured users use distinct passwords", () => {
+  assert.notEqual(LOCAL_SETUP_PASSWORD, LOCAL_BENCHMARK_PASSWORD);
+});
 
 test("PocketBase process options use absolute explicit paths and listener arguments", () => {
   const root = "/tmp/benchmark repository";

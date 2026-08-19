@@ -33,6 +33,7 @@ import { datasetProfiles, entityId, seedDataset, type EntityName, type ProfileNa
 import {
   LOCAL_BENCHMARK_PASSWORD,
   LOCAL_SETUP_EMAIL,
+  LOCAL_SETUP_PASSWORD,
   pocketBaseProcess,
 } from "./process.js";
 
@@ -55,7 +56,15 @@ const FIXTURE_IDS = {
   memberMembership: "fxmme0000000001",
   project: "fxprj0000000001",
   task: "fxtsk0000000001",
+  secondOrganization: "fxorg0000000002",
+  secondAdminMembership: "fxmad0000000002",
+  outsiderMembership: "fxmou0000000002",
 } as const;
+
+export interface PocketBaseCorrectnessFixture extends CorrectnessFixture {
+  foreignMembershipId: string;
+  outsiderUserId: string;
+}
 
 function record(value: unknown): PocketRecord {
   if (typeof value !== "object" || value === null) throw new BenchmarkOperationError("invalid_response", { code: "record_shape" });
@@ -250,6 +259,32 @@ class PocketBaseSession implements AppSession {
     if (result.items.length !== 1) throw new BenchmarkOperationError("authorization", { code: "tenant_denied" });
   }
 
+  private async requireMembershipTarget(organizationId: string, membershipId: string): Promise<void> {
+    await this.requireMembership(organizationId);
+    const result = await sdk(() => this.pb.collection("memberships").getList(1, 1, {
+      filter: this.pb.filter("id = {:membership} && organization = {:organization}", {
+        membership: membershipId,
+        organization: organizationId,
+      }),
+      fields: "id",
+      skipTotal: true,
+    }));
+    if (result.items.length !== 1) throw new BenchmarkOperationError("authorization", { code: "membership_tenant_denied" });
+  }
+
+  private async requireAssignee(organizationId: string, assigneeId: string | null | undefined): Promise<void> {
+    if (!assigneeId) return;
+    const result = await sdk(() => this.pb.collection("memberships").getList(1, 1, {
+      filter: this.pb.filter("organization = {:organization} && user = {:user}", {
+        organization: organizationId,
+        user: assigneeId,
+      }),
+      fields: "id",
+      skipTotal: true,
+    }));
+    if (result.items.length !== 1) throw new BenchmarkOperationError("authorization", { code: "assignee_tenant_denied" });
+  }
+
   private async requireProject(organizationId: string, projectId: string): Promise<void> {
     await this.requireMembership(organizationId);
     const result = await sdk(() => this.pb.collection("projects").getList(1, 1, {
@@ -334,6 +369,7 @@ class PocketBaseSession implements AppSession {
 
   async createTask(input: CreateTaskInput): Promise<Task> {
     await this.requireProject(input.organizationId, input.projectId);
+    await this.requireAssignee(input.organizationId, input.assigneeId);
     const user = this.authRecord();
     const id = newRecordId();
     const batch = this.pb.createBatch();
@@ -364,6 +400,7 @@ class PocketBaseSession implements AppSession {
 
   async updateTask(input: UpdateTaskInput): Promise<Task> {
     await this.requireTask(input.organizationId, input.projectId, input.taskId);
+    await this.requireAssignee(input.organizationId, input.assigneeId);
     const user = this.authRecord();
     const updates: PocketRecord = {};
     for (const field of ["status", "priority", "title", "description"] as const) {
@@ -442,7 +479,7 @@ class PocketBaseSession implements AppSession {
   }
 
   async updateMembershipRole(input: UpdateMembershipRoleInput): Promise<Membership> {
-    await this.requireMembership(input.organizationId);
+    await this.requireMembershipTarget(input.organizationId, input.membershipId);
     const updated = await sdk(() => this.pb.collection("memberships").update(input.membershipId, { role: input.role }, { fields: MEMBER_FIELDS }));
     return mapPocketBaseMembership(updated);
   }
@@ -494,7 +531,7 @@ function batchRecord(results: Array<{ status: number; body: unknown }>, index: n
 
 async function setupClient(): Promise<PocketBase> {
   const pb = new PocketBase(pocketBaseProcess.options.endpoint, new BaseAuthStore());
-  await sdk(() => pb.collection("_superusers").authWithPassword(LOCAL_SETUP_EMAIL, LOCAL_BENCHMARK_PASSWORD));
+  await sdk(() => pb.collection("_superusers").authWithPassword(LOCAL_SETUP_EMAIL, LOCAL_SETUP_PASSWORD));
   return pb;
 }
 
@@ -611,7 +648,7 @@ async function seed(profile: DatasetProfile, seedValue: number): Promise<void> {
   }
 }
 
-export async function seedPocketBaseCorrectnessFixture(): Promise<CorrectnessFixture> {
+export async function seedPocketBaseCorrectnessFixture(): Promise<PocketBaseCorrectnessFixture> {
   for (const id of Object.values(FIXTURE_IDS)) {
     if (!/^[a-z0-9]{15}$/.test(id)) throw new Error("Invalid PocketBase fixture ID");
   }
@@ -630,11 +667,16 @@ export async function seedPocketBaseCorrectnessFixture(): Promise<CorrectnessFix
       password: LOCAL_BENCHMARK_PASSWORD,
       passwordConfirm: LOCAL_BENCHMARK_PASSWORD,
     })));
-    await upsertRecords(pb, "organizations", [{ id: FIXTURE_IDS.organization, name: "PocketBase correctness", owner: FIXTURE_IDS.owner }]);
+    await upsertRecords(pb, "organizations", [
+      { id: FIXTURE_IDS.organization, name: "PocketBase correctness", owner: FIXTURE_IDS.owner },
+      { id: FIXTURE_IDS.secondOrganization, name: "PocketBase foreign tenant", owner: FIXTURE_IDS.admin },
+    ]);
     await upsertRecords(pb, "memberships", [
       { id: FIXTURE_IDS.ownerMembership, organization: FIXTURE_IDS.organization, user: FIXTURE_IDS.owner, role: "owner" },
       { id: FIXTURE_IDS.adminMembership, organization: FIXTURE_IDS.organization, user: FIXTURE_IDS.admin, role: "admin" },
       { id: FIXTURE_IDS.memberMembership, organization: FIXTURE_IDS.organization, user: FIXTURE_IDS.member, role: "member" },
+      { id: FIXTURE_IDS.secondAdminMembership, organization: FIXTURE_IDS.secondOrganization, user: FIXTURE_IDS.admin, role: "owner" },
+      { id: FIXTURE_IDS.outsiderMembership, organization: FIXTURE_IDS.secondOrganization, user: FIXTURE_IDS.outsider, role: "member" },
     ]);
     await upsertRecords(pb, "projects", [{ id: FIXTURE_IDS.project, organization: FIXTURE_IDS.organization, name: "Correctness project", status: "active" }]);
     await upsertRecords(pb, "tasks", [{
@@ -661,6 +703,8 @@ export async function seedPocketBaseCorrectnessFixture(): Promise<CorrectnessFix
       adminMembershipId: FIXTURE_IDS.adminMembership,
       memberMembershipId: FIXTURE_IDS.memberMembership,
       memberUserId: FIXTURE_IDS.member,
+      foreignMembershipId: FIXTURE_IDS.outsiderMembership,
+      outsiderUserId: FIXTURE_IDS.outsider,
     };
   } finally {
     pb.authStore.clear();

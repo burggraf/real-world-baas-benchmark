@@ -8,6 +8,7 @@ import type { BackendInfo } from "../../src/backend.js";
 
 export const POCKETBASE_VERSION = "0.39.11";
 export const LOCAL_SETUP_EMAIL = "setup@pocketbase.bench.test";
+export const LOCAL_SETUP_PASSWORD = "PocketBase-setup-only-39!";
 export const LOCAL_BENCHMARK_PASSWORD = "Benchmark-local-only-39!";
 const START_TIMEOUT_MS = 15_000;
 const STOP_TIMEOUT_MS = 5_000;
@@ -164,7 +165,7 @@ export class PocketBaseProcess {
     await mkdir(this.options.dataDir, { recursive: true });
     await mkdir(dirname(this.options.logFile), { recursive: true });
     await this.runCommand(["migrate", "up"]);
-    await this.runCommand(["superuser", "upsert", LOCAL_SETUP_EMAIL, LOCAL_BENCHMARK_PASSWORD], true);
+    await this.runCommand(["superuser", "upsert", LOCAL_SETUP_EMAIL, LOCAL_SETUP_PASSWORD], true);
     await this.start();
   }
 
