@@ -1,7 +1,7 @@
 import { strict as assert } from "node:assert";
 import test from "node:test";
 import { mulberry32 } from "../src/random.js";
-import { datasetProfiles, entityId, profileMetadata, seedDataset, userForOrganization } from "../src/seed.js";
+import { datasetProfiles, entityId, membershipRole, profileMetadata, seedDataset, userForOrganization } from "../src/seed.js";
 
 test("Mulberry32 has the documented deterministic sequence", () => {
   const a = mulberry32(42), b = mulberry32(42);
@@ -52,6 +52,36 @@ test("userForOrganization validates boundaries and wraps slots", () => {
     assert.throws(() => userForOrganization(profile, 0, -1));
     assert.throws(() => userForOrganization(profile, 0, 1.5));
   }
+});
+
+test("membershipRole maps organization slots and validates public inputs", () => {
+  for (const profile of ["small", "medium", "large"] as const) {
+    const { organizations, users } = datasetProfiles[profile];
+    for (const organization of [0, organizations - 1]) {
+      assert.equal(membershipRole(profile, organization), "owner");
+      assert.equal(membershipRole(profile, organizations + organization), "admin");
+      assert.equal(membershipRole(profile, 2 * organizations + organization), "member");
+      assert.equal(membershipRole(profile, users - organizations + organization), "member");
+    }
+    assert.throws(() => membershipRole(profile, -1), RangeError);
+    assert.throws(() => membershipRole(profile, users), RangeError);
+    assert.throws(() => membershipRole("nope" as never, 0), RangeError);
+  }
+});
+
+test("small profile has one owner, one admin, and eight members per organization", async () => {
+  const counts = new Map<string, Record<string, number>>(), organizations = new Map<string, string>();
+  for await (const batch of seedDataset("small", 42, 37)) {
+    if (batch.entity === "organization") for (const row of batch.records as Array<{ id: string; ownerId: string }>) organizations.set(row.id, row.ownerId);
+    if (batch.entity === "membership") for (const row of batch.records as Array<{ organizationId: string; userId: string; role: string }>) {
+      const roles = counts.get(row.organizationId) ?? { owner: 0, admin: 0, member: 0 };
+      roles[row.role] = (roles[row.role] ?? 0) + 1;
+      counts.set(row.organizationId, roles);
+      if (row.role === "owner") assert.equal(row.userId, organizations.get(row.organizationId));
+    }
+  }
+  assert.equal(counts.size, 100);
+  for (const roles of counts.values()) assert.deepEqual(roles, { owner: 1, admin: 1, member: 8 });
 });
 
 test("small profile streams bounded batches in dependency order", async () => {

@@ -34,6 +34,14 @@ export function userForOrganization(profile: ProfileName, organizationOrdinal: n
 function checkProfile(profile: string): asserts profile is ProfileName {
   if (!Object.hasOwn(datasetProfiles, profile)) throw new RangeError(`Invalid profile: ${profile}`);
 }
+/** Return the role for a user's zero-based slot within its organization. */
+export function membershipRole(profile: ProfileName, ordinal: number): Role {
+  checkProfile(profile);
+  const { organizations, users } = datasetProfiles[profile];
+  if (!Number.isInteger(ordinal) || ordinal < 0 || ordinal >= users) throw new RangeError("Invalid membership ordinal");
+  const slot = Math.floor(ordinal / organizations);
+  return slot === 0 ? "owner" : slot === 1 ? "admin" : "member";
+}
 /** Stable PocketBase-compatible lowercase ASCII ID shared by public validation and generation. */
 export function entityId(entity: EntityName, profile: ProfileName, ordinal: number): Id {
   checkProfile(profile);
@@ -71,7 +79,7 @@ export async function* seedDataset(profile: ProfileName, seed: number, batchSize
     return { id: localId("user", i), email: `user${i}-${Math.floor(random() * 1_000_000).toString(36)}@example.test`, displayName: text("User", i, random()), createdAt: timestamp(created), updatedAt: timestamp(created + 1 + Math.floor(random() * 1000)) };
   })) yield b;
   for await (const b of emit("organization", c.organizations, i => ({ id: localId("organization", i), name: text("Organization", i, random()), ownerId: localId("user", i % c.users), createdAt: timestamp(i) }))) yield b;
-  for await (const b of emit("membership", c.users, i => ({ id: localId("membership", i), organizationId: localId("organization", i < c.organizations ? i : i % c.organizations), userId: localId("user", i), role: (i < c.organizations ? "owner" : i % 10 === 0 ? "admin" : "member") as Role, createdAt: timestamp(i) }))) yield b;
+  for await (const b of emit("membership", c.users, i => ({ id: localId("membership", i), organizationId: localId("organization", i % c.organizations), userId: localId("user", i), role: membershipRole(profile, i), createdAt: timestamp(i) }))) yield b;
   for await (const b of emit("project", c.projects, i => ({ id: localId("project", i), organizationId: localId("organization", i % c.organizations), name: text("Project", i, random()), status: pick(PROJECT_STATUSES, random()), createdAt: timestamp(i), updatedAt: timestamp(i + 1) }))) yield b;
   for await (const b of emit("task", c.tasks, i => ({ id: localId("task", i), projectId: localId("project", i % c.projects), creatorId: localId("user", i % c.users), assigneeId: i % 5 === 0 ? null : localId("user", localUser((i % c.projects) % c.organizations, i * 7)), title: text("Task", i, random()), description: text("Description", i, random()), status: pick(TASK_STATUSES, random()), priority: pick(TASK_PRIORITIES, random()), dueDate: i % 3 === 0 ? timestamp(i + 100) : null, createdAt: timestamp(i), updatedAt: timestamp(i + 1) }))) yield b;
   for await (const b of emit("comment", c.comments, i => ({ id: localId("comment", i), taskId: localId("task", i % c.tasks), authorId: localId("user", localUser(((i % c.tasks) % c.projects) % c.organizations, i * 11)), body: text("Comment", i, random()), createdAt: timestamp(i), updatedAt: timestamp(i + 1) }))) yield b;
