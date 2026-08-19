@@ -22,11 +22,23 @@ test("entityId has stable boundaries for every profile and entity", () => {
     for (const entity of entities) {
       const key = ({ organization: "organizations", user: "users", membership: "memberships", project: "projects", task: "tasks", comment: "comments", activity: "activities" } as const)[entity];
       const last = totals[key];
-      assert.match(entityId(entity, profile, 0), /^[a-z]+-00000000$/);
-      assert.match(entityId(entity, profile, last - 1), /^[a-z]+-[0-9a-z]{8}$/);
+      assert.match(entityId(entity, profile, 0), /^[a-z]{3}[sml][0-9a-z]{11}$/);
+      assert.match(entityId(entity, profile, last - 1), /^[a-z]{3}[sml][0-9a-z]{11}$/);
       assert.throws(() => entityId(entity, profile, last));
     }
   }
+});
+
+test("IDs are exact PocketBase length and unique across entity/profile boundaries", () => {
+  const samples = new Set<string>();
+  for (const profile of ["small", "medium", "large"] as const) for (const entity of ["organization", "user", "membership", "project", "task", "comment", "activity"] as const) {
+    const id = entityId(entity, profile, 0);
+    assert.equal(id.length, 15);
+    assert.match(id, /^[a-z0-9]{15}$/);
+    assert.equal(samples.has(id), false);
+    samples.add(id);
+  }
+  assert.equal(samples.size, 21);
 });
 
 test("userForOrganization validates boundaries and wraps slots", () => {
@@ -54,21 +66,21 @@ test("small profile streams bounded batches in dependency order", async () => {
     const record = batch.records[0] as unknown as Record<string, unknown>;
     for (const key of ["organizationId", "userId", "projectId", "taskId", "creatorId", "authorId", "actorId", "subjectId"]) {
       const value = record[key];
-      if (typeof value === "string") assert.match(value, /^[a-z]+-[0-9a-z]{8}$/);
+      if (typeof value === "string") assert.match(value, /^[a-z]{3}[sml][0-9a-z]{11}$/);
     }
   }
   assert.deepEqual(order, ["user", "organization", "membership", "project", "task", "comment", "activity"]);
   assert.deepEqual([...counts.values()], [1000, 100, 1000, 500, 10000, 30000, 20000]);
   assert.equal(total, 62_600); assert.equal(finalSize, 20);
-  assert.deepEqual(finalActivity, { id: "act-00000ffj", organizationId: "org-0000002r", projectId: "prj-000000dv", actorId: "usr-000000m7", action: "created", subjectType: "project", subjectId: "prj-000000dv", createdAt: "2020-01-14T21:19:00.000Z" });
+  assert.deepEqual(finalActivity, { id: "acts00000000ffj", organizationId: "orgs0000000002r", projectId: "prjs000000000dv", actorId: "usrs000000000m7", action: "created", subjectType: "project", subjectId: "prjs000000000dv", createdAt: "2020-01-14T21:19:00.000Z" });
 });
 
 test("representative records, IDs, foreign keys, and owners are stable", async () => {
   const first: Record<string, any> = {};
   for await (const batch of seedDataset("small", 42, 1000)) if (!(batch.entity in first)) first[batch.entity] = batch.records[0];
-  assert.deepEqual(first.user, { id: "usr-00000000", email: "user0-9lwi@example.test", displayName: "User 0 i9rl", createdAt: "2020-01-01T10:01:00.000Z", updatedAt: "2020-01-01T21:11:00.000Z" });
-  assert.deepEqual(first.membership, { id: "mem-00000000", organizationId: "org-00000000", userId: "usr-00000000", role: "owner", createdAt: "2020-01-01T00:00:00.000Z" });
-  assert.equal(entityId("organization", "small", 99), "org-0000002r");
+  assert.deepEqual(first.user, { id: "usrs00000000000", email: "user0-9lwi@example.test", displayName: "User 0 i9rl", createdAt: "2020-01-01T10:01:00.000Z", updatedAt: "2020-01-01T21:11:00.000Z" });
+  assert.deepEqual(first.membership, { id: "mems00000000000", organizationId: "orgs00000000000", userId: "usrs00000000000", role: "owner", createdAt: "2020-01-01T00:00:00.000Z" });
+  assert.equal(entityId("organization", "small", 99), "orgs0000000002r");
   assert.equal(first.organization.ownerId, first.user.id);
   assert.equal(first.project.organizationId, first.organization.id);
   assert.equal(first.task.projectId, first.project.id);

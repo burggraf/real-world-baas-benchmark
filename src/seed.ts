@@ -18,9 +18,11 @@ type RecordType = Organization | User | Membership | Project | Task | Comment | 
 export interface SeedBatch { entity: EntityName; records: RecordType[]; }
 
 const prefixes: Record<EntityName, string> = { organization: "org", user: "usr", membership: "mem", project: "prj", task: "tsk", comment: "cmt", activity: "act" };
+const profileCodes: Record<ProfileName, string> = { small: "s", medium: "m", large: "l" };
 const entities = Object.keys(prefixes) as EntityName[];
 const userOrdinal = (organizationOrdinal: number, slot: number, organizations: number, usersPerOrganization: number) => organizationOrdinal + (slot % usersPerOrganization) * organizations;
-const formatId = (prefix: string, ordinal: number) => `${prefix}-${ordinal.toString(36).padStart(8, "0")}`;
+/** PocketBase-compatible deterministic ID: entity prefix, profile code, and an 11-digit base36 ordinal. */
+const formatId = (entity: EntityName, profile: ProfileName, ordinal: number): Id => `${prefixes[entity]}${profileCodes[profile]}${ordinal.toString(36).padStart(11, "0")}`;
 /** Select a stable user ordinal in an organization; users are evenly distributed. */
 export function userForOrganization(profile: ProfileName, organizationOrdinal: number, slot: number): number {
   checkProfile(profile);
@@ -32,13 +34,13 @@ export function userForOrganization(profile: ProfileName, organizationOrdinal: n
 function checkProfile(profile: string): asserts profile is ProfileName {
   if (!Object.hasOwn(datasetProfiles, profile)) throw new RangeError(`Invalid profile: ${profile}`);
 }
-/** Stable ASCII IDs: a short entity prefix and an eight-digit base36 ordinal. */
+/** Stable PocketBase-compatible lowercase ASCII ID shared by public validation and generation. */
 export function entityId(entity: EntityName, profile: ProfileName, ordinal: number): Id {
   checkProfile(profile);
   if (!entities.includes(entity)) throw new RangeError(`Invalid entity: ${entity}`);
   const c = datasetProfiles[profile], limit = c[({ organization: "organizations", user: "users", membership: "users", project: "projects", task: "tasks", comment: "comments", activity: "activities" } as const)[entity]];
   if (!Number.isInteger(ordinal) || ordinal < 0 || ordinal >= limit) throw new RangeError("Invalid ordinal");
-  return formatId(prefixes[entity], ordinal);
+  return formatId(entity, profile, ordinal);
 }
 const timestamp = (n: number) => new Date(Date.UTC(2020, 0, 1) + n * 60_000).toISOString();
 const text = (kind: string, ordinal: number, random: number) => {
@@ -56,7 +58,7 @@ export async function* seedDataset(profile: ProfileName, seed: number, batchSize
   if (!Number.isInteger(batchSize) || batchSize <= 0) throw new RangeError("batchSize must be a positive integer");
   const c = datasetProfiles[profile], usersPerOrganization = c.users / c.organizations, random = mulberry32(seed);
   const localUser = (organization: number, slot: number) => userOrdinal(organization, slot, c.organizations, usersPerOrganization);
-  const localId = (entity: EntityName, ordinal: number) => formatId(prefixes[entity], ordinal);
+  const localId = (entity: EntityName, ordinal: number) => formatId(entity, profile, ordinal);
   const emit = async function* <T extends RecordType>(entity: EntityName, total: number, make: (i: number) => T) {
     for (let start = 0; start < total; start += batchSize) {
       const records: T[] = [];
