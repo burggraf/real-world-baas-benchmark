@@ -32,13 +32,13 @@ export interface WorkflowContext {
 export const MAX_PAGE_SIZE = 100;
 export const configuredWorkflowNames = ["dashboard", "taskList", "taskDetail", "createTask", "updateTask", "addComment", "search", "profileUpdate", "signIn"] as const;
 
-/** Cumulative selection intentionally uses integer percentages, with 1.0 included in the final bucket. */
+/** Cumulative selection uses configured percentage weights, with 1.0 included in the final bucket. */
 export function selectWorkflow(weights: BenchmarkConfig["weights"], random: () => number): WorkflowName {
   const names = configuredWorkflowNames;
   let total = 0;
   for (const name of names) {
     const weight = weights[name];
-    if (!Number.isInteger(weight) || weight < 0) throw new Error(`Invalid workflow weight: ${name}`);
+    if (!Number.isFinite(weight) || weight < 0) throw new Error(`Invalid workflow weight: ${name}`);
     total += weight;
   }
   if (total !== 100) throw new Error("Workflow weights must total 100");
@@ -61,9 +61,10 @@ const nonempty = (value: unknown, label: string): string => {
 };
 const id = (value: unknown, label: string): string => nonempty(value, label);
 const page = <T extends object>(value: Page<T>, label: string): Page<T> => {
-  if (!value || !Number.isInteger(value.page) || value.page < 0 || !Number.isInteger(value.pageSize) || value.pageSize < 1 || value.pageSize > MAX_PAGE_SIZE || !Array.isArray(value.items) || value.items.length > value.pageSize || !Number.isInteger(value.total) || value.total < 0 || typeof value.hasNext !== "boolean") throw new Error(`Invalid ${label} page`);
+  if (!value || !Number.isSafeInteger(value.page) || value.page < 0 || !Number.isSafeInteger(value.pageSize) || value.pageSize < 1 || value.pageSize > MAX_PAGE_SIZE || !Array.isArray(value.items) || value.items.length > value.pageSize || !Number.isSafeInteger(value.total) || value.total < 0 || typeof value.hasNext !== "boolean") throw new Error(`Invalid ${label} page`);
   if (value.items.some(item => !item || typeof item !== "object")) throw new Error(`Invalid ${label} items`);
-  if (value.items.length > value.total || value.hasNext !== (value.pageSize * (value.page + 1) < value.total)) throw new Error(`Inconsistent ${label} page metadata`);
+  const expectedHasNext = value.total > 0 && value.page < Math.floor((value.total - 1) / value.pageSize);
+  if (value.items.length > value.total || value.hasNext !== expectedHasNext) throw new Error(`Inconsistent ${label} page metadata`);
   return value;
 };
 const requiredUser = (value: User | null | undefined, label: string): User => {

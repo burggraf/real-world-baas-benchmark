@@ -58,10 +58,11 @@ export async function runWorkload(backend: Backend, config: BenchmarkConfig, opt
   const onSample = options.onSample;
   const controller = new AbortController();
   const stopFromParent = () => controller.abort();
-  options.signal?.addEventListener("abort", stopFromParent, { once: true });
+  if (options.signal?.aborted) controller.abort();
+  else options.signal?.addEventListener("abort", stopFromParent, { once: true });
   const summary: WorkloadSummary = { requestedUsers: options.users.length, startedUsers: 0, completedWorkflowCount: 0, failedWorkflowCount: 0, graceExpired: false, stageFailed: false, closeErrors: 0 };
-  const active: Array<{ session: AppSession; spec: VirtualUserSpec }> = [];
-  const closed = new Set<AppSession>();
+  const active = new Set<AppSession>();
+  const closed = new WeakSet<AppSession>();
   let cleanupStarted = false;
   const call = async <T>(workflow: JourneyName, operation: string, operationClass: WorkloadSample["operationClass"], kind: WorkloadSample["kind"], action: () => Promise<T>): Promise<T> => {
     const started = now();
@@ -77,13 +78,14 @@ export async function runWorkload(backend: Backend, config: BenchmarkConfig, opt
 
   const closeSession = async (session: AppSession, throwError = false): Promise<void> => {
     if (closed.has(session)) return;
-    try { await call("signOutIn", "close", "authSearch", "read", () => session.close()); }
-    catch (error) {
+    try {
+      await call("signOutIn", "close", "authSearch", "read", () => session.close());
+      closed.add(session);
+    } catch (error) {
       summary.closeErrors++;
       summary.stageFailed = true;
       if (throwError) throw error;
     }
-    finally { closed.add(session); }
   };
   const create = async (spec: VirtualUserSpec, workflow: JourneyName = "signOutIn"): Promise<AppSession> => {
     const started = now();
@@ -114,9 +116,10 @@ export async function runWorkload(backend: Backend, config: BenchmarkConfig, opt
           const old = session;
           try { await closeSession(old, true); }
           finally { session = undefined; }
+          if (closed.has(old)) active.delete(old);
         }
         session = await create(spec);
-        active.push({ session, spec });
+        active.add(session);
       },
       organizationId: spec.organizationId,
       projectId: spec.projectId,
@@ -130,7 +133,7 @@ export async function runWorkload(backend: Backend, config: BenchmarkConfig, opt
     };
     if (controller.signal.aborted) return;
     session = await create(spec);
-    active.push({ session, spec });
+    active.add(session);
     summary.startedUsers++;
     const deadline = now() + durationMs;
     while (!controller.signal.aborted && now() < deadline) {
@@ -172,8 +175,14 @@ export async function runWorkload(backend: Backend, config: BenchmarkConfig, opt
   if (!settled) { summary.graceExpired = true; summary.stageFailed = true; }
   // Close every session observed, including replacements. Duplicates are avoided by identity.
   cleanupStarted = true;
-  const sessions = [...new Set(active.map(item => item.session))];
-  for (const session of sessions) await closeSession(session);
+  for (const session of [...active]) {
+    await closeSession(session);
+    if (closed.has(session)) active.delete(session);
+    if (!closed.has(session)) {
+      await closeSession(session);
+      if (closed.has(session)) active.delete(session);
+    }
+  }
   options.signal?.removeEventListener("abort", stopFromParent);
   return summary;
 }

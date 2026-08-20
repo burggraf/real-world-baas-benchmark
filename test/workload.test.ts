@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { loadConfig } from "../src/config.js";
+import { loadConfig, parseConfig } from "../src/config.js";
 import { selectWorkflow } from "../src/workflows.js";
 import { createFakeBackend } from "./fake-backend.js";
 import { runWorkload } from "../src/workload.js";
@@ -25,6 +25,24 @@ test("workflow selection is deterministic and follows configured weights", () =>
 });
 
 const user = (backend: ReturnType<typeof createFakeBackend>) => ({ credentials: backend.fixture.owner, organizationId: backend.fixture.organizationId, projectId: backend.fixture.projectId, taskId: backend.fixture.taskId });
+
+test("already-aborted workloads do not authenticate users", async () => {
+  const backend = createFakeBackend();
+  const controller = new AbortController();
+  controller.abort();
+  const summary = await runWorkload(backend, config, { users: [user(backend)], signal: controller.signal, durationMs: 100, graceMs: 0, now: () => 0, sleep: async () => {} });
+  assert.equal(summary.startedUsers, 0);
+  assert.equal(backend.sessions, 0);
+});
+
+test("fractional validated weights are selectable", () => {
+  const raw = JSON.parse(JSON.stringify(config)) as any;
+  raw.weights.dashboard = 12.5;
+  raw.weights.taskList = 32.5;
+  const fractional = parseConfig(raw);
+  assert.equal(selectWorkflow(fractional.weights, () => 0.1), "dashboard");
+  assert.equal(selectWorkflow(fractional.weights, () => 0.2), "taskList");
+});
 
 test("workload can run a finite stage and cleans up sessions", async () => {
   const backend = createFakeBackend();
@@ -132,6 +150,22 @@ test("authentication resolving after grace expiry is still closed", async () => 
   assert.equal(backend.closedSessions, 1);
 });
 
+test("unsafe page metadata fails the journey", async () => {
+  const backend = createFakeBackend();
+  const baseCreate = backend.createSession;
+  backend.createSession = async credentials => {
+    const session = await baseCreate(credentials);
+    const original = session.listTasks;
+    session.listTasks = async input => ({ ...(await original(input)), page: Number.MAX_SAFE_INTEGER + 1 });
+    return session;
+  };
+  const weights = { ...config.weights, dashboard: 0, taskList: 100, taskDetail: 0, createTask: 0, updateTask: 0, addComment: 0, search: 0, profileUpdate: 0, signIn: 0 };
+  let clock = 0;
+  const summary = await runWorkload(backend, { ...config, weights }, { users: [user(backend)], durationMs: 100, graceMs: 0, now: () => ++clock, sleep: async milliseconds => { if (milliseconds === 100) await new Promise<void>(() => {}); } });
+  assert.ok(summary.failedWorkflowCount > 0);
+  assert.equal(summary.stageFailed, true);
+});
+
 test("malformed task enums fail the journey instead of completing it", async () => {
   const backend = createFakeBackend({ malformedEnum: "task-status" });
   const weights = { ...config.weights, dashboard: 0, taskList: 100, taskDetail: 0, createTask: 0, updateTask: 0, addComment: 0, search: 0, profileUpdate: 0, signIn: 0 };
@@ -183,6 +217,16 @@ test("malformed pages, missing fields, nested users, and inconsistent hasNext fa
   }
 });
 
+test("reauthenticated sessions are closed once without retaining old sessions", async () => {
+  const backend = createFakeBackend();
+  const weights = { ...config.weights, dashboard: 0, taskList: 0, taskDetail: 0, createTask: 0, updateTask: 0, addComment: 0, search: 0, profileUpdate: 0, signIn: 100 };
+  let clock = 0;
+  const summary = await runWorkload(backend, { ...config, weights }, { users: [user(backend)], durationMs: 100, graceMs: 0, now: () => ++clock, sleep: async milliseconds => { if (milliseconds === 100) await new Promise<void>(() => {}); } });
+  assert.ok(backend.sessions > 2);
+  assert.equal(backend.closedSessions, backend.sessions);
+  assert.equal(summary.stageFailed, false);
+});
+
 test("null task assignee remains valid while creator is required", async () => {
   const backend = createFakeBackend();
   const baseCreate = backend.createSession;
@@ -215,6 +259,22 @@ test("null task creator emits invalid-response SDK and workflow failures", async
   assert.equal(summary.stageFailed, true);
   assert.ok(samples.some(sample => sample.type === "sdk" && sample.name === "getTask" && !sample.success && sample.error?.name === "Error"));
   assert.ok(samples.some(sample => sample.type === "workflow" && sample.workflow === "taskDetail" && !sample.success && sample.error?.message.includes("creator")));
+});
+
+test("close failures are retried during final cleanup", async () => {
+  const backend = createFakeBackend();
+  const baseCreate = backend.createSession;
+  let closeCalls = 0;
+  backend.createSession = async credentials => {
+    const session = await baseCreate(credentials);
+    const original = session.close;
+    session.close = async () => { closeCalls++; if (closeCalls === 1) throw new Error("transient close"); await original(); };
+    return session;
+  };
+  const weights = { ...config.weights, dashboard: 0, taskList: 0, taskDetail: 0, createTask: 0, updateTask: 0, addComment: 0, search: 0, profileUpdate: 0, signIn: 100 };
+  let clock = 0;
+  await runWorkload(backend, { ...config, weights }, { users: [user(backend)], durationMs: 0, graceMs: 0, now: () => ++clock, sleep: async () => {} });
+  assert.ok(closeCalls >= 2);
 });
 
 test("samples expose exact operation dimensions and failures", async () => {
