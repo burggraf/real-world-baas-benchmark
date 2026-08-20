@@ -32,13 +32,13 @@ interface Bucket { sample: WorkloadSample; attempted: number; completed: number;
 export interface MetricsOptions { maxLatencySamples?: number; maxErrorExamples?: number; }
 export class StageMetricsAccumulator {
   private readonly maxLatency: number; private readonly maxExamples: number; private finalized = false; private invalidReason?: string;
-  private readonly buckets = new Map<string, Bucket>(); private readonly examples = new Map<string, ErrorExample>();
+  private readonly buckets = new Map<string, Bucket>(); private readonly examples = new Map<string, ErrorExample>(); private retainedLatencies = 0;
   constructor(options: MetricsOptions = {}) { this.maxLatency = safePositive(options.maxLatencySamples ?? 100_000, "maxLatencySamples"); this.maxExamples = safePositive(options.maxErrorExamples ?? 100, "maxErrorExamples"); }
   record(sample: WorkloadSample): void {
     if (this.finalized) throw new Error("Cannot record after finalize");
     if (!sample || (sample.type !== "workflow" && sample.type !== "sdk") || typeof sample.name !== "string" || !sample.name || !workflows.has(sample.workflow) || !classes.includes(sample.operationClass) || !kinds.includes(sample.kind) || typeof sample.success !== "boolean" || !Number.isFinite(sample.elapsedMs) || sample.elapsedMs < 0 || (sample.success && sample.error) || (!sample.success && (!sample.error || typeof sample.error !== "object" || typeof sample.error.name !== "string" || !sample.error.name || typeof sample.error.message !== "string" || (sample.error.code !== undefined && typeof sample.error.code !== "string") || (sample.error.classification !== undefined && typeof sample.error.classification !== "string")))) throw new Error("Invalid workload sample");
     const k=key(sample); let b=this.buckets.get(k); if (!b) { b={sample:{...sample},attempted:0,completed:0,failed:0,latencies:[],errors:new Map()}; this.buckets.set(k,b); }
-    b.attempted++; if (sample.success) { b.completed++; if (b.latencies.length < this.maxLatency) b.latencies.push(sample.elapsedMs); else if (!this.invalidReason) this.invalidReason=`Latency sample ceiling exceeded for ${sample.name}`; }
+    b.attempted++; if (sample.success) { b.completed++; if (this.retainedLatencies < this.maxLatency) { b.latencies.push(sample.elapsedMs); this.retainedLatencies++; } else if (!this.invalidReason) this.invalidReason=`Latency sample ceiling exceeded for ${sample.name}`; }
     else { b.failed++; const c=classify(sample.error!); b.errors.set(c,(b.errors.get(c)??0)+1); const ek=`${k}|${c}|${redact(sample.error!.message)}`; if (!this.examples.has(ek) && this.examples.size < this.maxExamples) this.examples.set(ek,{type:sample.type,name:sample.name,workflow:sample.workflow,operationClass:sample.operationClass,kind:sample.kind,classification:c,nameOfError:sample.error!.name.slice(0,100),message:redact(sample.error!.message),occurrences:1}); else if (this.examples.has(ek)) this.examples.get(ek)!.occurrences++; }
   }
   finalize(elapsedSeconds: number): StageMetrics {
