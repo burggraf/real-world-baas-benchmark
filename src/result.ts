@@ -4,11 +4,15 @@ import type { DatasetProfile } from "./domain.js";
 
 export interface Environment { runtime: string; runtimeVersion: string; os: string; architecture: string; host?: string; cpu?: string; memoryBytes?: number; }
 export type FindingClassification = "authentication" | "authorization" | "timeout" | "transport/sdk" | "invalid_response" | "application" | "backend_health";
+export type ErrorClassification = "authentication" | "authorization" | "timeout" | "transport/sdk" | "invalid_response" | "backend_health" | "runner_overload" | "application_failure";
+export interface ErrorExample { type: "workflow" | "sdk"; name: string; workflow: string; operationClass: string; kind: "read" | "write"; classification: ErrorClassification; nameOfError: string; message: string; occurrences: number; }
 export interface Correctness { findings: CorrectnessFinding[]; aborted?: boolean; abortReason?: string; }
 export interface CorrectnessFinding { name: string; passed: boolean; classification: FindingClassification; message?: string; evidence?: string; }
 export interface OperationMetric {
   operationCount: number; errorCount: number;
   latencyP50Ms: number; latencyP95Ms: number; latencyP99Ms: number; latencyMinMs: number; latencyMaxMs: number;
+  type: "workflow" | "sdk"; name: string; workflow: string; operationClass: string; kind: "read" | "write";
+  attemptedCount: number; completedCount: number; failedCount: number; errorRate: number; successRate?: number; throughputPerSecond: number; errorCounts: Record<string, number>;
 }
 export interface StageMetrics {
   requestedUsers: number; achievedUsers: number; elapsedSeconds: number;
@@ -16,6 +20,7 @@ export interface StageMetrics {
   sdkOperationsPerSecond: number; readOperationsPerSecond: number; writeOperationsPerSecond: number;
   workflowCompletionCountByName?: Record<string, number>;
   operations: Record<string, OperationMetric>;
+  errorExamples: ErrorExample[]; valid: boolean; validityReasons: string[];
 }
 export interface ResourceMetrics { name: string; unit: string; samples: number[]; }
 export interface Capacity { users: number; saturation: boolean; reasons: string[]; }

@@ -12,7 +12,7 @@ export interface WorkloadSample {
   operationClass: OperationClass;
   elapsedMs: number;
   success: boolean;
-  error?: { name: string; message: string };
+  error?: { name: string; message: string; code?: string; classification?: string };
 }
 export interface WorkflowContext {
   session: AppSession;

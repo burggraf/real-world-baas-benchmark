@@ -1,0 +1,52 @@
+import type { OperationClass } from "./config.js";
+import type { StageMetrics, OperationMetric, ErrorClassification, ErrorExample } from "./result.js";
+import type { WorkloadSample, SampleKind, JourneyName } from "./workflows.js";
+
+const kinds: SampleKind[] = ["read", "write"];
+const classes: OperationClass[] = ["read", "write", "authSearch"];
+const workflows = new Set<string>(["dashboard","taskList","taskDetail","createTask","updateTask","addComment","search","profileUpdate","signIn","signOutIn"]);
+const safePositive = (n: number, label: string) => { if (!Number.isSafeInteger(n) || n < 1) throw new Error(`${label} must be a positive safe integer`); return n; };
+const key = (s: WorkloadSample) => JSON.stringify([s.type,s.name,s.workflow,s.operationClass,s.kind]);
+const redact = (message: string): string => message.replace(/\b(Bearer|Basic)\s+[A-Za-z0-9+/._=-]+/gi,"$1 [REDACTED]").replace(/\b(password|passwd|secret|token|api[_-]?key|access[_-]?key)\s*[:=]\s*[^\s,;]+/gi,"$1=[REDACTED]").replace(/\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b/g,"[REDACTED]").slice(0,500);
+const classify = (e: NonNullable<WorkloadSample["error"]>): ErrorClassification => {
+  const explicit = (e.classification ?? e.code ?? e.name).toLowerCase();
+  if (/authenticat/.test(explicit)) return "authentication";
+  if (/authoriz|forbidden|permission/.test(explicit)) return "authorization";
+  if (/timeout|timed.?out|deadline/.test(explicit)) return "timeout";
+  if (/transport|network|socket|sdk/.test(explicit)) return "transport/sdk";
+  if (/invalid.?response|parse|schema/.test(explicit)) return "invalid_response";
+  if (/backend|health|process|server.?error|5\d\d/.test(explicit)) return "backend_health";
+  if (/overload|capacity|too.?many|429/.test(explicit)) return "runner_overload";
+  const text = `${e.name} ${e.message}`.toLowerCase();
+  if (/timed.?out|timeout|deadline/.test(text)) return "timeout";
+  if (/\b(401|unauthenticated)\b|authentication failed|invalid credentials/.test(text)) return "authentication";
+  if (/\b(403|forbidden|not authorized)\b/.test(text)) return "authorization";
+  if (/econn|network|socket|fetch failed/.test(text)) return "transport/sdk";
+  if (/invalid response|unexpected response|parse error/.test(text)) return "invalid_response";
+  if (/overload|too many requests|\b429\b/.test(text)) return "runner_overload";
+  if (/backend|service unavailable|\b5\d\d\b/.test(text)) return "backend_health";
+  return "application_failure";
+};
+// ponytail: exact in-memory samples are simplest; replace with HDR histograms when a real run reaches the configured sample ceiling.
+interface Bucket { sample: WorkloadSample; attempted: number; completed: number; failed: number; latencies: number[]; errors: Map<ErrorClassification, number>; }
+export interface MetricsOptions { maxLatencySamples?: number; maxErrorExamples?: number; }
+export class StageMetricsAccumulator {
+  private readonly maxLatency: number; private readonly maxExamples: number; private finalized = false; private invalidReason?: string;
+  private readonly buckets = new Map<string, Bucket>(); private readonly examples = new Map<string, ErrorExample>();
+  constructor(options: MetricsOptions = {}) { this.maxLatency = safePositive(options.maxLatencySamples ?? 100_000, "maxLatencySamples"); this.maxExamples = safePositive(options.maxErrorExamples ?? 100, "maxErrorExamples"); }
+  record(sample: WorkloadSample): void {
+    if (this.finalized) throw new Error("Cannot record after finalize");
+    if (!sample || (sample.type !== "workflow" && sample.type !== "sdk") || typeof sample.name !== "string" || !sample.name || !workflows.has(sample.workflow) || !classes.includes(sample.operationClass) || !kinds.includes(sample.kind) || typeof sample.success !== "boolean" || !Number.isFinite(sample.elapsedMs) || sample.elapsedMs < 0 || (sample.success && sample.error) || (!sample.success && !sample.error)) throw new Error("Invalid workload sample");
+    const k=key(sample); let b=this.buckets.get(k); if (!b) { b={sample:{...sample},attempted:0,completed:0,failed:0,latencies:[],errors:new Map()}; this.buckets.set(k,b); }
+    b.attempted++; if (sample.success) { b.completed++; if (b.latencies.length < this.maxLatency) b.latencies.push(sample.elapsedMs); else if (!this.invalidReason) this.invalidReason=`Latency sample ceiling exceeded for ${sample.name}`; }
+    else { b.failed++; const c=classify(sample.error!); b.errors.set(c,(b.errors.get(c)??0)+1); const ek=`${k}|${c}|${redact(sample.error!.message)}`; if (!this.examples.has(ek) && this.examples.size < this.maxExamples) this.examples.set(ek,{type:sample.type,name:sample.name,workflow:sample.workflow,operationClass:sample.operationClass,kind:sample.kind,classification:c,nameOfError:sample.error!.name.slice(0,100),message:redact(sample.error!.message),occurrences:1}); else if (this.examples.has(ek)) this.examples.get(ek)!.occurrences++; }
+  }
+  finalize(elapsedSeconds: number): StageMetrics {
+    if (this.finalized) throw new Error("Stage already finalized"); if (!Number.isFinite(elapsedSeconds) || elapsedSeconds <= 0) throw new Error("elapsedSeconds must be finite and positive"); this.finalized=true;
+    const operations: Record<string, OperationMetric>={}; let workflowDone=0,sdkDone=0,reads=0,writes=0; const workflowByName:Record<string,number>={}, workflowCounts:Record<string,number>={};
+    for(const [k,b] of this.buckets){ const l=[...b.latencies].sort((a,c)=>a-c); const pct=(p:number)=>l.length?l[Math.min(l.length-1,Math.ceil(p*l.length)-1)]!:0; const metric:OperationMetric={type:b.sample.type,name:b.sample.name,workflow:b.sample.workflow,operationClass:b.sample.operationClass,kind:b.sample.kind,attemptedCount:b.attempted,completedCount:b.completed,failedCount:b.failed,errorRate:b.failed/b.attempted,successRate:b.completed/b.attempted,throughputPerSecond:b.completed/elapsedSeconds,operationCount:b.attempted,errorCount:b.failed,latencyP50Ms:pct(.5),latencyP95Ms:pct(.95),latencyP99Ms:pct(.99),latencyMinMs:l[0]??0,latencyMaxMs:l[l.length-1]??0,errorCounts:Object.fromEntries(b.errors)}; operations[k]=metric; if(b.sample.type==="workflow"){workflowDone+=b.completed;workflowCounts[b.sample.name]=(workflowCounts[b.sample.name]??0)+b.completed;} else {sdkDone+=b.completed;if(b.sample.kind==="read")reads+=b.completed;else writes+=b.completed;} }
+    for(const [n,c] of Object.entries(workflowCounts)) workflowByName[n]=c/elapsedSeconds;
+    return {requestedUsers:0,achievedUsers:0,elapsedSeconds,workflowTransactionsPerSecond:workflowDone/elapsedSeconds,workflowTransactionsPerSecondByName:workflowByName,sdkOperationsPerSecond:sdkDone/elapsedSeconds,readOperationsPerSecond:reads/elapsedSeconds,writeOperationsPerSecond:writes/elapsedSeconds,workflowCompletionCountByName:workflowCounts,operations,errorExamples:[...this.examples].map(([,e])=>({...e})),valid:!this.invalidReason,validityReasons:this.invalidReason?[this.invalidReason]:[]};
+  }
+}
+export const createStageMetricsAccumulator = (options?: MetricsOptions) => new StageMetricsAccumulator(options);
