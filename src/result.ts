@@ -4,7 +4,7 @@ import type { DatasetProfile } from "./domain.js";
 
 export interface Environment { runtime: string; runtimeVersion: string; os: string; architecture: string; host?: string; cpu?: string; memoryBytes?: number; }
 export type FindingClassification = "authentication" | "authorization" | "timeout" | "transport/sdk" | "invalid_response" | "application" | "backend_health";
-export type ErrorClassification = "authentication" | "authorization" | "timeout" | "transport/sdk" | "invalid_response" | "backend_health" | "runner_overload" | "application_failure";
+export type ErrorClassification = "expected_rejection" | "authentication" | "authorization" | "timeout" | "transport/sdk" | "invalid_response" | "backend_health" | "runner_overload" | "application_failure";
 export interface ErrorExample { type: "workflow" | "sdk"; name: string; workflow: string; operationClass: string; kind: "read" | "write"; classification: ErrorClassification; nameOfError: string; message: string; occurrences: number; }
 export interface Correctness { findings: CorrectnessFinding[]; aborted?: boolean; abortReason?: string; }
 export interface CorrectnessFinding { name: string; passed: boolean; classification: FindingClassification; message?: string; evidence?: string; }

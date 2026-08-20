@@ -4,13 +4,14 @@ import { configuredWorkflowNames, type WorkloadSample, type SampleKind } from ".
 
 const kinds: SampleKind[] = ["read", "write"];
 const classes: OperationClass[] = ["read", "write", "authSearch"];
-const workflows = new Set<string>(configuredWorkflowNames.flatMap(name => name === "signIn" ? ["signIn", "signOutIn"] : [name]));
+const workflows = new Set<string>(configuredWorkflowNames.map(name => name === "signIn" ? "signOutIn" : name));
 const safePositive = (n: number, label: string) => { if (!Number.isSafeInteger(n) || n < 1) throw new Error(`${label} must be a positive safe integer`); return n; };
 const finiteDivide = (numerator: number, denominator: number, label: string): number => { if (numerator === 0) return 0; const value = numerator / denominator; if (!Number.isFinite(value)) throw new Error(`${label} must be finite`); return value; };
 const key = (s: WorkloadSample) => JSON.stringify([s.type,s.name,s.workflow,s.operationClass,s.kind]);
 const redact = (message: string): string => message.replace(/\b(Bearer|Basic)\s+[A-Za-z0-9+/._=-]+/gi,"$1 [REDACTED]").replace(/(["'])(password|passwd|secret|token|key|api[_-]?key|access[_-]?key)\1\s*:\s*(["'])[^"']*\3/gi,"$1$2$1:$3[REDACTED]$3").replace(/\b(password|passwd|secret|token|key|api[_-]?key|access[_-]?key)\s*[:=]\s*[^\s,;]+/gi,"$1=[REDACTED]").replace(/\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b/g,"[REDACTED]").slice(0,500);
 const classify = (e: NonNullable<WorkloadSample["error"]>): ErrorClassification => {
   const explicit = (e.classification ?? e.code ?? e.name).toLowerCase();
+  if (/expected[_ -]?rejection|application[_ -]?rejection|rejected/.test(explicit)) return "expected_rejection";
   if (/authenticat/.test(explicit)) return "authentication";
   if (/authoriz|forbidden|permission/.test(explicit)) return "authorization";
   if (/timeout|timed.?out|deadline/.test(explicit)) return "timeout";
@@ -19,6 +20,7 @@ const classify = (e: NonNullable<WorkloadSample["error"]>): ErrorClassification 
   if (/backend|health|process|server.?error|5\d\d/.test(explicit)) return "backend_health";
   if (/overload|capacity|too.?many|429/.test(explicit)) return "runner_overload";
   const text = `${e.name} ${e.message}`.toLowerCase();
+  if (/expected application rejection|application rejected|expected rejection/.test(text)) return "expected_rejection";
   if (/timed.?out|timeout|deadline/.test(text)) return "timeout";
   if (/\b(401|unauthenticated)\b|authentication failed|invalid credentials/.test(text)) return "authentication";
   if (/\b(403|forbidden|not authorized)\b/.test(text)) return "authorization";
@@ -39,8 +41,8 @@ export class StageMetricsAccumulator {
     if (this.finalized) throw new Error("Cannot record after finalize");
     if (!sample || (sample.type !== "workflow" && sample.type !== "sdk") || typeof sample.name !== "string" || !sample.name || !workflows.has(sample.workflow) || !classes.includes(sample.operationClass) || !kinds.includes(sample.kind) || typeof sample.success !== "boolean" || !Number.isFinite(sample.elapsedMs) || sample.elapsedMs < 0 || (sample.success && sample.error) || (!sample.success && (!sample.error || typeof sample.error !== "object" || typeof sample.error.name !== "string" || !sample.error.name || typeof sample.error.message !== "string" || (sample.error.code !== undefined && typeof sample.error.code !== "string") || (sample.error.classification !== undefined && typeof sample.error.classification !== "string")))) throw new Error("Invalid workload sample");
     const k=key(sample); let b=this.buckets.get(k); if (!b) { b={sample:{...sample},attempted:0,completed:0,failed:0,latencies:[],errors:new Map()}; this.buckets.set(k,b); }
-    b.attempted++; if (sample.success) { b.completed++; if (this.retainedLatencies < this.maxLatency) { b.latencies.push(sample.elapsedMs); this.retainedLatencies++; } else if (!this.invalidReason) this.invalidReason=`Latency sample ceiling exceeded for ${sample.name}`; }
-    else { b.failed++; const c=classify(sample.error!); b.errors.set(c,(b.errors.get(c)??0)+1); const ek=`${k}|${c}|${redact(sample.error!.message)}`; if (!this.examples.has(ek) && this.examples.size < this.maxExamples) this.examples.set(ek,{type:sample.type,name:sample.name,workflow:sample.workflow,operationClass:sample.operationClass,kind:sample.kind,classification:c,nameOfError:sample.error!.name.slice(0,100),message:redact(sample.error!.message),occurrences:1}); else if (this.examples.has(ek)) this.examples.get(ek)!.occurrences++; }
+    b.attempted++; if (this.retainedLatencies < this.maxLatency) { b.latencies.push(sample.elapsedMs); this.retainedLatencies++; } else if (!this.invalidReason) this.invalidReason=`Latency sample ceiling exceeded for ${sample.name}`;
+    if (sample.success) b.completed++; else { b.failed++; const c=classify(sample.error!); b.errors.set(c,(b.errors.get(c)??0)+1); const safeName=redact(sample.error!.name).slice(0,100); const safeMessage=redact(sample.error!.message); const ek=`${k}|${c}|${safeMessage}`; if (!this.examples.has(ek) && this.examples.size < this.maxExamples) this.examples.set(ek,{type:sample.type,name:sample.name,workflow:sample.workflow,operationClass:sample.operationClass,kind:sample.kind,classification:c,nameOfError:safeName,message:safeMessage,occurrences:1}); else if (this.examples.has(ek)) this.examples.get(ek)!.occurrences++; }
   }
   finalize(elapsedSeconds: number, users: { requestedUsers: number; achievedUsers: number }): StageMetrics {
     if (this.finalized) throw new Error("Stage already finalized"); if (!Number.isFinite(elapsedSeconds) || elapsedSeconds <= 0) throw new Error("elapsedSeconds must be finite and positive"); if (!Number.isSafeInteger(users?.requestedUsers) || users.requestedUsers < 0 || !Number.isSafeInteger(users.achievedUsers) || users.achievedUsers < 0 || users.achievedUsers > users.requestedUsers) throw new Error("Invalid stage user counts"); this.finalized=true;
