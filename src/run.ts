@@ -160,6 +160,7 @@ export async function runBenchmark(options: RunOptions): Promise<{ result: Bench
     const workloadFn = d.workload ?? runWorkload;
     const stages = [...options.config.concurrency];
     let refined = false;
+    let refinementStage: number | undefined;
     let conclusiveFailureSeen = false;
     for (let stageIndex = 0; stageIndex < stages.length; stageIndex++) {
       const requestedUsers = stages[stageIndex]!;
@@ -210,7 +211,7 @@ export async function runBenchmark(options: RunOptions): Promise<{ result: Bench
       if (currentFailedConclusively) conclusiveFailureSeen = true;
       if (currentFailedConclusively && previousEvaluation?.passed && previous !== undefined && requestedUsers - previous > 1 && !refined) {
         const midpoint = Math.floor((previous + requestedUsers) / 2);
-        if (midpoint <= options.config.maxConcurrency && !stages.includes(midpoint)) { stages.push(midpoint); refined = true; }
+        if (midpoint <= options.config.maxConcurrency && !stages.includes(midpoint)) { stages.splice(stageIndex + 1, 0, midpoint); refinementStage = midpoint; refined = true; }
       }
       const configuredDone = options.config.concurrency.every(count => result.stages.some(item => item.requestedUsers === count));
       if (configuredDone && !conclusiveFailureSeen && currentEvaluation?.passed && requestedUsers < options.config.maxConcurrency) {
@@ -218,6 +219,7 @@ export async function runBenchmark(options: RunOptions): Promise<{ result: Bench
         if (next > requestedUsers && !stages.includes(next)) stages.push(next);
       }
       await save();
+      if (refinementStage === requestedUsers || (currentFailedConclusively && refinementStage === undefined)) break;
     }
     result.valid = result.correctness.findings.every(finding => finding.passed) && result.stages.length > 0 && result.stages.every(stage => stage.valid) && result.capacity.users > 0;
     result.validityReasons = result.valid ? [] : ["one or more benchmark prerequisites failed"];

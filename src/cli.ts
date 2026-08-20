@@ -60,15 +60,29 @@ export function resolveResultPath(value: string): string {
 }
 
 export interface SignalSource { once(event: "SIGINT" | "SIGTERM", listener: () => void): unknown; removeListener(event: "SIGINT" | "SIGTERM", listener: () => void): unknown; }
-export async function holdBackendUntilSignal(backend: Pick<Backend, "stop">, signals: SignalSource = process): Promise<number> {
+export async function holdBackendUntilSignal(backend: Pick<Backend, "start" | "stop">, signals: SignalSource = process, onStarted?: () => void): Promise<number> {
   let release!: () => void;
+  let signalReceived = false;
+  let started = false;
+  let stopError: unknown;
+  let stopping: Promise<void> | undefined;
   const signaled = new Promise<void>(resolveSignal => { release = resolveSignal; });
-  const onSignal = () => release();
+  const stopOnce = (): Promise<void> => stopping ??= Promise.resolve().then(() => backend.stop()).catch(error => { stopError = error; });
+  const onSignal = () => { signalReceived = true; if (started) release(); };
   signals.once("SIGINT", onSignal);
   signals.once("SIGTERM", onSignal);
-  try { await signaled; await backend.stop(); return 0; }
-  catch { return 1; }
-  finally { signals.removeListener("SIGINT", onSignal); signals.removeListener("SIGTERM", onSignal); }
+  try {
+    await backend.start();
+    started = true;
+    onStarted?.();
+    if (signalReceived) release();
+    await signaled;
+    await stopOnce();
+    return stopError === undefined ? 0 : 1;
+  } finally {
+    signals.removeListener("SIGINT", onSignal);
+    signals.removeListener("SIGTERM", onSignal);
+  }
 }
 
 export async function main(argv: string[]): Promise<number> {
@@ -105,9 +119,7 @@ export async function main(argv: string[]): Promise<number> {
     }
     if (args.command === "up") {
       const backend = await loadBackend(backendName);
-      await backend.start();
-      console.log(`${backendName} started`);
-      const code = await holdBackendUntilSignal(backend);
+      const code = await holdBackendUntilSignal(backend, process, () => console.log(`${backendName} started`));
       if (code) console.error("backend stop failed");
       return code;
     }

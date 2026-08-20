@@ -96,6 +96,21 @@ test("PID changes and post-stage doctor failures invalidate rather than silently
   const unhealthyOutput = await unhealthy.output; assert.equal(unhealthyOutput.result.stages[0]!.valid, false); assert.match(unhealthyOutput.result.stages[0]!.validityReasons.join(" "), /post-stage.*failed|health.*failed/i); assert.doesNotMatch(JSON.stringify(unhealthyOutput.result), /stage-secret/);
 });
 
+test("configured stages after a conclusive failure are not executed", async () => {
+  const requested: number[] = [];
+  const run = await fakeRun({ config: measuredConfig({ concurrency: [1, 10, 20, 40], maxConcurrency: 40 }), workload: async opts => {
+    if (opts.onSample) {
+      const users = opts.users.length; requested.push(users);
+      opts.onSample({ type: "workflow", name: "dashboard", workflow: "dashboard", operationClass: "read", kind: "read", elapsedMs: users === 10 ? 2000 : 1, success: true });
+    }
+    return summary(opts.users.length);
+  } });
+  const output = await run.output;
+  assert.ok(requested.includes(1)); assert.ok(requested.includes(10));
+  assert.ok(!requested.includes(20)); assert.ok(!requested.includes(40));
+  assert.deepEqual(output.result.stages.map(stage => stage.requestedUsers), [1, 5, 10]);
+});
+
 test("schedule runs configured stages, extends after passes, stops at failure, and refines once", async () => {
   const requested: number[] = [];
   const run = await fakeRun({ config: measuredConfig({ concurrency: [1, 4], maxConcurrency: 16 }), workload: async opts => { const users = opts.users.length; if (opts.onSample) { requested.push(users); opts.onSample({ type: "workflow", name: "dashboard", workflow: "dashboard", operationClass: "read", kind: "read", elapsedMs: users === 16 ? 2000 : 1, success: true }); } return summary(users); } });

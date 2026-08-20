@@ -88,7 +88,7 @@ test("result paths stay below results and name a JSON file", () => {
 
 test("foreground lifecycle stops once and removes signal listeners", async () => {
   const signals = new EventEmitter(); let stops = 0;
-  const pending = holdBackendUntilSignal({ stop: async () => { stops++; } }, signals);
+  const pending = holdBackendUntilSignal({ start: async () => {}, stop: async () => { stops++; } }, signals);
   signals.emit("SIGINT"); signals.emit("SIGTERM");
   assert.equal(await pending, 0); assert.equal(stops, 1);
   assert.equal(signals.listenerCount("SIGINT"), 0); assert.equal(signals.listenerCount("SIGTERM"), 0);
@@ -96,10 +96,23 @@ test("foreground lifecycle stops once and removes signal listeners", async () =>
 
 test("foreground lifecycle returns nonzero when stop fails", async () => {
   const signals = new EventEmitter();
-  const pending = holdBackendUntilSignal({ stop: async () => { throw new Error("stop failed"); } }, signals);
+  const pending = holdBackendUntilSignal({ start: async () => {}, stop: async () => { throw new Error("stop failed"); } }, signals);
   signals.emit("SIGTERM");
   assert.equal(await pending, 1);
   assert.equal(signals.listenerCount("SIGINT"), 0); assert.equal(signals.listenerCount("SIGTERM"), 0);
+});
+
+test("foreground lifecycle installs handlers before startup and cleans up on startup signal", async () => {
+  const signals = new EventEmitter(); let starts = 0; let stops = 0;
+  const pending = holdBackendUntilSignal({ start: async () => { starts++; signals.emit("SIGINT"); }, stop: async () => { stops++; } }, signals);
+  assert.equal(await pending, 0); assert.equal(starts, 1); assert.equal(stops, 1);
+  assert.equal(signals.listenerCount("SIGINT"), 0); assert.equal(signals.listenerCount("SIGTERM"), 0);
+});
+
+test("startup failure removes handlers without stopping an unacquired backend", async () => {
+  const signals = new EventEmitter(); let stops = 0;
+  await assert.rejects(holdBackendUntilSignal({ start: async () => { signals.emit("SIGTERM"); throw new Error("start failed"); }, stop: async () => { stops++; } }, signals), /start failed/);
+  assert.equal(stops, 0); assert.equal(signals.listenerCount("SIGINT"), 0); assert.equal(signals.listenerCount("SIGTERM"), 0);
 });
 
 test("CLI error redaction is bounded and covers credential forms", () => {
