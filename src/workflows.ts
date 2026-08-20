@@ -66,15 +66,16 @@ const page = <T extends object>(value: Page<T>, label: string): Page<T> => {
   if (value.items.length > value.total || value.hasNext !== (value.pageSize * (value.page + 1) < value.total)) throw new Error(`Inconsistent ${label} page metadata`);
   return value;
 };
-const user = (value: User | null | undefined, label: string): User | null => {
-  if (value === null) return null;
-  id(value?.id, `${label} id`);
-  nonempty(value?.email, `${label} email`);
-  nonempty(value?.displayName, `${label} display name`);
-  nonempty(value?.createdAt, `${label} createdAt`);
-  nonempty(value?.updatedAt, `${label} updatedAt`);
-  return value!;
+const requiredUser = (value: User | null | undefined, label: string): User => {
+  if (value === null || value === undefined) throw new Error(`Invalid ${label}`);
+  id(value.id, `${label} id`);
+  nonempty(value.email, `${label} email`);
+  nonempty(value.displayName, `${label} display name`);
+  nonempty(value.createdAt, `${label} createdAt`);
+  nonempty(value.updatedAt, `${label} updatedAt`);
+  return value;
 };
+const nullableUser = (value: User | null | undefined, label: string): User | null => value === null ? null : requiredUser(value, label);
 const task = (value: Task, context: WorkflowContext): Task => {
   id(value?.id, "task id");
   if (value.projectId !== context.projectId) throw new Error("Task crossed project boundary");
@@ -100,8 +101,8 @@ const comment = (value: Comment, context: WorkflowContext): Comment => {
 };
 const detail = (value: TaskDetail, context: WorkflowContext): TaskDetail => {
   task(value.task, context);
-  user(value.creator, "creator");
-  user(value.assignee, "assignee");
+  requiredUser(value.creator, "creator");
+  nullableUser(value.assignee, "assignee");
   page(value.comments, "comments");
   for (const item of value.comments.items) {
     comment(item as Comment, context);
@@ -111,56 +112,77 @@ const detail = (value: TaskDetail, context: WorkflowContext): TaskDetail => {
 const randomPage = (context: WorkflowContext): { page: number; pageSize: number } => ({ page: 0, pageSize: context.pageSize() });
 
 async function dashboard(context: WorkflowContext): Promise<void> {
-  const value = await context.invoke<Dashboard>("dashboard", "read", "read", () => context.session.dashboard({ organizationId: context.organizationId, projectId: context.projectId, activityPage: randomPage(context) }));
-  id(value.organization?.id, "organization id");
-  if (value.organization.id !== context.organizationId || !Array.isArray(value.projects)) throw new Error("Invalid dashboard tenant context");
-  for (const project of value.projects) {
-    id(project.id, "dashboard project id");
-    if (project.organizationId !== context.organizationId) throw new Error("Dashboard project crossed tenant boundary");
-  }
+  await context.invoke<Dashboard>("dashboard", "read", "read", async () => {
+    const value = await context.session.dashboard({ organizationId: context.organizationId, projectId: context.projectId, activityPage: randomPage(context) });
+    id(value.organization?.id, "organization id");
+    if (value.organization.id !== context.organizationId || !Array.isArray(value.projects)) throw new Error("Invalid dashboard tenant context");
+    for (const project of value.projects) {
+      id(project.id, "dashboard project id");
+      if (project.organizationId !== context.organizationId) throw new Error("Dashboard project crossed tenant boundary");
+    }
+    return value;
+  });
 }
 async function taskList(context: WorkflowContext): Promise<void> {
-  const value = await context.invoke("listTasks", "read", "read", () => context.session.listTasks({ ...randomPage(context), organizationId: context.organizationId, projectId: context.projectId }));
-  const result = page(value, "task");
-  for (const item of result.items) task(item, context);
+  const result = await context.invoke("listTasks", "read", "read", async () => {
+    const value = await context.session.listTasks({ ...randomPage(context), organizationId: context.organizationId, projectId: context.projectId });
+    const result = page(value, "task");
+    for (const item of result.items) task(item, context);
+    return result;
+  });
   if (result.items[0]) context.taskId = result.items[0].id;
 }
 async function taskDetail(context: WorkflowContext): Promise<void> {
-  const value = await context.invoke("getTask", "read", "read", () => context.session.getTask({ organizationId: context.organizationId, projectId: context.projectId, taskId: context.taskId, comments: randomPage(context) }));
-  detail(value, context);
+  const value = await context.invoke("getTask", "read", "read", async () => {
+    const value = await context.session.getTask({ organizationId: context.organizationId, projectId: context.projectId, taskId: context.taskId, comments: randomPage(context) });
+    detail(value, context);
+    return value;
+  });
   if (value.comments.items[0]) context.commentId = value.comments.items[0]!.id;
 }
 async function createTask(context: WorkflowContext): Promise<void> {
-  const value = await context.invoke("createTask", "write", "write", () => context.session.createTask({ organizationId: context.organizationId, projectId: context.projectId, title: `workload task ${Math.floor(context.random() * 1_000_000)}`, description: "deterministic workload task", priority: "medium" }));
-  task(value, context);
+  const value = await context.invoke("createTask", "write", "write", async () => {
+    const value = await context.session.createTask({ organizationId: context.organizationId, projectId: context.projectId, title: `workload task ${Math.floor(context.random() * 1_000_000)}`, description: "deterministic workload task", priority: "medium" });
+    task(value, context);
+    return value;
+  });
   context.taskId = value.id;
 }
 async function updateTask(context: WorkflowContext): Promise<void> {
-  const value = await context.invoke("updateTask", "write", "write", () => context.session.updateTask({ organizationId: context.organizationId, projectId: context.projectId, taskId: context.taskId, title: `updated workload task ${Math.floor(context.random() * 1_000_000)}` }));
-  task(value, context);
+  const value = await context.invoke("updateTask", "write", "write", async () => {
+    const value = await context.session.updateTask({ organizationId: context.organizationId, projectId: context.projectId, taskId: context.taskId, title: `updated workload task ${Math.floor(context.random() * 1_000_000)}` });
+    task(value, context);
+    return value;
+  });
   context.taskId = value.id;
 }
 async function addComment(context: WorkflowContext): Promise<void> {
-  const value = await context.invoke("addComment", "write", "write", () => context.session.addComment({ organizationId: context.organizationId, projectId: context.projectId, taskId: context.taskId, body: `deterministic workload comment ${Math.floor(context.random() * 1_000_000)}` }));
-  comment(value, context);
+  const value = await context.invoke("addComment", "write", "write", async () => {
+    const value = await context.session.addComment({ organizationId: context.organizationId, projectId: context.projectId, taskId: context.taskId, body: `deterministic workload comment ${Math.floor(context.random() * 1_000_000)}` });
+    comment(value, context);
+    return value;
+  });
   context.commentId = value.id;
 }
 async function search(context: WorkflowContext): Promise<void> {
-  const value = await context.invoke("searchTasks", "authSearch", "read", () => context.session.searchTasks({ ...randomPage(context), organizationId: context.organizationId, projectId: context.projectId, query: "workload" }));
-  const result = page(value, "search");
-  for (const item of result.items) task(item, context);
+  await context.invoke("searchTasks", "authSearch", "read", async () => {
+    const value = await context.session.searchTasks({ ...randomPage(context), organizationId: context.organizationId, projectId: context.projectId, query: "workload" });
+    const result = page(value, "search");
+    for (const item of result.items) task(item, context);
+    return result;
+  });
 }
 async function profileUpdate(context: WorkflowContext): Promise<void> {
-  const value = await context.invoke<User>("updateProfile", "write", "write", () => context.session.updateProfile({ displayName: `Workload user ${Math.floor(context.random() * 1_000_000)}` }));
-  id(value.id, "profile id");
-  nonempty(value.displayName, "profile display name");
+  await context.invoke<User>("updateProfile", "write", "write", async () => {
+    const value = await context.session.updateProfile({ displayName: `Workload user ${Math.floor(context.random() * 1_000_000)}` });
+    return requiredUser(value, "profile");
+  });
 }
 
 export async function runSignOutIn(context: WorkflowContext): Promise<void> {
   await context.invoke("signOut", "authSearch", "read", () => context.session.signOut());
   await context.replaceSession();
-  const profile = await context.invoke<User>("getProfile", "authSearch", "read", () => context.session.getProfile());
-  id(profile.id, "signed-in profile id");
+  await context.invoke<User>("getProfile", "authSearch", "read", async () => requiredUser(await context.session.getProfile(), "signed-in profile"));
 }
 
 const implementations: Record<Exclude<JourneyName, "signOutIn">, (context: WorkflowContext) => Promise<void>> = {

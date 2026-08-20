@@ -166,12 +166,55 @@ test("malformed pages, missing fields, nested users, and inconsistent hasNext fa
     return session;
   };
   cases.push({ name: "hasNext consistency", backend: inconsistent, weights: { ...config.weights, dashboard: 0, taskList: 100, taskDetail: 0, createTask: 0, updateTask: 0, addComment: 0, search: 0, profileUpdate: 0, signIn: 0 } });
+  const malformedProfile = createFakeBackend();
+  const malformedProfileCreate = malformedProfile.createSession;
+  malformedProfile.createSession = async credentials => {
+    const session = await malformedProfileCreate(credentials);
+    const original = session.updateProfile;
+    session.updateProfile = async input => ({ ...(await original(input)), email: "" });
+    return session;
+  };
+  cases.push({ name: "profile required fields", backend: malformedProfile, weights: { ...config.weights, dashboard: 0, taskList: 0, taskDetail: 0, createTask: 0, updateTask: 0, addComment: 0, search: 0, profileUpdate: 100, signIn: 0 } });
   for (const item of cases) {
     let clock = 0;
     const summary = await runWorkload(item.backend, { ...config, weights: item.weights }, { users: [user(item.backend)], durationMs: 100, graceMs: 0, now: () => ++clock, sleep: async milliseconds => { if (milliseconds === 100) await new Promise<void>(() => {}); } });
     assert.ok(summary.failedWorkflowCount > 0, item.name);
     assert.equal(summary.stageFailed, true, item.name);
   }
+});
+
+test("null task assignee remains valid while creator is required", async () => {
+  const backend = createFakeBackend();
+  const baseCreate = backend.createSession;
+  backend.createSession = async credentials => {
+    const session = await baseCreate(credentials);
+    const original = session.getTask;
+    session.getTask = async input => ({ ...(await original(input)), assignee: null });
+    return session;
+  };
+  const weights = { ...config.weights, dashboard: 0, taskList: 0, taskDetail: 100, createTask: 0, updateTask: 0, addComment: 0, search: 0, profileUpdate: 0, signIn: 0 };
+  let clock = 0;
+  const summary = await runWorkload(backend, { ...config, weights }, { users: [user(backend)], durationMs: 100, graceMs: 0, now: () => ++clock, sleep: async milliseconds => { if (milliseconds === 100) await new Promise<void>(() => {}); } });
+  assert.equal(summary.failedWorkflowCount, 0);
+});
+
+test("null task creator emits invalid-response SDK and workflow failures", async () => {
+  const backend = createFakeBackend();
+  const baseCreate = backend.createSession;
+  backend.createSession = async credentials => {
+    const session = await baseCreate(credentials);
+    const original = session.getTask;
+    session.getTask = async input => ({ ...(await original(input)), creator: null } as any);
+    return session;
+  };
+  const weights = { ...config.weights, dashboard: 0, taskList: 0, taskDetail: 100, createTask: 0, updateTask: 0, addComment: 0, search: 0, profileUpdate: 0, signIn: 0 };
+  const samples: any[] = [];
+  let clock = 0;
+  const summary = await runWorkload(backend, { ...config, weights }, { users: [user(backend)], durationMs: 100, graceMs: 0, now: () => ++clock, sleep: async milliseconds => { if (milliseconds === 100) await new Promise<void>(() => {}); }, onSample: sample => samples.push(sample) });
+  assert.ok(summary.failedWorkflowCount > 0);
+  assert.equal(summary.stageFailed, true);
+  assert.ok(samples.some(sample => sample.type === "sdk" && sample.name === "getTask" && !sample.success && sample.error?.name === "Error"));
+  assert.ok(samples.some(sample => sample.type === "workflow" && sample.workflow === "taskDetail" && !sample.success && sample.error?.message.includes("creator")));
 });
 
 test("samples expose exact operation dimensions and failures", async () => {
