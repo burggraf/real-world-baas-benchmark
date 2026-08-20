@@ -8,7 +8,32 @@ const workflows = new Set<string>(configuredWorkflowNames.map(name => name === "
 const safePositive = (n: number, label: string) => { if (!Number.isSafeInteger(n) || n < 1) throw new Error(`${label} must be a positive safe integer`); return n; };
 const finiteDivide = (numerator: number, denominator: number, label: string): number => { if (numerator === 0) return 0; const value = numerator / denominator; if (!Number.isFinite(value)) throw new Error(`${label} must be finite`); return value; };
 const key = (s: WorkloadSample) => JSON.stringify([s.type,s.name,s.workflow,s.operationClass,s.kind]);
-const redact = (message: string): string => message.replace(/(["'])authorization\1\s*([:=])\s*(["'])[^"']*\3/gi,"$1authorization$1$2$3[REDACTED]$3").replace(/(?<!["'])\bauthorization\s*([:=])\s*[^\r\n,;}]*\S(?=\s*(?:[,;}\r\n]|$))/gi,"authorization$1 [REDACTED]").replace(/\b(Bearer|Basic)\s+[A-Za-z0-9+/._=-]+/gi,"$1 [REDACTED]").replace(/(["'])(password|passwd|secret|token|key|api[_-]?key|access[_-]?key)\1\s*:\s*(["'])[^"']*\3/gi,"$1$2$1:$3[REDACTED]$3").replace(/\b(password|passwd|secret|token|key|api[_-]?key|access[_-]?key)\s*[:=]\s*[^\s,;]+/gi,"$1=[REDACTED]").replace(/\b[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b/g,"[REDACTED]").slice(0,500);
+const redactAuthorization = (message: string): string => {
+  let output = "", last = 0, i = 0;
+  while (i < message.length) {
+    const quote = message[i] === "\"" || message[i] === "'" ? message[i] : "";
+    const keyStart = quote ? i + 1 : i;
+    if (message.slice(keyStart, keyStart + 13).toLowerCase() !== "authorization" || (quote ? message[keyStart + 13] !== quote : (keyStart > 0 && /[A-Za-z0-9_]/.test(message[keyStart - 1]!)) || /[A-Za-z0-9_]/.test(message[keyStart + 13] ?? ""))) { i++; continue; }
+    let j = keyStart + 13;
+    if (quote) j++;
+    while (/\s/.test(message[j] ?? "")) j++;
+    if (message[j] !== ":" && message[j] !== "=") { i++; continue; }
+    j++; while (/\s/.test(message[j] ?? "")) j++;
+    const valueStart = j;
+    if (message[j] === "\"" || message[j] === "'") {
+      const valueQuote = message[j++]!; let escaped = false;
+      while (j < message.length) { if (!escaped && message[j] === valueQuote) break; if (!escaped && message[j] === "\\") escaped = true; else escaped = false; j++; }
+      if (last < valueStart) output += message.slice(last, valueStart);
+      output += "[REDACTED]"; if (j < message.length) { output += valueQuote; j++; } last = j; i = j; continue;
+    }
+    while (j < message.length && !/[\\r\\n,;}]/.test(message[j]!)) j++;
+    const valueEnd = j;
+    if (last < valueStart) output += message.slice(last, valueStart);
+    output += "[REDACTED]"; last = valueEnd; i = valueEnd;
+  }
+  return output + message.slice(last);
+};
+const redact = (message: string): string => redactAuthorization(message).replace(/\b(Bearer|Basic)\s+[A-Za-z0-9+/._=-]+/gi,"$1 [REDACTED]").replace(/(["'])(password|passwd|secret|token|key|api[_-]?key|access[_-]?key)\1\s*:\s*(["'])[^"']*\3/gi,"$1$2$1:$3[REDACTED]$3").replace(/\b(password|passwd|secret|token|key|api[_-]?key|access[_-]?key)\s*[:=]\s*[^\s,;]+/gi,"$1=[REDACTED]").replace(/\b[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b/g,"[REDACTED]").slice(0,500);
 const classify = (e: NonNullable<WorkloadSample["error"]>): ErrorClassification => {
   const explicit = (e.classification ?? e.code ?? e.name).toLowerCase();
   if (/expected[_ -]?rejection|application[_ -]?rejection|rejected/.test(explicit)) return "expected_rejection";
