@@ -16,7 +16,7 @@ const finiteNonnegative = (value: unknown, label: string): number => {
   if (typeof value !== "number" || !Number.isFinite(value) || value < 0) throw new Error(`${label} must be finite and nonnegative`);
   return value;
 };
-const strictlyBelow = (value: number, threshold: number): boolean => value < threshold && threshold - value > Number.EPSILON * Math.max(1, Math.abs(value), Math.abs(threshold)) * 4;
+const strictlyBelow = (value: number, threshold: number): boolean => value < threshold && threshold - value > Number.EPSILON * Math.max(Number.MIN_VALUE, Math.abs(value), Math.abs(threshold)) * 4;
 const record = (value: unknown, label: string): Record<string, unknown> => {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error(`${label} must be an object`);
   return value as Record<string, unknown>;

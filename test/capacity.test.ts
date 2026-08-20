@@ -85,6 +85,7 @@ test("plateau requires material increase, under ten percent gain, and rising act
   assert.equal(evaluateCapacity([pass(25, 100, passMetrics(100)), pass(29, 109, passMetrics(120))], config).saturation, false);
   assert.equal(evaluateCapacity([pass(25, 100, passMetrics(100)), pass(30, 110, passMetrics(120))], config).saturation, false);
   assert.equal(evaluateCapacity([pass(25, 0.1, passMetrics(100)), pass(30, 0.11, passMetrics(120))], config).saturation, false);
+  assert.equal(evaluateCapacity([pass(25, 100, passMetrics(100)), pass(30, 100, passMetrics(120))], config, { maxThroughputGain: 1e-20 }).saturation, true);
   assert.equal(evaluateCapacity([pass(25, 100, passMetrics(100)), pass(30, 109.999, passMetrics(120))], config).saturation, true);
 });
 
