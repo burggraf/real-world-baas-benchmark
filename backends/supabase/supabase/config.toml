@@ -1,0 +1,16 @@
+project_id = "realworldbaasbench"
+[api]
+port = 55321
+[db]
+port = 55322
+shadow_port = 55330
+[studio]
+port = 55323
+[local_smtp]
+port = 55324
+smtp_port = 55325
+pop3_port = 55326
+[analytics]
+port = 55327
+[db.pooler]
+port = 55329
