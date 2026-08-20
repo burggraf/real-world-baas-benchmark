@@ -62,6 +62,7 @@ export async function runWorkload(backend: Backend, config: BenchmarkConfig, opt
   const summary: WorkloadSummary = { requestedUsers: options.users.length, startedUsers: 0, completedWorkflowCount: 0, failedWorkflowCount: 0, graceExpired: false, stageFailed: false, closeErrors: 0 };
   const active: Array<{ session: AppSession; spec: VirtualUserSpec }> = [];
   const closed = new Set<AppSession>();
+  let cleanupStarted = false;
   const call = async <T>(workflow: JourneyName, operation: string, operationClass: WorkloadSample["operationClass"], kind: WorkloadSample["kind"], action: () => Promise<T>): Promise<T> => {
     const started = now();
     try {
@@ -74,16 +75,31 @@ export async function runWorkload(backend: Backend, config: BenchmarkConfig, opt
     }
   };
 
+  const closeSession = async (session: AppSession, throwError = false): Promise<void> => {
+    if (closed.has(session)) return;
+    try { await call("signOutIn", "close", "authSearch", "read", () => session.close()); }
+    catch (error) {
+      summary.closeErrors++;
+      summary.stageFailed = true;
+      if (throwError) throw error;
+    }
+    finally { closed.add(session); }
+  };
   const create = async (spec: VirtualUserSpec, workflow: JourneyName = "signOutIn"): Promise<AppSession> => {
     const started = now();
+    let session: AppSession;
     try {
-      const session = await backend.createSession(spec.credentials);
-      emit(onSample, { type: "sdk", name: "createSession", workflow, kind: "read", operationClass: "authSearch", elapsedMs: Math.max(0, now() - started), success: true });
-      return session;
+      session = await backend.createSession(spec.credentials);
     } catch (error) {
       emit(onSample, { type: "sdk", name: "createSession", workflow, kind: "read", operationClass: "authSearch", elapsedMs: Math.max(0, now() - started), success: false, error: asError(error) });
       throw error;
     }
+    emit(onSample, { type: "sdk", name: "createSession", workflow, kind: "read", operationClass: "authSearch", elapsedMs: Math.max(0, now() - started), success: true });
+    if (cleanupStarted) {
+      await closeSession(session);
+      throw abortError();
+    }
+    return session;
   };
 
   const users = options.users.map((spec, index) => ({ spec, random: mulberry32(deriveSeed(config.seed, index)) }));
@@ -96,9 +112,8 @@ export async function runWorkload(backend: Backend, config: BenchmarkConfig, opt
       replaceSession: async () => {
         if (session) {
           const old = session;
-          try { await call("signOutIn", "close", "authSearch", "read", () => old.close()); }
-          catch (error) { summary.stageFailed = true; throw error; }
-          finally { closed.add(old); session = undefined; }
+          try { await closeSession(old, true); }
+          finally { session = undefined; }
         }
         session = await create(spec);
         active.push({ session, spec });
@@ -156,13 +171,9 @@ export async function runWorkload(backend: Backend, config: BenchmarkConfig, opt
   graceController.abort();
   if (!settled) { summary.graceExpired = true; summary.stageFailed = true; }
   // Close every session observed, including replacements. Duplicates are avoided by identity.
+  cleanupStarted = true;
   const sessions = [...new Set(active.map(item => item.session))];
-  for (const session of sessions) {
-    if (closed.has(session)) continue;
-    try { await call("signOutIn", "close", "authSearch", "read", () => session.close()); }
-    catch (error) { summary.closeErrors++; summary.stageFailed = true; }
-    finally { closed.add(session); }
-  }
+  for (const session of sessions) await closeSession(session);
   options.signal?.removeEventListener("abort", stopFromParent);
   return summary;
 }

@@ -61,28 +61,51 @@ const nonempty = (value: unknown, label: string): string => {
 };
 const id = (value: unknown, label: string): string => nonempty(value, label);
 const page = <T extends object>(value: Page<T>, label: string): Page<T> => {
-  if (!value || !Number.isInteger(value.page) || value.page < 0 || !Number.isInteger(value.pageSize) || value.pageSize < 1 || value.pageSize > MAX_PAGE_SIZE || !Array.isArray(value.items) || value.items.length > value.pageSize || !Number.isInteger(value.total) || value.total < 0) throw new Error(`Invalid ${label} page`);
+  if (!value || !Number.isInteger(value.page) || value.page < 0 || !Number.isInteger(value.pageSize) || value.pageSize < 1 || value.pageSize > MAX_PAGE_SIZE || !Array.isArray(value.items) || value.items.length > value.pageSize || !Number.isInteger(value.total) || value.total < 0 || typeof value.hasNext !== "boolean") throw new Error(`Invalid ${label} page`);
   if (value.items.some(item => !item || typeof item !== "object")) throw new Error(`Invalid ${label} items`);
+  if (value.items.length > value.total || value.hasNext !== (value.pageSize * (value.page + 1) < value.total)) throw new Error(`Inconsistent ${label} page metadata`);
   return value;
+};
+const user = (value: User | null | undefined, label: string): User | null => {
+  if (value === null) return null;
+  id(value?.id, `${label} id`);
+  nonempty(value?.email, `${label} email`);
+  nonempty(value?.displayName, `${label} display name`);
+  nonempty(value?.createdAt, `${label} createdAt`);
+  nonempty(value?.updatedAt, `${label} updatedAt`);
+  return value!;
 };
 const task = (value: Task, context: WorkflowContext): Task => {
   id(value?.id, "task id");
   if (value.projectId !== context.projectId) throw new Error("Task crossed project boundary");
+  id(value.creatorId, "task creator id");
+  if (value.assigneeId !== null) id(value.assigneeId, "task assignee id");
   nonempty(value.title, "task title");
   nonempty(value.description, "task description");
+  if (!["todo", "in_progress", "done", "cancelled"].includes(value.status)) throw new Error("Invalid task status");
+  if (!["low", "medium", "high", "urgent"].includes(value.priority)) throw new Error("Invalid task priority");
+  if (value.dueDate !== null) nonempty(value.dueDate, "task dueDate");
+  nonempty(value.createdAt, "task createdAt");
+  nonempty(value.updatedAt, "task updatedAt");
   return value;
 };
 const comment = (value: Comment, context: WorkflowContext): Comment => {
   id(value?.id, "comment id");
   if (value.taskId !== context.taskId) throw new Error("Comment crossed task boundary");
+  id(value.authorId, "comment author id");
   nonempty(value.body, "comment body");
+  nonempty(value.createdAt, "comment createdAt");
+  nonempty(value.updatedAt, "comment updatedAt");
   return value;
 };
 const detail = (value: TaskDetail, context: WorkflowContext): TaskDetail => {
   task(value.task, context);
+  user(value.creator, "creator");
+  user(value.assignee, "assignee");
   page(value.comments, "comments");
-  for (const item of value.comments.items) if ((item as Comment).taskId !== context.taskId) throw new Error("Comment page crossed task boundary");
-  id(value.creator?.id, "creator id");
+  for (const item of value.comments.items) {
+    comment(item as Comment, context);
+  }
   return value;
 };
 const randomPage = (context: WorkflowContext): { page: number; pageSize: number } => ({ page: 0, pageSize: context.pageSize() });
