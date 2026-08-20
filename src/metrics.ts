@@ -26,7 +26,7 @@ const redactAuthorization = (message: string): string => {
       if (last < valueStart) output += message.slice(last, valueStart);
       output += "[REDACTED]"; if (j < message.length) { output += valueQuote; j++; } last = j; i = j; continue;
     }
-    while (j < message.length && !/[\\r\\n,;}]/.test(message[j]!)) j++;
+    while (j < message.length && !/[\r\n,;}]/.test(message[j]!)) j++;
     const valueEnd = j;
     if (last < valueStart) output += message.slice(last, valueStart);
     output += "[REDACTED]"; last = valueEnd; i = valueEnd;
