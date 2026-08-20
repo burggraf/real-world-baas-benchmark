@@ -55,7 +55,7 @@ export function buildSupabaseArgs(options: SupabaseOptions, args: readonly strin
 export function supabaseEnvironment(source: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
   const result = { ...source };
   for (const key of Object.keys(result)) {
-    if (key === "SUPABASE_PROJECT_ID" || key === "SUPABASE_WORKDIR" || key === "SUPABASE_NETWORK_ID" || /^SUPABASE_.*_PORT$/.test(key) || /^SUPABASE_.*(ACCESS_TOKEN|DB_PASSWORD|PASSWORD|TOKEN|KEY|SECRET|CREDENTIAL|API_URL|DB_URL)/.test(key)) delete result[key];
+    if (key === "SUPABASE_PROJECT_ID" || key === "SUPABASE_WORKDIR" || key === "SUPABASE_NETWORK_ID" || /^SUPABASE_.*_PORT$/.test(key) || /(?:^|_)(?:PASSWORD|TOKEN|KEY|SECRET|CREDENTIAL)(?:_|$)/i.test(key) || /(?:^|_)(?:DATABASE_URL|DB_URL)$/i.test(key) || /^PGPASSWORD$/i.test(key)) delete result[key];
   }
   return result;
 }
@@ -64,7 +64,8 @@ export function redactSupabaseOutput(value: string): string {
   return value
     .replace(/\b(postgres(?:ql)?:\/\/)[^\s/@:]+:[^\s/@]+@/gi, "$1<redacted>@")
     .replace(/\bBearer\s+[A-Za-z0-9._~+/=-]+/gi, "Bearer <redacted>")
-    .replace(/(["']?\b(?:service[_ ]role|secret|publishable|anon|jwt|database|db|access|refresh)?[ _-]*(?:key|password|token|credential|secret)\b["']?\s*[:=]\s*)["']?[^\s,"'}]+["']?/gi, "$1<redacted>");
+    .replace(/(["']?\b(?:service[_ ]role|secret|publishable|anon|jwt|database|db|access|refresh)?[ _-]*(?:key|password|token|credential|secret)\b["']?\s*[:=]\s*)["']?[^\s,"'}]+["']?/gi, "$1<redacted>")
+    .replace(/(["']?\b(?:[A-Za-z][A-Za-z0-9]*_)*(?:PASSWORD|PASS|TOKEN|KEY|SECRET|CREDENTIAL)(?:_[A-Za-z0-9]+)*["']?\s*[:=]\s*)["']?[^\s,"'}]+["']?/gi, "$1<redacted>");
 }
 
 export function parseSupabaseStatus(stdout: string): SupabaseStatus {

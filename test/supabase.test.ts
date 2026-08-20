@@ -34,13 +34,14 @@ test("Supabase lifecycle uses PATH binary, absolute workdir, and scrubbed CLI ov
   assert.equal(options.binary, "supabase");
   assert.equal(options.workdir, "/tmp/benchmark repo/backends/supabase");
   assert.deepEqual(buildSupabaseArgs(options, ["status", "-o", "json"]), ["--workdir", options.workdir, "status", "-o", "json"]);
-  const env = supabaseEnvironment({ SUPABASE_PROJECT_ID: "wrong", SUPABASE_DB_PORT: "1", SUPABASE_ACCESS_TOKEN: "access", SUPABASE_DB_PASSWORD: "password", SUPABASE_SERVICE_ROLE_KEY: "service", SUPABASE_DB_URL: "postgres://secret", KEEP: "yes" });
+  const env = supabaseEnvironment({ SUPABASE_PROJECT_ID: "wrong", SUPABASE_DB_PORT: "1", SUPABASE_ACCESS_TOKEN: "access", SUPABASE_DB_PASSWORD: "password", SUPABASE_SERVICE_ROLE_KEY: "service", SUPABASE_DB_URL: "postgres://secret", PGPASSWORD: "pg", DATABASE_URL: "db", POSTGRES_PASSWORD: "pg2", S3_ACCESS_KEY_ID: "s3", KEEP: "yes" });
   assert.equal(env.SUPABASE_PROJECT_ID, undefined);
   assert.equal(env.SUPABASE_DB_PORT, undefined);
   assert.equal(env.SUPABASE_ACCESS_TOKEN, undefined);
   assert.equal(env.SUPABASE_DB_PASSWORD, undefined);
   assert.equal(env.SUPABASE_SERVICE_ROLE_KEY, undefined);
   assert.equal(env.SUPABASE_DB_URL, undefined);
+  for (const key of ["PGPASSWORD", "DATABASE_URL", "POSTGRES_PASSWORD", "S3_ACCESS_KEY_ID"]) assert.equal(env[key], undefined);
   assert.equal(env.KEEP, "yes");
   assert.equal(SUPABASE_PROJECT_ID, "realworldbaasbench");
   assert.equal(SUPABASE_PORTS.shadow, 55330);
@@ -68,7 +69,7 @@ test("status parser requires the benchmark local API and logs redact all known s
   assert.throws(() => parseSupabaseStatus('{"API_URL":"https://remote.example"}'));
   const redacted = redactSupabaseOutput('Secret key: s3cr3t-value Publishable key=publish-value JWT secret: jwt-value Authorization: Bearer eyJbearer-value SERVICE_ROLE_KEY="service-value" token=token-value postgres://postgres:db-value@127.0.0.1/db {"ANON_KEY":"json-value"}');
   for (const secret of ["s3cr3t-value", "publish-value", "jwt-value", "eyJbearer-value", "service-value", "token-value", "postgres:db-value", "json-value"]) assert.equal(redacted.includes(secret), false, secret);
-  assert.doesNotMatch(redactSupabaseOutput("DB password: db-secret access token: access-secret"), /db-secret|access-secret/);
+  assert.doesNotMatch(redactSupabaseOutput("DB password: db-secret access token: access-secret POSTGRES_PASSWORD=pg-secret S3_ACCESS_KEY_ID=s3-secret"), /db-secret|access-secret|pg-secret|s3-secret/);
 });
 
 test("measured client configuration retains no service credential", () => {
@@ -90,6 +91,7 @@ test("domain mappings remove snake_case fields and preserve nullable values", ()
   assert.deepEqual(mapSupabasePage([mappedTask], 0, 1, 2), { items: [mappedTask], page: 0, pageSize: 1, total: 2, hasNext: true });
   assert.throws(() => mapSupabasePage(null as never, 0, 1, 0), /record_list/);
   assert.throws(() => mapSupabasePage(undefined as never, 0, 1, 0), /record_list/);
+  assert.throws(() => mapSupabasePage([], 0, 10, null as never), /page_count/);
 });
 
 test("null and malformed SDK responses become safe invalid_response errors", () => {
@@ -97,6 +99,7 @@ test("null and malformed SDK responses become safe invalid_response errors", () 
   assert.throws(() => checkedSupabaseResponse(undefined), (error: any) => error?.classification === "invalid_response" && error.code === "response_shape");
   assert.equal(checkedSupabaseResponse({ data: null, error: null }), null);
   assert.throws(() => requiredSupabaseObject({ data: null, error: null }, "auth_response"), (error: any) => error?.classification === "invalid_response" && error.code === "auth_response");
+  assert.throws(() => requiredSupabaseObject({ data: { user: undefined }, error: null }, "auth_response"), (error: any) => error?.classification === "invalid_response" && error.code === "auth_response");
 });
 
 test("search escapes Postgres pattern metacharacters and errors expose no payload", () => {
