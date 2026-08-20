@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { existsSync } from "node:fs";
 import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -36,7 +37,7 @@ const info = (processIds = [101]): BackendInfo => ({ name: "pocketbase", version
 const snapshot = (cpuPercent = 1, timestampMs = 1): ResourceSnapshot => ({ timestampMs, runner: { pid: 1, cpuPercent, rssBytes: 100 }, backend: { totalCpuPercent: 1, totalRssBytes: 100, processes: [{ pid: 101, cpuPercent: 1, rssBytes: 100 }] }, containers: null, containerTotals: null, containerReason: "not required", eventLoop: { p99Ms: 1, maxMs: 2 } });
 const summary = (users: number) => ({ requestedUsers: users, startedUsers: users, completedWorkflowCount: 1, failedWorkflowCount: 0, graceExpired: false, stageFailed: false, closeErrors: 0 });
 
-async function fakeRun(options: { config?: ReturnType<typeof measuredConfig>; doctor?: () => Promise<BackendInfo>; phaseFailure?: "start" | "reset" | "seed" | "correctness"; stopFailure?: boolean; unsafeCorrectness?: boolean; workload?: (opts: any) => Promise<any>; resources?: (opts: any) => Promise<any>; overloadThresholds?: { cpuPercent?: number; p99Ms?: number; maxMs?: number; consecutiveSamples?: number }; write?: (path: string, text: string, options: { flag: "wx" }) => Promise<void> } = {}) {
+async function fakeRun(options: { config?: ReturnType<typeof measuredConfig>; doctor?: () => Promise<BackendInfo>; phaseFailure?: "start" | "reset" | "seed" | "correctness"; stopFailure?: boolean; unsafeCorrectness?: boolean; workload?: (opts: any) => Promise<any>; resources?: (opts: any) => Promise<any>; overloadThresholds?: { cpuPercent?: number; p99Ms?: number; maxMs?: number; consecutiveSamples?: number }; write?: (path: string, text: string, options: { flag: "wx" }) => Promise<void>; rename?: (from: string, to: string) => Promise<void>; onStop?: (resultPath: string) => void } = {}) {
   const dir = await mkdtemp(join(tmpdir(), "bench-run-hardening-")); const resultPath = join(dir, "result.json"); const events: string[] = []; let workloadCalls = 0; let stopCalls = 0;
   const fail = (phase: string) => { if (options.phaseFailure === phase) throw new Error("Authorization: Bearer abc.def.ghi password=hunter2 api_key=sekret"); };
   const backend = {
@@ -45,7 +46,7 @@ async function fakeRun(options: { config?: ReturnType<typeof measuredConfig>; do
     start: async () => { events.push("start"); fail("start"); },
     reset: async () => { events.push("reset"); fail("reset"); },
     seed: async () => { events.push("seed"); fail("seed"); },
-    stop: async () => { events.push("stop"); stopCalls++; if (options.stopFailure) throw new Error("stop failed"); },
+    stop: async () => { options.onStop?.(resultPath); events.push("stop"); stopCalls++; if (options.stopFailure) throw new Error("stop failed"); },
     createSession: async () => { throw new Error("unused"); },
     seedCorrectnessFixture: async () => fixture,
     buildVirtualUserSpecs: async (_profile: string, count: number) => Array.from({ length: count }, (_, i) => ({ credentials: { email: `u${i}`, password: "p" }, organizationId: "o", projectId: "p", taskId: "t" })),
@@ -53,8 +54,8 @@ async function fakeRun(options: { config?: ReturnType<typeof measuredConfig>; do
   const workload = async (_backend: unknown, _config: unknown, opts: any) => { workloadCalls++; if (options.workload) return options.workload(opts); opts.onSample?.({ type: "workflow", name: "dashboard", workflow: "dashboard", operationClass: "read", kind: "read", elapsedMs: 1, success: true }); return summary(opts.users.length); };
   const correctness = async () => { events.push("correctness"); fail("correctness"); return { findings: [{ name: options.unsafeCorrectness ? "password=name-secret" : "ok", passed: !options.unsafeCorrectness, classification: "application" as const, message: options.unsafeCorrectness ? "Authorization: Bearer finding-secret" : undefined, evidence: options.unsafeCorrectness ? "api_key=evidence-secret" : undefined }] }; };
   const resources = options.resources ?? (async () => ({ samples: [snapshot()], valid: true, validityReasons: [] }));
-  const output = runBenchmark({ backend: "pocketbase", config: options.config ?? measuredConfig(), resultPath, dependencies: { loadBackend: async () => backend as any, captureEnvironment: async backendInfo => ({ backend: backendInfo, runtimeVersion: "v1", sdkVersion: "1.0.0" } as any), correctness, workload: workload as any, resources: resources as any, write: options.write, overloadThresholds: options.overloadThresholds, now: () => new Date("2026-01-01T00:00:00.000Z"), monotonic: (() => { let value = 0; return () => (value += 1000); })() } });
-  return { output, resultPath, events, get workloadCalls() { return workloadCalls; }, get stopCalls() { return stopCalls; } };
+  const output = runBenchmark({ backend: "pocketbase", config: options.config ?? measuredConfig(), resultPath, dependencies: { loadBackend: async () => backend as any, captureEnvironment: async backendInfo => ({ backend: backendInfo, runtimeVersion: "v1", sdkVersion: "1.0.0" } as any), correctness, workload: workload as any, resources: resources as any, write: options.write, rename: options.rename, overloadThresholds: options.overloadThresholds, now: () => new Date("2026-01-01T00:00:00.000Z"), monotonic: (() => { let value = 0; return () => (value += 1000); })() } });
+  return { output, resultPath, dir, events, get workloadCalls() { return workloadCalls; }, get stopCalls() { return stopCalls; } };
 }
 
 test("phase failures prevent workload, stop once, and save redacted partial JSON", async () => {
@@ -78,18 +79,41 @@ test("resource invalidity and default runner overload invalidate measured stages
   const overloadedOutput = await overloaded.output; assert.equal(overloadedOutput.result.stages[0]!.valid, false); assert.match(overloadedOutput.result.stages[0]!.validityReasons.join(" "), /cpuPercent sustained above threshold/);
 });
 
-test("checkpoints correctness and stages in a private partial file, then removes it after final publish", async () => {
-  const dir = await mkdtemp(join(tmpdir(), "bench-partial-")); const resultPath = join(dir, "result.json"); const events: string[] = [];
+test("checkpoints the actual run partial through correctness and stages, then removes it after final publish", async () => {
+  const writes: Array<{ path: string; text: string; flag: string }> = [];
   const run = await fakeRun({
-    workload: async opts => { events.push("workload"); opts.onSample?.({ type: "workflow", name: "dashboard", workflow: "dashboard", operationClass: "read", kind: "read", elapsedMs: 1, success: true }); return summary(opts.users.length); },
+    write: async (path, text, options) => { writes.push({ path, text, flag: options.flag }); await writeFile(path, text, { encoding: "utf8", mode: 0o600, flag: options.flag }); },
+    workload: async opts => { opts.onSample?.({ type: "workflow", name: "dashboard", workflow: "dashboard", operationClass: "read", kind: "read", elapsedMs: 1, success: true }); return summary(opts.users.length); },
   });
-  const output = await run.output; const files = await import("node:fs/promises").then(fs => fs.readdir(dir));
-  assert.equal(files.filter(file => file.endsWith(".partial.json")).length, 0); assert.deepEqual(JSON.parse(await readFile(run.resultPath, "utf8")), output.result);
+  const output = await run.output;
+  const partialWrites = writes.filter(item => item.path.includes(".partial.json"));
+  assert.equal(partialWrites.length >= 2, true);
+  const checkpointResults = partialWrites.map(item => JSON.parse(item.text));
+  assert.equal(checkpointResults.some(value => value.stages.length === 0 && value.correctness.findings.length > 0), true);
+  assert.equal(checkpointResults.some(value => value.stages.length === 1 && value.resources.length === 1 && value.capacity), true);
+  assert.ok(run.events.indexOf("stop") >= 0); assert.equal(existsSync(run.resultPath), true);
+  assert.deepEqual(JSON.parse(await readFile(run.resultPath, "utf8")), output.result);
+  assert.equal(writes.every(item => item.flag === "wx"), true);
+  assert.doesNotMatch(writes.map(item => item.text).join("\n"), /password|hunter2|secret|Bearer/i);
+  const partialPath = (await import("node:fs/promises")).readdir(run.dir).then(files => files.find(file => file.endsWith(".partial.json")));
+  assert.equal(await partialPath, undefined);
 });
 
-test("publishes once after cleanup and records stop failure on disk", async () => {
-  const run = await fakeRun({ stopFailure: true }); await assert.rejects(run.output, /stop failed/);
+test("does not publish the final result until backend cleanup and retains a stop-failure partial", async () => {
+  let finalExistsAtStop: boolean | undefined;
+  const run = await fakeRun({ stopFailure: true, onStop: path => { finalExistsAtStop = existsSync(path); } });
+  await assert.rejects(run.output, /stop failed/);
+  assert.equal(finalExistsAtStop, false);
   const saved = JSON.parse(await readFile(run.resultPath, "utf8")); assert.equal(saved.valid, false); assert.deepEqual(saved.failures, ["stop failed"]); assert.match(saved.validityReasons.join(" "), /backend stop failed/);
+  const partialName = (await import("node:fs/promises")).readdir(run.dir).then(files => files.find(file => file.endsWith(".partial.json")));
+  const partial = await partialName; assert.ok(partial); const partialResult = JSON.parse(await readFile(join(run.dir, partial), "utf8")); assert.deepEqual(partialResult.failures, ["stop failed"]);
+});
+
+test("retains the latest actual partial when final publication fails", async () => {
+  const run = await fakeRun({ write: async (path, text, options) => { if (path.includes("result.json.tmp-")) throw new Error("publish failed"); await writeFile(path, text, { encoding: "utf8", mode: 0o600, flag: options.flag }); } });
+  await assert.rejects(run.output, /publish failed/); assert.equal(existsSync(run.resultPath), false);
+  const files = await (await import("node:fs/promises")).readdir(run.dir); const partialName = files.find(file => file.endsWith(".partial.json")); assert.ok(partialName);
+  const partialResult = JSON.parse(await readFile(join(run.dir, partialName!), "utf8")); assert.equal(partialResult.valid, true); assert.equal(partialResult.stages.length, 1);
 });
 
 test("creates result temporary files exclusively", async () => {
