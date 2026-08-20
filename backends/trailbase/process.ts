@@ -213,6 +213,7 @@ export class TrailBaseProcess {
       version: TRAILBASE_VERSION,
       endpoint: this.options.endpoint,
       processIds: running(this.child) && this.child.pid ? [this.child.pid] : [],
+      processExecutable: running(this.child) && this.child.pid ? this.options.binary : undefined,
       deviations: [
         "TrailBase list-rule denial returns an empty page rather than an authorization response.",
         "The v0.33.1 release schema and CLI verify command are incompatible; setup verifies registered users with a constrained owned-depot transaction.",

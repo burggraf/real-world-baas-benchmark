@@ -1,7 +1,7 @@
 import type { Credentials, DatasetProfile, Dashboard, DashboardInput, ListTasksInput, GetTaskInput, CreateTaskInput, UpdateTaskInput, AddCommentInput, UpdateCommentInput, UpdateMembershipRoleInput, SearchTasksInput, UpdateProfileInput, Page, Task, TaskDetail, Comment, User, Membership } from "./domain.js";
 
 export type BackendName = "pocketbase" | "supabase" | "trailbase";
-export interface BackendInfo { name: BackendName; version: string; endpoint: string; processIds?: number[]; supabaseProjectId?: string; deviations?: string[]; }
+export interface BackendInfo { name: BackendName; version: string; endpoint: string; processIds?: number[]; processExecutable?: string; supabaseProjectId?: string; deviations?: string[]; }
 export interface AppSession {
   dashboard(input: DashboardInput): Promise<Dashboard>; listTasks(input: ListTasksInput): Promise<Page<Task>>; getTask(input: GetTaskInput): Promise<TaskDetail>;
   createTask(input: CreateTaskInput): Promise<Task>; updateTask(input: UpdateTaskInput): Promise<Task>; addComment(input: AddCommentInput): Promise<Comment>; updateComment(input: UpdateCommentInput): Promise<Comment>; updateMembershipRole(input: UpdateMembershipRoleInput): Promise<Membership>;

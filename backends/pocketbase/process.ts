@@ -148,6 +148,7 @@ export class PocketBaseProcess {
       version: POCKETBASE_VERSION,
       endpoint: this.options.endpoint,
       processIds: running(this.child) && this.child.pid ? [this.child.pid] : [],
+      processExecutable: running(this.child) && this.child.pid ? this.options.binary : undefined,
       deviations: ["PocketBase list-rule denial returns an empty page; protected record denial is concealed as 404."],
     };
   }

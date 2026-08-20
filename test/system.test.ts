@@ -20,10 +20,10 @@ test("resource sampling scopes owned PIDs and cleans up without waiting", async 
   const calls: string[][] = []; let disabled = 0;
   const eventLoop = { percentile: () => 5_000_000, max: 8_000_000, reset() {}, disable() { disabled++; } };
   const commandRunner = async (command:string, args:string[]) => { calls.push([command, ...args]); return {stdout:"10 1.5 20 node\n11 2.5 30 pocketbase\n", stderr:"secret-never-used"}; };
-  const one = await sampleResources({backend:{name:"pocketbase",version:"1",endpoint:"",processIds:[11]},runnerPid:10,commandRunner,eventLoop,nowNs:()=>7_000_000});
+  const one = await sampleResources({backend:{name:"pocketbase",version:"1",endpoint:"",processIds:[11],processExecutable:"/tools/pocketbase"},runnerPid:10,commandRunner,eventLoop,nowNs:()=>7_000_000});
   assert.deepEqual(calls[0], ["ps","-o","pid=,pcpu=,rss=,comm=","-p","10,11"]);
   assert.equal(one.backend.totalCpuPercent, 2.5); assert.equal(one.eventLoop.p99Ms, 5); assert.equal(one.eventLoop.maxMs, 8);
-  const result = await collectResources({backend:{name:"pocketbase",version:"1",endpoint:"",processIds:[11]},runnerPid:10,commandRunner,eventLoop,maxSamples:2,sleep:async()=>{},nowNs:()=>7_000_000});
+  const result = await collectResources({backend:{name:"pocketbase",version:"1",endpoint:"",processIds:[11],processExecutable:"pocketbase"},runnerPid:10,commandRunner,eventLoop,maxSamples:2,sleep:async()=>{},nowNs:()=>7_000_000});
   assert.equal(result.samples.length, 2); assert.equal(disabled, 1);
 });
 
@@ -33,7 +33,25 @@ test("Supabase sampling discovers then scopes exact container IDs", async () => 
   assert.equal(sample.containers?.[0]?.containerId,"deadbeef123456"); assert.deepEqual(calls[2], ["docker","stats","--no-stream","--format","{{json .}}","deadbeef123456"]);
 });
 
-test("abort before sampling is clean", async () => { const controller=new AbortController(); controller.abort(); let called=false; const result=await collectResources({backend:{name:"pocketbase",version:"1",endpoint:""},signal:controller.signal,commandRunner:async()=>{called=true;return {stdout:"",stderr:""}}}); assert.equal(called,false); assert.deepEqual(result.validityReasons,["aborted before sampling"]); });
+test("registered executable identity is exact for backend PIDs", async () => {
+  const eventLoop={percentile:()=>1e6,max:1e6,reset(){},disable(){}}; const run=async()=>({stdout:"10 1 1 node\n11 2 2 trail",stderr:""});
+  const accepted=await sampleResources({backend:{name:"trailbase",version:"1",endpoint:"",processIds:[11],processExecutable:"/tools/trail"},runnerPid:10,commandRunner:run,eventLoop,nowNs:()=>1e6}); assert.equal(accepted.backend.totalCpuPercent,2);
+  for(const executable of ["trailbase-other",undefined]) { const rejected=await sampleResources({backend:{name:"trailbase",version:"1",endpoint:"",processIds:[11],processExecutable:executable},runnerPid:10,commandRunner:run,eventLoop,nowNs:()=>1e6}); assert.equal(rejected.backend.totalCpuPercent,null); assert.match(rejected.backend.reason!,/unavailable/); }
+  const same=await sampleResources({backend:{name:"trailbase",version:"1",endpoint:"",processIds:[10],processExecutable:"trail"},runnerPid:10,commandRunner:run,eventLoop,nowNs:()=>1e6}); assert.equal(same.backend.totalCpuPercent,null);
+});
+
+test("owned event-loop monitors warm once and clean up", async () => {
+  let warmed=0,resets=0,disabled=0,max=0; const factory=()=>({percentile:()=>max,max:()=>max,reset(){resets++;},disable(){disabled++;}});
+  const sample=await sampleResources({backend:{name:"pocketbase",version:"1",endpoint:""},runnerPid:10,commandRunner:async()=>({stdout:"10 1 1 node",stderr:""}),monitorFactory:factory,warmupSleep:async()=>{warmed++;max=4e6;},nowNs:()=>1e6}); assert.equal(sample.eventLoop.maxMs,4); assert.equal(warmed,1); assert.equal(resets,1); assert.equal(disabled,1);
+  await assert.rejects(()=>sampleResources({backend:{name:"pocketbase",version:"1",endpoint:""},runnerPid:10,commandRunner:async()=>({stdout:"10 1 1 node",stderr:""}),monitorFactory:factory,warmupSleep:async()=>{},nowNs:()=>NaN})); assert.equal(disabled,2);
+});
+
+test("aggregate overflow is null with explicit evidence", async () => {
+  const eventLoop={percentile:()=>1e6,max:1e6,reset(){},disable(){}}; const proc=await sampleResources({backend:{name:"pocketbase",version:"1",endpoint:"",processIds:[11,12],processExecutable:"pocketbase"},runnerPid:10,commandRunner:async()=>({stdout:"10 1 1 node\n11 1 5000000000000 pocketbase\n12 1 5000000000000 pocketbase",stderr:""}),eventLoop,nowNs:()=>1e6}); assert.equal(proc.backend.totalRssBytes,null); assert.match(proc.backend.reason!,/overflow/);
+  const ids=["aaaaaaaaaaaa","bbbbbbbbbbbb"]; const docker=async(command:string,args:string[])=>command==="ps"?{stdout:"10 1 1 node",stderr:""}:args[0]==="ps"?{stdout:ids.join("\n"),stderr:""}:{stdout:ids.map(id=>JSON.stringify({ID:id,CPUPerc:"1%",MemUsage:"5000000000000000 B / 1 B",BlockIO:"1 B / 1 B"})).join("\n"),stderr:""}; const containers=await sampleResources({backend:{name:"supabase",version:"1",endpoint:"",supabaseProjectId:"p"},runnerPid:10,commandRunner:docker,eventLoop,nowNs:()=>1e6}); assert.equal(containers.containerTotals,null); assert.match(containers.containerReason!,/overflow/);
+});
+
+test("abort before sampling is clean", async () => { const controller=new AbortController(); controller.abort(); let called=false; let monitors=0; const result=await collectResources({backend:{name:"pocketbase",version:"1",endpoint:""},signal:controller.signal,monitorFactory:()=>{monitors++;throw new Error("must not create");},commandRunner:async()=>{called=true;return {stdout:"",stderr:""}}}); assert.equal(called,false); assert.equal(monitors,0); assert.deepEqual(result.validityReasons,["aborted before sampling"]); });
 
 test("environment probes are bounded, shell-free, and preserve unavailable reasons", async () => {
   const calls:string[][]=[]; const runner=async(command:string,args:string[]) => { calls.push([command,...args]); if(command === "git" && args[0] === "rev-parse") return {stdout:"a".repeat(40),stderr:"secret"}; if(command === "git") return {stdout:" M src/file.ts",stderr:"secret"}; if(command === "npm") return {stdout:"bad version",stderr:"secret"}; return {stdout:"",stderr:"secret"}; };
@@ -50,12 +68,13 @@ test("captured environment and resource snapshots serialize as BenchmarkResult",
 });
 
 test("collector samples immediately, serializes commands, enforces ceilings, aborts cleanly, and cleans monitors", async () => {
-  const backend={name:"pocketbase" as const,version:"1",endpoint:"",processIds:[11]}; let calls=0; let active=0; let maxActive=0; let now=0; let resets=0; let disabled=0;
+  const backend={name:"pocketbase" as const,version:"1",endpoint:"",processIds:[11],processExecutable:"/tools/pocketbase"}; let calls=0; let active=0; let maxActive=0; let now=0; let resets=0; let disabled=0;
   const eventLoop={percentile:()=>1e6,max:1e6,reset(){resets++;},disable(){disabled++;}}; const runner=async()=>{active++; maxActive=Math.max(maxActive,active); await Promise.resolve(); active--; calls++; return {stdout:"10 1 20 node\n11 2.5 30 pocketbase",stderr:""};};
   const bounded=await collectResources({backend,runnerPid:10,commandRunner:runner,eventLoop,maxSamples:2,sleep:async()=>{},nowNs:()=>++now}); assert.equal(calls,2); assert.equal(bounded.samples.length,2); assert.equal(bounded.valid,false); assert.deepEqual(bounded.validityReasons,["maxSamples ceiling exceeded"]); assert.equal(maxActive,1); assert.equal(resets,2); assert.equal(disabled,1);
   calls=0; now=0; const stopped=await collectResources({backend,runnerPid:10,commandRunner:runner,eventLoop:{...eventLoop,disable(){}},maxSamples:2,sleep:async()=>{},shouldStop:()=>calls===2,nowNs:()=>++now}); assert.equal(stopped.valid,true); assert.equal(stopped.samples.length,2);
   const controller=new AbortController(); const aborted=await collectResources({backend,runnerPid:10,commandRunner:runner,eventLoop:{...eventLoop,disable(){}},maxSamples:3,sleep:async()=>{controller.abort();throw new Error("aborted");},signal:controller.signal,nowNs:()=>++now}); assert.equal(aborted.valid,true); assert.equal(aborted.samples.length,1);
   await assert.rejects(() => collectResources({backend,intervalMs:0,eventLoop:{...eventLoop,disable(){throw new Error("must not monitor");}}}),/intervalMs/);
+  let ownedWarmups=0,ownedDisables=0,ownedCalls=0; const owned=await collectResources({backend,runnerPid:10,commandRunner:async()=>{ownedCalls++;return {stdout:"10 1 20 node\n11 2 30 pocketbase",stderr:""};},monitorFactory:()=>({percentile:()=>1e6,max:1e6,reset(){},disable(){ownedDisables++;}}),warmupSleep:async()=>{ownedWarmups++;},sleep:async()=>{},shouldStop:()=>ownedCalls===2,nowNs:()=>++now}); assert.equal(owned.valid,true); assert.equal(ownedWarmups,1); assert.equal(ownedDisables,1);
 });
 
 test("runner overload requires consecutive samples", () => {
