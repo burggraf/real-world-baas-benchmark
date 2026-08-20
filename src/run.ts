@@ -11,10 +11,7 @@ import type { BenchmarkResult, Capacity, Correctness, StageMetrics } from "./res
 import { profileMetadata, buildSeedVirtualUserSpecs } from "./seed.js";
 export { buildSeedVirtualUserSpecs } from "./seed.js";
 
-export interface SetupBackend extends Backend {
-  seedCorrectnessFixture?: () => Promise<CorrectnessFixture>;
-  buildVirtualUserSpecs?: (profile: BenchmarkConfig["dataset"], count: number, seed: number) => Promise<VirtualUserSpec[]>;
-}
+export type SetupBackend = Backend;
 export interface RunDependencies {
   loadBackend?: (name: string) => Promise<SetupBackend>;
   captureEnvironment?: (info: BackendInfo) => Promise<BenchmarkResult["environment"]>;
@@ -85,23 +82,28 @@ export async function runBenchmark(options: RunOptions): Promise<{ result: Bench
       const requestedUsers = stages[stageIndex]!;
       const stageStart = monotonic(); const acc = new StageMetricsAccumulator(); const controller = new AbortController();
       const resourcesPromise = resourceFn({ backend: result.backend, maxSamples: Math.ceil((options.config.stageSeconds * 1000 + options.config.timeoutMs) / 1000) + 2, intervalMs: 1000, signal: controller.signal, shouldStop: () => controller.signal.aborted });
-      let summary: WorkloadSummary;
+      let summary: WorkloadSummary; let workloadEnd = stageStart;
       try { summary = await workloadFn(backend, options.config, { users: users.slice(0, requestedUsers), durationMs: options.config.stageSeconds * 1000, graceMs: options.config.timeoutMs, onSample: s => acc.record(s) }); }
-      finally { controller.abort(); }
+      finally { workloadEnd = monotonic(); controller.abort(); }
       const resources = await resourcesPromise;
-      const elapsed = (monotonic() - stageStart) / 1000;
+      const elapsed = (workloadEnd - stageStart) / 1000;
       if (!Number.isFinite(elapsed) || elapsed <= 0) throw new Error("invalid monotonic stage elapsed time");
       const stage = acc.finalize(elapsed, { requestedUsers, achievedUsers: summary.startedUsers });
       const reasons = [...stage.validityReasons]; if (summary.stageFailed) reasons.push("workload failed"); if (summary.closeErrors) reasons.push("session close failed"); if (summary.graceExpired) reasons.push("grace period expired"); if (summary.startedUsers < requestedUsers) reasons.push("achieved user count below requested"); if (!resources.valid) reasons.push(...resources.validityReasons); const overload = evaluateRunnerOverload(resources.samples, d.overloadThresholds); if (overload) reasons.push(overload);
       stage.valid = reasons.length === 0; stage.validityReasons = [...new Set(reasons)]; result.stages.push(stage);
       result.resources.push({ name: `stage-${requestedUsers}`, unit: "snapshot", samples: resources.samples.map(() => null), snapshots: resources.samples });
-      result.stages.sort((a, b) => a.requestedUsers - b.requestedUsers); result.capacity = mapCapacity(evaluateCapacity(result.stages, options.config, { minSamples: options.config.publishable ? 20 : 1 }));
-      if (!stage.valid && !refined && stageIndex > 0) {
-        const previous = stages[stageIndex - 1]!;
+      result.stages.sort((a, b) => a.requestedUsers - b.requestedUsers);
+      const evaluation = evaluateCapacity(result.stages, options.config, { minSamples: options.config.publishable ? 20 : 1 });
+      result.capacity = mapCapacity(evaluation);
+      const currentEvaluation = evaluation.stages.find(item => item.requestedUsers === requestedUsers);
+      const previous = stageIndex > 0 ? stages[stageIndex - 1]! : undefined;
+      const previousEvaluation = previous === undefined ? undefined : evaluation.stages.find(item => item.requestedUsers === previous);
+      if (currentEvaluation && !currentEvaluation.passed && previousEvaluation?.passed && previous !== undefined && requestedUsers - previous > 1 && !refined) {
         const midpoint = Math.floor((previous + requestedUsers) / 2);
-        if (midpoint > previous && midpoint < requestedUsers && midpoint <= options.config.maxConcurrency && !stages.includes(midpoint)) { stages.push(midpoint); refined = true; }
+        if (midpoint <= options.config.maxConcurrency && !stages.includes(midpoint)) { stages.push(midpoint); refined = true; }
       }
-      if (stageIndex + 1 === options.config.concurrency.length && stage.valid && requestedUsers < options.config.maxConcurrency) {
+      const configuredDone = options.config.concurrency.every(usersCount => result.stages.some(item => item.requestedUsers === usersCount));
+      if (configuredDone && currentEvaluation?.passed && requestedUsers < options.config.maxConcurrency) {
         const next = Math.min(options.config.maxConcurrency, requestedUsers * 2);
         if (next > requestedUsers && !stages.includes(next)) stages.push(next);
       }

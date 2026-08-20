@@ -35,11 +35,15 @@ export async function main(argv: string[]): Promise<number> {
       for (const name of names) { const info = await (await loadBackend(name)).doctor(); console.log(`${info.name} ${info.version}`); }
       return 0;
     }
-    const backendName = required(args, "backend");
+    const backendName = args.backend ?? (args.command === "compare" ? "" : required(args, "backend"));
     if (args.command === "reset" || args.command === "correctness") {
-      const config = loadConfig(configPath(required(args, "config"))); const backend = await loadBackend(backendName);
+      const config = args.config ? loadConfig(configPath(args.config)) : undefined;
+      const dataset = (args.dataset ?? config?.dataset ?? "small") as keyof typeof profileMetadata;
+      const seed = args.seed === undefined ? (config?.seed ?? 0) : Number(args.seed);
+      if (!Object.hasOwn(profileMetadata, dataset) || !Number.isSafeInteger(seed) || seed < 0) throw new Error("invalid dataset or seed");
+      const backend = await loadBackend(backendName);
       try {
-        await backend.start(); await backend.reset(); await backend.seed({ name: config.dataset, definition: { ...profileMetadata[config.dataset] } }, config.seed);
+        await backend.start(); await backend.reset(); await backend.seed({ name: dataset, definition: { ...profileMetadata[dataset] } }, seed);
         if (args.command === "correctness") {
           if (!backend.seedCorrectnessFixture) throw new Error("backend correctness fixture unavailable");
           const check = await runCorrectness(backend, await backend.seedCorrectnessFixture());
@@ -50,12 +54,16 @@ export async function main(argv: string[]): Promise<number> {
       return 0;
     }
     if (args.command === "up") {
-      const backend = await loadBackend(backendName); await backend.start();
-      const stop = async () => { await backend.stop(); process.exitCode = 0; };
-      process.once("SIGINT", stop); process.once("SIGTERM", stop); console.log(`${backendName} started`); await new Promise<void>(() => undefined); return 0;
+      const backend = await loadBackend(backendName); await backend.start(); let stopping: Promise<void> | undefined;
+      const stop = () => stopping ??= backend.stop().catch(error => { process.exitCode = 1; throw error; });
+      const onSignal = () => { void stop().catch(() => undefined); };
+      process.once("SIGINT", onSignal); process.once("SIGTERM", onSignal); console.log(`${backendName} started`);
+      try { await new Promise<void>(resolve => { const done = () => resolve(); stopping?.then(done, done); }); }
+      finally { process.removeListener("SIGINT", onSignal); process.removeListener("SIGTERM", onSignal); await stop().catch(() => undefined); }
+      return process.exitCode === 1 ? 1 : 0;
     }
     if (args.command === "run") { const config = loadConfig(configPath(required(args, "config"))); const path = args.result ?? `results/${basename(configPath(required(args, "config")), ".json")}-${backendName}.json`; const output = await runBenchmark({ backend: backendName, config, resultPath: path }); console.log(`${output.resultPath} ${output.result.valid ? "valid" : "invalid"}`); return output.result.valid ? 0 : 1; }
-    if (args.command === "compare") { const config = loadConfig(configPath(required(args, "config"))); const names = (args.backends ?? args.backend ?? "pocketbase,supabase,trailbase").split(","); for (const name of names) { const selected = name.trim(); if (!selected) throw new Error("invalid backend"); await runBenchmark({ backend: selected, config, resultPath: `results/${config.name}-${selected}.json` }); } return 0; }
+    if (args.command === "compare") { const config = loadConfig(configPath(required(args, "config"))); const names = (args.backends ?? args.backend ?? "pocketbase,supabase,trailbase").split(","); for (const name of names) { const selected = name.trim(); if (!selected) throw new Error("invalid backend"); const output = await runBenchmark({ backend: selected, config, resultPath: `results/${config.name}-${selected}.json` }); if (!output.result.valid) return 1; } return 0; }
     throw new Error("Unsupported command");
   } catch (error) { console.error(error instanceof Error ? error.message.replace(/\b(password|secret|token)\b[^\n]*/gi, "$1=[REDACTED]") : "command failed"); return 1; }
 }
