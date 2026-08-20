@@ -23,7 +23,8 @@ export function parseByteUnit(input: string): number | null {
   const binary = ["B", "KIB", "MIB", "GIB", "TIB"].includes(unit);
   const units = ["B", binary ? "KIB" : "KB", binary ? "MIB" : "MB", binary ? "GIB" : "GB", binary ? "TIB" : "TB"];
   const index = units.indexOf(unit); const value = Number(match[1]) * (binary ? 1024 : 1000) ** index;
-  return Number.isSafeInteger(value) && validNumber(value) ? value : null;
+  // Docker reports approximate decimal quantities; retain the nearest whole byte.
+  return validNumber(value) && value <= Number.MAX_SAFE_INTEGER ? Math.round(value) : null;
 }
 
 function integer(value: string): number | null { const n = Number(value.trim()); return positive(n) ? n : null; }

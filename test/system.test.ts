@@ -7,6 +7,13 @@ test("system parsers reject malformed values and parse units", () => {
   assert.equal(parseByteUnit("1.5 GiB"), 1610612736);
   assert.equal(parseByteUnit("2 MB"), 2000000);
   assert.equal(parseByteUnit("nope"), null);
+  assert.equal(parseByteUnit("228.2MiB"), Math.round(228.2 * 1024 ** 2));
+  assert.equal(parseByteUnit("93.33MiB"), Math.round(93.33 * 1024 ** 2));
+  assert.equal(parseByteUnit("7.817GiB"), Math.round(7.817 * 1024 ** 3));
+  assert.equal(parseByteUnit("16.4kB"), 16400);
+  assert.equal(parseByteUnit("3.33MB"), 3330000);
+  assert.equal(parseByteUnit("0B"), 0);
+  assert.equal(parseByteUnit("9007199254740GB"), null);
   assert.deepEqual(parseSysctl("hw.cpufrequency: 2400000000\nhw.logicalcpu: 8\nhw.memsize: 17179869184"), { model: null, logicalCores: 8, memoryBytes: 17179869184 });
   assert.deepEqual(parsePs("123 4.5 10m\n bad x -1\n"), [{ pid: 123, cpuPercent: 4.5, rssBytes: 10485760 }]);
   assert.deepEqual(parseDockerStats('{"ID":"abcdef123456","CPUPerc":"2.5%","MemUsage":"1.5GiB / 4GiB","BlockIO":"2MB / 3.5 MiB"}'), [{containerId:"abcdef123456", cpuPercent:2.5, memoryBytes:1610612736, blockReadBytes:2000000, blockWriteBytes:3670016}]);
@@ -14,6 +21,11 @@ test("system parsers reject malformed values and parse units", () => {
   assert.equal(parseMemInfo("  MemTotal\t:       16384 kB"), 16777216);
   assert.deepEqual(parseSysctl("  hw.logicalcpu : 8 \n hw.memsize\t: 1024 "), {model:null,logicalCores:8,memoryBytes:1024});
   assert.equal(parseDockerStats('{"ID":"abcdef123456","CPUPerc":"250%","MemUsage":"1 B / 2 B","BlockIO":"1 B / 2 B"}')[0]?.cpuPercent, 250);
+  const realistic = parseDockerStats([
+    '{"ID":"abcdef123456","CPUPerc":"2.1%","MemUsage":"228.2MiB / 1GiB","BlockIO":"16.4kB / 3.33MB"}',
+    '{"ID":"fedcba654321","CPUPerc":"0.5%","MemUsage":"93.33MiB / 1GiB","BlockIO":"7.817GiB / 0B"}'
+  ].join("\n"), new Set(["abcdef123456", "fedcba654321"]));
+  assert.equal(realistic.length, 2); assert.ok(realistic.every(row => Number.isSafeInteger(row.memoryBytes)));
 });
 
 test("resource sampling scopes owned PIDs and cleans up without waiting", async () => {
@@ -49,6 +61,19 @@ test("owned event-loop monitors warm once and clean up", async () => {
 test("aggregate overflow is null with explicit evidence", async () => {
   const eventLoop={percentile:()=>1e6,max:1e6,reset(){},disable(){}}; const proc=await sampleResources({backend:{name:"pocketbase",version:"1",endpoint:"",processIds:[11,12],processExecutable:"pocketbase"},runnerPid:10,commandRunner:async()=>({stdout:"10 1 1 node\n11 1 5000000000000 pocketbase\n12 1 5000000000000 pocketbase",stderr:""}),eventLoop,nowNs:()=>1e6}); assert.equal(proc.backend.totalRssBytes,null); assert.match(proc.backend.reason!,/overflow/);
   const ids=["aaaaaaaaaaaa","bbbbbbbbbbbb"]; const docker=async(command:string,args:string[])=>command==="ps"?{stdout:"10 1 1 node",stderr:""}:args[0]==="ps"?{stdout:ids.join("\n"),stderr:""}:{stdout:ids.map(id=>JSON.stringify({ID:id,CPUPerc:"1%",MemUsage:"5000000000000000 B / 1 B",BlockIO:"1 B / 1 B"})).join("\n"),stderr:""}; const containers=await sampleResources({backend:{name:"supabase",version:"1",endpoint:"",supabaseProjectId:"p"},runnerPid:10,commandRunner:docker,eventLoop,nowNs:()=>1e6}); assert.equal(containers.containerTotals,null); assert.match(containers.containerReason!,/overflow/);
+});
+
+test("Supabase realistic decimal stats aggregate safely", async () => {
+  const ids=["abcdef123456","fedcba654321"]; const runner=async(command:string,args:string[]) => {
+    if (command === "ps") return {stdout:"10 1 1 node",stderr:""};
+    if (args[0] === "ps") return {stdout:ids.join("\n"),stderr:""};
+    return {stdout:[
+      '{"ID":"abcdef123456","CPUPerc":"2.1%","MemUsage":"228.2MiB / 1GiB","BlockIO":"16.4kB / 3.33MB"}',
+      '{"ID":"fedcba654321","CPUPerc":"0.5%","MemUsage":"93.33MiB / 1GiB","BlockIO":"7.817GiB / 0B"}'
+    ].join("\n"),stderr:""};
+  };
+  const result=await sampleResources({backend:{name:"supabase",version:"1",endpoint:"",supabaseProjectId:"project"},runnerPid:10,commandRunner:runner,eventLoop:{percentile:()=>1e6,max:1e6,reset(){},disable(){}},nowNs:()=>1e6});
+  assert.equal(result.containers?.length,2); assert.ok(result.containerTotals); assert.equal(result.containerReason,undefined); assert.equal(result.containerTotals?.memoryBytes,Math.round(228.2*1024**2)+Math.round(93.33*1024**2));
 });
 
 test("abort before sampling is clean", async () => { const controller=new AbortController(); controller.abort(); let called=false; let monitors=0; const result=await collectResources({backend:{name:"pocketbase",version:"1",endpoint:""},signal:controller.signal,monitorFactory:()=>{monitors++;throw new Error("must not create");},commandRunner:async()=>{called=true;return {stdout:"",stderr:""}}}); assert.equal(called,false); assert.equal(monitors,0); assert.deepEqual(result.validityReasons,["aborted before sampling"]); });
