@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile } from "node:fs/promises";
+import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -36,7 +36,7 @@ const info = (processIds = [101]): BackendInfo => ({ name: "pocketbase", version
 const snapshot = (cpuPercent = 1, timestampMs = 1): ResourceSnapshot => ({ timestampMs, runner: { pid: 1, cpuPercent, rssBytes: 100 }, backend: { totalCpuPercent: 1, totalRssBytes: 100, processes: [{ pid: 101, cpuPercent: 1, rssBytes: 100 }] }, containers: null, containerTotals: null, containerReason: "not required", eventLoop: { p99Ms: 1, maxMs: 2 } });
 const summary = (users: number) => ({ requestedUsers: users, startedUsers: users, completedWorkflowCount: 1, failedWorkflowCount: 0, graceExpired: false, stageFailed: false, closeErrors: 0 });
 
-async function fakeRun(options: { config?: ReturnType<typeof measuredConfig>; doctor?: () => Promise<BackendInfo>; phaseFailure?: "start" | "reset" | "seed" | "correctness"; unsafeCorrectness?: boolean; workload?: (opts: any) => Promise<any>; resources?: (opts: any) => Promise<any>; overloadThresholds?: { cpuPercent?: number; p99Ms?: number; maxMs?: number; consecutiveSamples?: number } } = {}) {
+async function fakeRun(options: { config?: ReturnType<typeof measuredConfig>; doctor?: () => Promise<BackendInfo>; phaseFailure?: "start" | "reset" | "seed" | "correctness"; stopFailure?: boolean; unsafeCorrectness?: boolean; workload?: (opts: any) => Promise<any>; resources?: (opts: any) => Promise<any>; overloadThresholds?: { cpuPercent?: number; p99Ms?: number; maxMs?: number; consecutiveSamples?: number }; write?: (path: string, text: string, options: { flag: "wx" }) => Promise<void> } = {}) {
   const dir = await mkdtemp(join(tmpdir(), "bench-run-hardening-")); const resultPath = join(dir, "result.json"); const events: string[] = []; let workloadCalls = 0; let stopCalls = 0;
   const fail = (phase: string) => { if (options.phaseFailure === phase) throw new Error("Authorization: Bearer abc.def.ghi password=hunter2 api_key=sekret"); };
   const backend = {
@@ -45,7 +45,7 @@ async function fakeRun(options: { config?: ReturnType<typeof measuredConfig>; do
     start: async () => { events.push("start"); fail("start"); },
     reset: async () => { events.push("reset"); fail("reset"); },
     seed: async () => { events.push("seed"); fail("seed"); },
-    stop: async () => { events.push("stop"); stopCalls++; },
+    stop: async () => { events.push("stop"); stopCalls++; if (options.stopFailure) throw new Error("stop failed"); },
     createSession: async () => { throw new Error("unused"); },
     seedCorrectnessFixture: async () => fixture,
     buildVirtualUserSpecs: async (_profile: string, count: number) => Array.from({ length: count }, (_, i) => ({ credentials: { email: `u${i}`, password: "p" }, organizationId: "o", projectId: "p", taskId: "t" })),
@@ -53,7 +53,7 @@ async function fakeRun(options: { config?: ReturnType<typeof measuredConfig>; do
   const workload = async (_backend: unknown, _config: unknown, opts: any) => { workloadCalls++; if (options.workload) return options.workload(opts); opts.onSample?.({ type: "workflow", name: "dashboard", workflow: "dashboard", operationClass: "read", kind: "read", elapsedMs: 1, success: true }); return summary(opts.users.length); };
   const correctness = async () => { events.push("correctness"); fail("correctness"); return { findings: [{ name: options.unsafeCorrectness ? "password=name-secret" : "ok", passed: !options.unsafeCorrectness, classification: "application" as const, message: options.unsafeCorrectness ? "Authorization: Bearer finding-secret" : undefined, evidence: options.unsafeCorrectness ? "api_key=evidence-secret" : undefined }] }; };
   const resources = options.resources ?? (async () => ({ samples: [snapshot()], valid: true, validityReasons: [] }));
-  const output = runBenchmark({ backend: "pocketbase", config: options.config ?? measuredConfig(), resultPath, dependencies: { loadBackend: async () => backend as any, captureEnvironment: async backendInfo => ({ backend: backendInfo, runtimeVersion: "v1", sdkVersion: "1.0.0" } as any), correctness, workload: workload as any, resources: resources as any, overloadThresholds: options.overloadThresholds, now: () => new Date("2026-01-01T00:00:00.000Z"), monotonic: (() => { let value = 0; return () => (value += 1000); })() } });
+  const output = runBenchmark({ backend: "pocketbase", config: options.config ?? measuredConfig(), resultPath, dependencies: { loadBackend: async () => backend as any, captureEnvironment: async backendInfo => ({ backend: backendInfo, runtimeVersion: "v1", sdkVersion: "1.0.0" } as any), correctness, workload: workload as any, resources: resources as any, write: options.write, overloadThresholds: options.overloadThresholds, now: () => new Date("2026-01-01T00:00:00.000Z"), monotonic: (() => { let value = 0; return () => (value += 1000); })() } });
   return { output, resultPath, events, get workloadCalls() { return workloadCalls; }, get stopCalls() { return stopCalls; } };
 }
 
@@ -76,6 +76,17 @@ test("resource invalidity and default runner overload invalidate measured stages
   const unavailableOutput = await unavailable.output; assert.equal(unavailableOutput.result.stages[0]!.valid, false); assert.match(unavailableOutput.result.stages[0]!.validityReasons.join(" "), /resource unavailable/);
   const overloaded = await fakeRun({ resources: async () => ({ samples: [snapshot(91, 1), snapshot(91, 2), snapshot(91, 3)], valid: true, validityReasons: [] }) });
   const overloadedOutput = await overloaded.output; assert.equal(overloadedOutput.result.stages[0]!.valid, false); assert.match(overloadedOutput.result.stages[0]!.validityReasons.join(" "), /cpuPercent sustained above threshold/);
+});
+
+test("publishes once after cleanup and records stop failure on disk", async () => {
+  const run = await fakeRun({ stopFailure: true }); await assert.rejects(run.output, /stop failed/);
+  const saved = JSON.parse(await readFile(run.resultPath, "utf8")); assert.equal(saved.valid, false); assert.deepEqual(saved.failures, ["stop failed"]); assert.match(saved.validityReasons.join(" "), /backend stop failed/);
+});
+
+test("creates result temporary files exclusively", async () => {
+  let flag: string | undefined;
+  const run = await fakeRun({ write: async (path, text, options) => { flag = options.flag; await writeFile(path, text, { encoding: "utf8", mode: 0o600, flag: options.flag }); } });
+  await run.output; assert.equal(flag, "wx");
 });
 
 test("settings are effective, recorded, and final disk result matches return value", async () => {

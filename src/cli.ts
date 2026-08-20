@@ -1,6 +1,7 @@
 import { pathToFileURL } from "node:url";
 import { lstat, readFile, realpath } from "node:fs/promises";
-import { extname, isAbsolute, relative, resolve, sep } from "node:path";
+import { lstatSync, realpathSync } from "node:fs";
+import { dirname, extname, isAbsolute, relative, resolve, sep } from "node:path";
 import { loadBackend, type Backend } from "./backend.js";
 import { loadConfig } from "./config.js";
 import { runCorrectness } from "./correctness.js";
@@ -57,12 +58,16 @@ const help = `Usage: npm run bench -- <command> [options]\n\nCommands:\n  doctor
 const required = (args: ParsedArgs, name: string): string => { const value = args[name]; if (!value) throw new Error(`Missing --${name}`); return value; };
 const configPath = (value: string): string => { if (value.includes("\0") || value.includes("..")) throw new Error("Unsafe config path"); return resolve(value); };
 
-export function resolveResultPath(value: string): string {
-  const root = resolve("results");
+export function resolveResultPath(value: string, repository = process.cwd()): string {
+  const repo = resolve(repository); const root = resolve(repo, "results");
   if (!value || value.includes("\0") || value.split(/[\\/]/).includes("..") || isAbsolute(value) || extname(value).toLowerCase() !== ".json") throw new Error("Invalid result path");
-  const candidate = resolve(value);
-  const inside = relative(root, candidate);
+  const candidate = resolve(repo, value); const inside = relative(root, candidate);
   if (!inside || inside === ".." || inside.startsWith(`..${sep}`) || isAbsolute(inside)) throw new Error("Invalid result path");
+  let current = repo;
+  try {
+    for (const part of relative(repo, dirname(candidate)).split(sep).filter(Boolean)) { current = resolve(current, part); const stat = lstatSync(current); if (stat.isSymbolicLink()) throw new Error("symlink"); }
+    const realRepo = realpathSync(repo); const realParent = realpathSync(dirname(candidate)); const realInside = relative(realRepo, realParent); if (realInside === ".." || realInside.startsWith(`..${sep}`) || isAbsolute(realInside)) throw new Error("outside repository");
+  } catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw new Error("Invalid result path: non-symlink repository path required"); }
   return candidate;
 }
 

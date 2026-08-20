@@ -81,11 +81,13 @@ test("compare backend lists reject empty and duplicate names", () => {
   assert.throws(() => parseArgs(["compare", "--backend", "pocketbase", "--backends", "supabase"]), /cannot combine/i);
 });
 
-test("result paths stay below results and name a JSON file", () => {
+test("result paths stay below non-symlink results and name a JSON file", async () => {
   assert.equal(resolveResultPath("results/nested/run.json"), resolve("results/nested/run.json"));
   for (const path of ["results", "results/run.txt", "../run.json", "/tmp/run.json", "result.json", "results/../run.json"]) {
     assert.throws(() => resolveResultPath(path), /result path/i);
   }
+  const root = await mkdtemp(join(tmpdir(), "bench-cli-result-link-")); const outside = await mkdtemp(join(tmpdir(), "bench-cli-result-outside-")); await symlink(outside, join(root, "results"));
+  assert.throws(() => resolveResultPath("results/run.json", root), /result path/i);
 });
 
 test("report accepts exactly one positional JSON path and no option syntax", () => {

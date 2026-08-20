@@ -44,6 +44,7 @@ function compatibility(results: BenchmarkResult[]): AggregationMismatch[] {
   const first = results[0]!; const checks: Array<[string, (result: BenchmarkResult) => unknown]> = [
     ["backend.name", result => result.backend.name], ["backend.version", result => result.backend.version], ["backend.endpoint", result => result.backend.endpoint], ["backend.supabaseProjectId", result => result.backend.supabaseProjectId], ["backend.deviations", result => result.backend.deviations],
     ["environment.sdkVersion", result => result.environment.sdkVersion], ["environment.npmVersion", result => result.environment.npmVersion], ["environment.dockerVersion", result => result.environment.dockerVersion], ["environment.supabaseVersion", result => result.environment.supabaseVersion],
+    ["environment.gitCommit", result => result.environment.gitCommit], ["environment.gitDirty", result => result.environment.gitDirty], ["environment.runtime", result => result.environment.runtime], ["environment.runtimeVersion", result => result.environment.runtimeVersion], ["environment.nodeVersion", result => result.environment.nodeVersion], ["versions", result => result.versions],
     ["config", result => result.config], ["settings", result => result.settings], ["dataset", result => result.dataset], ["seed", result => result.seed], ["schemaVersion", result => result.schemaVersion], ["hardware", hardware],
   ];
   return results.slice(1).flatMap(result => checks.flatMap(([field, get]) => encoded(get(result)) === encoded(get(first)) ? [] : [{ runId: String(result.runId), field, expected: encoded(get(first)), actual: encoded(get(result)) }]));
@@ -61,17 +62,17 @@ const aggregateResources = (values: StageResourceMaxima[]): AggregateResources =
 
 export function aggregateBenchmarkResults(results: BenchmarkResult[], options: AggregateOptions = {}): BenchmarkAggregate {
   if (!Array.isArray(results) || results.length < 3) throw new Error("Aggregation requires at least 3 repeated runs");
-  for (const result of results) {
-    if (!result.valid) throw new Error(`Run ${result.runId} is not valid: ${result.validityReasons.join("; ") || "no reason recorded"}`);
-    if ((options.publishable ?? true) && !result.publishable) throw new Error(`Run ${result.runId} is not publishable`);
-  }
+  const runIds = results.map(result => String(result.runId)); if (new Set(runIds).size !== runIds.length) throw new Error("Aggregation requires distinct run IDs");
   const mismatches = compatibility(results); const crossBackend = mismatches.filter(item => item.field === "backend.name");
   if (crossBackend.length) throw new AggregationCompatibilityError(crossBackend);
   if (mismatches.length && !options.override) throw new AggregationCompatibilityError(mismatches);
   if (!options.override && results.some(result => result.schemaVersion !== 1)) throw new Error("Aggregation requires schemaVersion 1");
   for (const result of results) validateBenchmarkResult(result.schemaVersion === 1 ? result : { ...result, schemaVersion: 1 });
+  if ((options.publishable ?? true) && new Set(results.map(result => result.environment.gitCommit)).size !== 1) throw new Error("Publishable aggregation requires an identical clean git commit");
   for (const result of results) {
-    if (new Set(result.stages.map(stage => stage.requestedUsers)).size !== result.stages.length) throw new Error(`Run ${result.runId} has duplicate requested-user stages`);
+    if (!result.valid) throw new Error(`Run ${result.runId} is not valid: ${result.validityReasons.join("; ") || "no reason recorded"}`);
+    if ((options.publishable ?? true) && !result.publishable) throw new Error(`Run ${result.runId} is not publishable`);
+    if ((options.publishable ?? true) && (result.environment.gitDirty !== false || result.environment.gitCommit === null)) throw new Error(`Run ${result.runId} lacks a clean git commit for publishable aggregation`);
   }
   const requestedUsers = [...new Set(results.flatMap(result => result.stages.map(stage => stage.requestedUsers)))].sort((left, right) => left - right);
   const common = requestedUsers.filter(users => results.every(result => result.stages.some(stage => stage.requestedUsers === users)));

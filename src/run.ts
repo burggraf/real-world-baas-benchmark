@@ -20,8 +20,7 @@ export interface RunDependencies {
   resources?: (options: Parameters<typeof collectResources>[0]) => Promise<ResourceCollection>;
   now?: () => Date;
   monotonic?: () => number;
-  write?: (path: string, text: string) => Promise<void>;
-  rename?: (from: string, to: string) => Promise<void>; // retained for dependency compatibility; atomic save does not overwrite
+  write?: (path: string, text: string, options: { flag: "wx" }) => Promise<void>;
   overloadThresholds?: Parameters<typeof evaluateRunnerOverload>[1];
 }
 export interface RunOptions { backend: string; config: BenchmarkConfig; resultPath: string; dependencies?: RunDependencies; }
@@ -48,9 +47,9 @@ export function safeErrorMessage(error: unknown): string {
 
 const isoId = (date: Date, backend: string, config: string): string => `${date.toISOString().replace(/[^0-9TZ]/g, "-")}-${backend.replace(/[^A-Za-z0-9_-]/g, "-")}-${config.replace(/[^A-Za-z0-9_-]/g, "-")}`;
 const emptyCapacity = (): Capacity => ({ users: 0, saturation: false, reasons: ["capacity not evaluated"] });
-const atomic = async (path: string, text: string, write: (p: string, t: string) => Promise<void>) => {
+const atomic = async (path: string, text: string, write: (p: string, t: string, options: { flag: "wx" }) => Promise<void>) => {
   const tmp = `${path}.tmp-${process.pid}-${Math.random().toString(36).slice(2, 8)}`;
-  try { await write(tmp, text); await link(tmp, path); }
+  try { await write(tmp, text, { flag: "wx" }); await link(tmp, path); }
   catch (error) { if ((error as NodeJS.ErrnoException).code === "EEXIST") throw new Error("Result path already exists"); throw error; }
   finally { await unlink(tmp).catch(() => undefined); }
 };
@@ -83,11 +82,11 @@ const conclusive = (evaluation: ReturnType<typeof evaluateCapacity>["stages"][nu
 export async function runBenchmark(options: RunOptions): Promise<{ result: BenchmarkResult; resultPath: string }> {
   if (!options || typeof options.backend !== "string" || !options.backend || !options.config || !options.resultPath || basename(options.resultPath).includes("..") || options.resultPath.includes("\0") || options.resultPath.split(/[\\/]/).includes("..")) throw new Error("invalid benchmark options");
   const d = options.dependencies ?? {};
-  if (await lstat(options.resultPath).then(() => true).catch(() => false)) throw new Error("Result path already exists");
+  try { await lstat(options.resultPath); throw new Error("Result path already exists"); } catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
   const load = d.loadBackend ?? (async name => (await import("./backend.js")).loadBackend(name) as Promise<SetupBackend>);
   const backend = await load(options.backend);
-  const write = d.write ?? ((path, text) => writeFile(path, text, { encoding: "utf8", mode: 0o600 }));
-  await mkdir(dirname(options.resultPath), { recursive: true });
+  const write = d.write ?? ((path, text, options) => writeFile(path, text, { encoding: "utf8", mode: 0o600, flag: options.flag }));
+  await mkdir(dirname(options.resultPath), { recursive: true }); const parent = await lstat(dirname(options.resultPath)); if (!parent.isDirectory() || parent.isSymbolicLink()) throw new Error("Result parent must be a non-symlink directory");
   const started = (d.now ?? (() => new Date()))();
   const stageDurationMs = options.config.stageSeconds * 1_000;
   const overloadThresholds = {
@@ -127,7 +126,7 @@ export async function runBenchmark(options: RunOptions): Promise<{ result: Bench
     stages: [], resources: [], capacity: emptyCapacity(), failures: [], valid: false, validityReasons: ["run incomplete"],
   };
   const save = async () => atomic(options.resultPath, serialize(result), write);
-  let stopFailure: unknown;
+  let runFailure: unknown; let stopFailure: unknown; let saveFailure: unknown;
   let baseline: BackendInfo | undefined;
   try {
     await backend.doctor();
@@ -222,17 +221,15 @@ export async function runBenchmark(options: RunOptions): Promise<{ result: Bench
     }
     result.valid = result.correctness.findings.every(finding => finding.passed) && result.stages.length > 0 && result.stages.every(stage => stage.valid) && result.capacity.users > 0;
     result.validityReasons = result.valid ? [] : ["one or more benchmark prerequisites failed"];
-    await save();
   } catch (error) {
-    result.failures.push(safeErrorMessage(error));
-    result.valid = false;
-    result.validityReasons = ["benchmark failed"];
-    await save().catch(() => undefined);
-    throw error;
+    runFailure = error; result.failures.push(safeErrorMessage(error)); result.valid = false; result.validityReasons = ["benchmark failed"];
   } finally {
     try { await backend.stop(); }
-    catch (error) { stopFailure = error; result.failures.push(safeErrorMessage(error)); result.valid = false; result.validityReasons.push("backend stop failed"); await save().catch(() => undefined); }
+    catch (error) { stopFailure = error; result.failures.push(safeErrorMessage(error)); result.valid = false; result.validityReasons.push("backend stop failed"); }
+    try { await save(); } catch (error) { saveFailure = error; }
   }
+  if (runFailure) throw runFailure;
   if (stopFailure) throw stopFailure;
+  if (saveFailure) throw saveFailure;
   return { result, resultPath: options.resultPath };
 }

@@ -14,15 +14,14 @@ const repeated = async (count: number): Promise<BenchmarkResult[]> => {
   return Array.from({ length: count }, (_, index) => {
     const result = structuredClone(base);
     result.runId = `run-${index + 1}`;
-    result.capacity.users = [1, 2, 10, 20][index]!;
-    result.stages[0]!.workflowTransactionsPerSecond = [10, 20, 100, 30][index]!;
-    result.stages[0]!.sdkOperationsPerSecond = [20, 40, 200, 60][index]!;
-    result.stages[0]!.readOperationsPerSecond = [15, 30, 150, 45][index]!;
-    result.stages[0]!.writeOperationsPerSecond = [5, 10, 50, 15][index]!;
-    result.stages[0]!.operationClassMetrics.read.latencyP95Ms = [90, 100, 130, 110][index]!;
-    result.stages[0]!.operationClassMetrics.read.latencyP99Ms = [120, 140, 180, 160][index]!;
-    result.stages[0]!.operationClassMetrics.read.errorRate = [0, 0.01, 0.02, 0.03][index]!;
-    for (const snapshot of result.resources[0]!.snapshots!) snapshot.runner.cpuPercent = [10, 20, 30, 40][index]!;
+    result.config.maxConcurrency = 20; result.capacity.users = [1, 2, 10, 20][index]!;
+    for (const users of [1, 10, 20]) { const stage = structuredClone(result.stages[0]!); stage.requestedUsers = users; stage.achievedUsers = users; result.stages.push(stage); const resource = structuredClone(result.resources[0]!); resource.name = `stage-${users}`; result.resources.push(resource); }
+    result.stages.sort((left, right) => left.requestedUsers - right.requestedUsers);
+    for (const stage of result.stages) {
+      stage.workflowTransactionsPerSecond = [10, 20, 100, 30][index]!; stage.sdkOperationsPerSecond = [20, 40, 200, 60][index]!; stage.readOperationsPerSecond = [15, 30, 150, 45][index]!; stage.writeOperationsPerSecond = [5, 10, 50, 15][index]!;
+      stage.operationClassMetrics.read.latencyP95Ms = [90, 100, 130, 110][index]!; stage.operationClassMetrics.read.latencyP99Ms = [120, 140, 180, 160][index]!; const readErrors = [0, 1, 2, 3][index]!; Object.assign(stage.operationClassMetrics.read, { failed: readErrors, completed: 100 - readErrors, errorRate: readErrors / 100 });
+    }
+    for (const resource of result.resources) for (const snapshot of resource.snapshots!) snapshot.runner.cpuPercent = [10, 20, 30, 40][index]!;
     return result;
   });
 };
@@ -54,12 +53,15 @@ test("renders deterministic valid Markdown and CSV with all required report sect
     "Workflow TPS",
     "Read attempts",
     "Read p50 (ms)",
-    "PASS (p95 <= 500 ms; errors <= 5.00%)",
+    "PASS (p95 &lt;= 500 ms; errors &lt; 5.00%)",
     "Resource samples",
     "250000000",
     "5800",
     "aaaaaaaaaaaa",
     "bbbbbbbbbbbb",
+    "CPU (%)",
+    "RSS/memory (bytes)",
+    "block read (bytes) 3000",
     "local SMTP \\| disabled",
     "timeout \\| \"safe\", retry, then stop",
     "[result-pass.json](./result-pass.json)",
@@ -75,7 +77,7 @@ test("renders invalid reasons, failures, and unavailable resources without inven
   assert.match(report.markdown, /# INVALID benchmark result/);
   assert.match(report.markdown, /correctness \\\| prerequisite failed/);
   assert.match(report.markdown, /backend health check failed, safe detail/);
-  assert.match(report.markdown, /FAIL \(p95 <= 500 ms; errors <= 5\.00%\)/);
+  assert.match(report.markdown, /FAIL \(p95 &lt;= 500 ms; errors &lt; 5\.00%\)/);
   assert.match(report.markdown, /runner probe unavailable/);
   assert.match(report.markdown, /docker stats unavailable/);
   assert.match(report.markdown, /unavailable \(official SDK metadata unavailable\)/);
@@ -88,7 +90,7 @@ test("renders invalid reasons, failures, and unavailable resources without inven
 
 test("redacts bounded error text and rejects malformed or non-finite required fields", async () => {
   const result = await fixture();
-  result.failures = ["password=hunter2 Authorization: Bearer abc.def.ghi token=secret-token"];
+  result.correctness.findings[0]!.message = "password=hunter2 Authorization: Bearer abc.def.ghi token=secret-token";
   result.stages[0]!.errorExamples = Array.from({ length: 40 }, (_, index) => ({ ...result.stages[0]!.errorExamples[0]!, message: `safe error ${index}` }));
   const report = createBenchmarkReport(result, "result-pass.json");
   assert.doesNotMatch(report.markdown + report.csv, /hunter2|abc\.def\.ghi|secret-token/);
@@ -100,10 +102,36 @@ test("redacts bounded error text and rejects malformed or non-finite required fi
   assert.throws(() => validateBenchmarkResult({ ...result, environment: {} }), /environment/i);
 });
 
+test("rejects semantically inconsistent benchmark results", async () => {
+  const cases: Array<[string, (result: BenchmarkResult) => void]> = [
+    ["achieved users", result => { result.stages[0]!.achievedUsers = result.stages[0]!.requestedUsers + 1; }],
+    ["class counts", result => { result.stages[0]!.operationClassMetrics.read = { ...result.stages[0]!.operationClassMetrics.read, attempted: 1, completed: 999 }; }],
+    ["class error rate", result => { result.stages[0]!.operationClassMetrics.read.errorRate = 0.5; }],
+    ["percentile order", result => { result.stages[0]!.operationClassMetrics.read.latencyP50Ms = 700; }],
+    ["stage uniqueness", result => { result.stages.push(structuredClone(result.stages[0]!)); }],
+    ["stage validity", result => { result.stages[0]!.validityReasons = ["contradiction"]; }],
+    ["settings integer", result => { result.settings.minClassSamples = 1.5; }],
+    ["byte integer", result => { result.resources[0]!.snapshots![0]!.runner.rssBytes = 1.5; }],
+    ["valid prerequisites", result => { result.failures = ["failure"]; }],
+    ["selected capacity SLO", result => { Object.assign(result.stages[0]!.operationClassMetrics.read, { failed: 5, completed: 95, errorRate: 0.05 }); }],
+  ];
+  for (const [label, mutate] of cases) { const result = await fixture(); mutate(result); assert.throws(() => validateBenchmarkResult(result), /Invalid/, label); }
+});
+
+test("uses strict error SLO boundaries and escapes active Markdown and CSV content", async () => {
+  const boundary = await fixture("fail"); Object.assign(boundary.stages[0]!.operationClassMetrics.read, { attempted: 100, completed: 95, failed: 5, errorRate: 0.05, latencyP95Ms: 500 });
+  assert.match(createBenchmarkReport(boundary, "boundary.json").markdown, /FAIL \(p95 &lt;= 500 ms; errors &lt; 5\.00%\)/);
+  const injected = await fixture(); injected.correctness.findings[0]!.name = "<img src=x onerror=alert(1)> [x](javascript:alert(1))";
+  const markdown = createBenchmarkReport(injected, "x](javascript:alert(1)).json").markdown;
+  assert.doesNotMatch(markdown, /<img|(?:^|[^\\])\[x\]\(javascript:/m); assert.match(markdown, /&lt;img src=x onerror=alert\(1\)&gt;/);
+  const formula = await fixture("fail"); formula.stages[0]!.validityReasons = ["=CMD()"];
+  assert.match(createBenchmarkReport(formula, "formula.json").csv, /'=CMD\(\)/);
+});
+
 test("writes both reports atomically with private permissions and refuses overwrite by default", async () => {
   const dir = await mkdtemp(join(tmpdir(), "bench-report-"));
   const jsonPath = join(dir, "run.json");
-  const result = await fixture(); result.failures = ["password=writer-secret Authorization: Bearer abc.def.ghi"];
+  const result = await fixture(); result.correctness.findings[0]!.message = "password=writer-secret Authorization: Bearer abc.def.ghi";
   await writeFile(jsonPath, JSON.stringify(result), { mode: 0o600 });
   const written = await writeBenchmarkReport(result, jsonPath);
   assert.equal(written.markdownPath, join(dir, "run.md"));
@@ -165,10 +193,22 @@ test("lists exact aggregation incompatibilities and only compatibility override 
     dataset: sourceConfig.dataset, publishable: sourceConfig.publishable, name: sourceConfig.name,
   };
   assert.doesNotThrow(() => aggregateBenchmarkResults(reordered));
+  const duplicateRuns = await repeated(3); duplicateRuns[1]!.runId = duplicateRuns[0]!.runId;
+  assert.throws(() => aggregateBenchmarkResults(duplicateRuns, { override: true }), /distinct run IDs/i);
   const settingsChanged = await repeated(3); settingsChanged[1]!.settings.minClassSamples++;
   assert.throws(() => aggregateBenchmarkResults(settingsChanged), /settings/);
   const hostChanged = await repeated(3); hostChanged[1]!.environment.hostname = "other-host";
   assert.throws(() => aggregateBenchmarkResults(hostChanged), /hardware/);
+  const commitChanged = await repeated(3); commitChanged[1]!.environment.gitCommit = "abcdefabcdefabcdefabcdefabcdefabcdefabcd";
+  assert.throws(() => aggregateBenchmarkResults(commitChanged), /gitCommit/); assert.throws(() => aggregateBenchmarkResults(commitChanged, { override: true }), /identical clean git/i);
+  const runtimeChanged = await repeated(3); runtimeChanged[1]!.environment.runtimeVersion = "v23.0.0";
+  assert.throws(() => aggregateBenchmarkResults(runtimeChanged), /runtimeVersion/);
+  const nodeChanged = await repeated(3); nodeChanged[1]!.environment.nodeVersion = "v23.0.0";
+  assert.throws(() => aggregateBenchmarkResults(nodeChanged), /nodeVersion/);
+  const versionsChanged = await repeated(3); versionsChanged[1]!.versions = { ...versionsChanged[1]!.versions, runtime: "v23.0.0" };
+  assert.throws(() => aggregateBenchmarkResults(versionsChanged), /versions/);
+  const dirty = await repeated(3); dirty[1]!.environment.gitDirty = true;
+  assert.throws(() => aggregateBenchmarkResults(dirty, { override: true }), /clean git/i);
   const projectChanged = await repeated(3); projectChanged[1]!.backend.supabaseProjectId = "other-project"; projectChanged[1]!.environment.backend.supabaseProjectId = "other-project";
   assert.throws(() => aggregateBenchmarkResults(projectChanged), /supabaseProjectId/);
   const schemaRuns = await repeated(3); (schemaRuns[2] as { schemaVersion: number }).schemaVersion = 2;
@@ -196,10 +236,10 @@ test("keeps cross-backend aggregates separate", async () => {
 test("aggregates only common requested-user stages and reports every missing stage", async () => {
   const runs = await repeated(3);
   for (const result of runs.slice(0, 2)) {
-    const stage = structuredClone(result.stages[0]!); stage.requestedUsers = 4; stage.achievedUsers = 4; result.stages.push(stage);
+    const stage = structuredClone(result.stages[0]!); stage.requestedUsers = 4; stage.achievedUsers = 4; result.stages.push(stage); result.stages.sort((left, right) => left.requestedUsers - right.requestedUsers);
     const resource = structuredClone(result.resources[0]!); resource.name = "stage-4"; result.resources.push(resource);
   }
   const aggregate = aggregateBenchmarkResults(runs);
-  assert.deepEqual(aggregate.stages.map(stage => stage.requestedUsers), [2]);
+  assert.deepEqual(aggregate.stages.map(stage => stage.requestedUsers), [1, 2, 10, 20]);
   assert.deepEqual(aggregate.missingStages, [{ requestedUsers: 4, missingRunIds: ["run-3"] }]);
 });
