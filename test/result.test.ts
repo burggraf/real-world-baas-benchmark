@@ -9,10 +9,11 @@ test("benchmark results survive JSON round trip", () => {
     backend: { name: "pocketbase", version: "0.1", endpoint: "http://localhost" }, dataset: "small", seed: 42,
     environment: { runtime: "node", runtimeVersion: "22", os: "linux", architecture: "x64", host: "test", cpu: "CPU", memoryBytes: 1024, release: "test", logicalCores: 1, cpuModel: "CPU", totalMemoryBytes: 1024, hostname: "test", nodeVersion: "22", npmVersion: null, gitCommit: null, gitDirty: null, backend: { name: "pocketbase", version: "0.1", endpoint: "http://127.0.0.1" }, sdkVersion: null, dockerVersion: null, supabaseVersion: null, unavailable: {} },
     config: { name: "quick", publishable: false, dataset: "small", seed: 42, warmupSeconds: 1, stageSeconds: 1, concurrency: [1], maxConcurrency: 1, timeoutMs: 1000, thinkTimeMs: { min: 0, max: 0 }, weights: { dashboard: 100, taskList: 0, taskDetail: 0, createTask: 0, updateTask: 0, addComment: 0, search: 0, profileUpdate: 0, signIn: 0 }, slos: { read: { p95Ms: 1, maxErrorRate: 1 }, write: { p95Ms: 1, maxErrorRate: 1 }, authSearch: { p95Ms: 1, maxErrorRate: 1 } } },
+    settings: { warmupUserCount: 1, warmupWritesUnscored: true, resourceIntervalMs: 1000, resourceMaxSamples: { stageDurationMs: 1000, graceMs: 1000, formula: "ceil((stageDurationMs + graceMs) / intervalMs) + 2", value: 4 }, overloadThresholds: { cpuPercent: 90, p99Ms: 100, maxMs: 250, consecutiveSamples: 3 }, minClassSamples: 1, minAchievedRatio: 0.95, saturationMaterialIncrease: 0.2, saturationMaxThroughputGain: 0.1, maxLatencySamples: 2_000_000, maxErrorExamples: 100 },
     versions: { node: "22" }, correctness: { findings: [] }, stages: [], resources: [], capacity: { users: 1, saturation: false, reasons: [] }, failures: [], valid: true, validityReasons: [],
   };
   const parsed = JSON.parse(JSON.stringify(result)) as BenchmarkResult;
-  assert.equal(parsed.schemaVersion, 1); assert.equal(parsed.backend.name, "pocketbase"); assert.equal(parsed.dataset, "small"); assert.deepEqual(parsed.stages, []); assert.equal(parsed.valid, true); assert.equal(parsed.capacity.users, 1);
+  assert.equal(parsed.schemaVersion, 1); assert.equal(parsed.backend.name, "pocketbase"); assert.equal(parsed.dataset, "small"); assert.deepEqual(parsed.stages, []); assert.equal(parsed.valid, true); assert.equal(parsed.capacity.users, 1); assert.equal(parsed.settings.maxLatencySamples, 2_000_000); assert.equal(parsed.settings.overloadThresholds.p99Ms, 100);
 });
 
 test("stage metrics expose units in field names and values", () => {

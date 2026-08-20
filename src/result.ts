@@ -30,8 +30,21 @@ export interface StageMetrics {
 }
 export interface ResourceMetrics { name: string; unit: string; samples: (number | null)[]; reasons?: (string | null)[]; snapshots?: ResourceSnapshot[]; reason?: string; }
 export interface Capacity { users: number; saturation: boolean; reasons: string[]; }
+export interface BenchmarkSettings {
+  warmupUserCount: number;
+  warmupWritesUnscored: true;
+  resourceIntervalMs: number;
+  resourceMaxSamples: { stageDurationMs: number; graceMs: number; formula: "ceil((stageDurationMs + graceMs) / intervalMs) + 2"; value: number };
+  overloadThresholds: { cpuPercent: number; p99Ms: number; maxMs: number; consecutiveSamples: number };
+  minClassSamples: number;
+  minAchievedRatio: number;
+  saturationMaterialIncrease: number;
+  saturationMaxThroughputGain: number;
+  maxLatencySamples: number;
+  maxErrorExamples: number;
+}
 export interface BenchmarkResult {
   schemaVersion: 1; runId: string; startedAt: string; publishable: boolean; backend: BackendInfo; dataset: DatasetProfile["name"]; seed: number;
-  environment: Environment; versions: Record<string, string>; config: BenchmarkConfig; correctness: Correctness; stages: StageMetrics[]; resources: ResourceMetrics[];
+  environment: Environment; versions: Record<string, string>; config: BenchmarkConfig; settings: BenchmarkSettings; correctness: Correctness; stages: StageMetrics[]; resources: ResourceMetrics[];
   capacity: Capacity; failures: string[]; valid: boolean; validityReasons: string[];
 }
