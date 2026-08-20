@@ -132,9 +132,9 @@ export async function portAvailable(port: number): Promise<boolean> {
   });
 }
 
-function ownContainerIds(projectId: string, runningOnly = false): number[] {
+function ownContainerIds(projectId: string, runningOnly = false): string[] {
   const stdout = runSynchronousProbe("docker", ["ps", runningOnly ? "-q" : "-aq", "--filter", `label=com.supabase.cli.project=${projectId}`], "Docker");
-  return stdout.trim() ? stdout.trim().split(/\s+/).map(id => Number.parseInt(id.slice(0, 8), 16)) : [];
+  return stdout.trim() ? stdout.trim().split(/\s+/).filter(id => /^[0-9a-f]+$/i.test(id)) : [];
 }
 function removeOwnContainers(projectId: string): void {
   const stdout = runSynchronousProbe("docker", ["ps", "-aq", "--filter", `label=com.supabase.cli.project=${projectId}`], "Docker");
@@ -151,7 +151,7 @@ export class SupabaseProcess {
     const ids = ownContainerIds(this.options.projectId, true);
     if (ids.length) {
       const status = await this.status();
-      return { name: "supabase", version: SUPABASE_VERSION, endpoint: status.API_URL, processIds: ids };
+      return { name: "supabase", version: SUPABASE_VERSION, endpoint: status.API_URL, supabaseProjectId: this.options.projectId };
     }
     for (const port of Object.values(this.options.ports)) {
       if (!(await portAvailable(port))) throw new Error(`Supabase benchmark port ${port} is in use by another process`);
