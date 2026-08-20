@@ -1,6 +1,7 @@
 import { randomBytes } from "node:crypto";
 import PocketBase, { BaseAuthStore, ClientResponseError, type RecordModel } from "pocketbase";
 import type { Backend, AppSession, BackendInfo } from "../../src/backend.js";
+import { buildSeedVirtualUserSpecs } from "../../src/run.js";
 import type {
   Activity,
   AddCommentInput,
@@ -743,6 +744,8 @@ export const backend: Backend = {
   start: async () => pocketBaseProcess.start(),
   reset: async () => pocketBaseProcess.reset(),
   seed,
+  seedCorrectnessFixture: seedPocketBaseCorrectnessFixture,
+  buildVirtualUserSpecs: (profile, count, seedValue) => buildSeedVirtualUserSpecs(profile, count, seedValue, (_id, canonical) => canonical, LOCAL_BENCHMARK_PASSWORD),
   createSession,
   stop: async () => pocketBaseProcess.stop(),
 };

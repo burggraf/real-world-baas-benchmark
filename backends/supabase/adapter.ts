@@ -1,6 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import type { Backend, AppSession, BackendInfo } from "../../src/backend.js";
+import { buildSeedVirtualUserSpecs } from "../../src/run.js";
 import type {
   Activity, AddCommentInput, Comment, CreateTaskInput, Credentials, Dashboard, DashboardInput, DatasetProfile,
   GetTaskInput, ListTasksInput, Membership, Organization, Page, Project, SearchTasksInput, Task, TaskDetail,
@@ -437,6 +438,8 @@ export const backend: Backend = {
     measuredConfiguration = publicSupabaseConfiguration(await supabaseProcess.reset());
   },
   seed,
+  seedCorrectnessFixture: seedSupabaseCorrectnessFixture,
+  buildVirtualUserSpecs: (profile, count, seedValue) => buildSeedVirtualUserSpecs(profile, count, seedValue, (id) => benchmarkEmail(profile, id), LOCAL_BENCHMARK_PASSWORD),
   createSession,
   stop: async () => {
     try { await supabaseProcess.stop(); }

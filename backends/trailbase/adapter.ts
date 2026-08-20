@@ -1,6 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { DeleteOperation, initClient, type Client, type FilterOrComposite, type ListOpts } from "trailbase";
 import type { Backend, AppSession } from "../../src/backend.js";
+import { buildSeedVirtualUserSpecs } from "../../src/run.js";
 import type {
   Activity, AddCommentInput, Comment, CreateTaskInput, Credentials, Dashboard, DashboardInput, DatasetProfile,
   GetTaskInput, ListTasksInput, Membership, Organization, Page, Project, Role, SearchTasksInput, Task, TaskDetail,
@@ -589,6 +590,8 @@ export const backend: Backend = {
   reset: () => trailBaseProcess.reset(),
   stop: () => trailBaseProcess.stop(),
   seed: seedTrailBase,
+  seedCorrectnessFixture: seedTrailBaseCorrectnessFixture,
+  buildVirtualUserSpecs: (profile, count, seedValue) => buildSeedVirtualUserSpecs(profile, count, seedValue, (id) => benchmarkEmail(profile, id), LOCAL_BENCHMARK_PASSWORD),
   createSession: async (credentials: Credentials): Promise<AppSession> => {
     const client = initClient(resolveTrailBaseOptions().endpoint);
     await sdk(() => client.login(credentials.email, credentials.password));
