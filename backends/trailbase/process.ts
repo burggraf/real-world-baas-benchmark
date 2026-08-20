@@ -1,4 +1,5 @@
-import { existsSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { createReadStream, existsSync } from "node:fs";
 import { access, appendFile, cp, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
 import { basename, dirname, isAbsolute, join, parse, resolve } from "node:path";
@@ -8,6 +9,7 @@ import { DatabaseSync, type SQLOutputValue } from "node:sqlite";
 import type { BackendInfo } from "../../src/backend.js";
 
 export const TRAILBASE_VERSION = "0.33.1";
+export const TRAILBASE_BINARY_SHA256 = "cf870bd8daef2a9c5ae26d34267618b29961188ef3be312722f363538ed787fb";
 export const LOCAL_SETUP_EMAIL = "setup@trailbase.bench.test";
 export const LOCAL_SETUP_PASSWORD = "TrailBase-setup-only-39!";
 export const LOCAL_BENCHMARK_PASSWORD = "Benchmark-local-only-39!";
@@ -30,6 +32,22 @@ export interface TrailBaseProcessOptions {
 }
 
 interface OwnerMarker { pid: number; binary: string }
+
+export function assertTrailBaseVersionOutput(output: string): void {
+  const firstLine = output.split(/\r?\n/, 1)[0] || "";
+  const match = /^trail v(?<version>\d+\.\d+\.\d+)-0-g[0-9a-f]+ \(\d{4}-\d{2}-\d{2}\)$/.exec(firstLine);
+  if (match?.groups?.version !== TRAILBASE_VERSION) throw new Error(`Expected exact TrailBase ${TRAILBASE_VERSION} version output`);
+}
+
+export async function trailBaseBinarySha256(binary: string): Promise<string> {
+  return new Promise((resolveDigest, reject) => {
+    const hash = createHash("sha256");
+    const input = createReadStream(binary);
+    input.once("error", reject);
+    input.on("data", chunk => hash.update(chunk));
+    input.once("end", () => resolveDigest(hash.digest("hex")));
+  });
+}
 
 function findRepoRoot(): string {
   let current = dirname(fileURLToPath(import.meta.url));
@@ -180,8 +198,11 @@ export class TrailBaseProcess {
     await access(this.options.binary);
     await access(join(this.options.repoRoot, "backends/trailbase/config.textproto"));
     await access(this.options.migrationsDir);
+    const digest = await trailBaseBinarySha256(this.options.binary);
+    if (digest !== TRAILBASE_BINARY_SHA256) throw new Error(`Expected TrailBase executable SHA-256 ${TRAILBASE_BINARY_SHA256}`);
     const version = spawnSync(this.options.binary, ["--version"], { encoding: "utf8", shell: false, timeout: SETUP_TIMEOUT_MS, maxBuffer: SETUP_MAX_BUFFER });
-    if (version.error || version.status !== 0 || !version.stdout.includes(`v${TRAILBASE_VERSION}`)) throw new Error(`Expected TrailBase ${TRAILBASE_VERSION} binary`);
+    if (version.error || version.status !== 0) throw new Error(`Expected TrailBase ${TRAILBASE_VERSION} binary`);
+    assertTrailBaseVersionOutput(version.stdout);
     if (running(this.child)) {
       if (!await health(this.options.endpoint)) throw new Error("Owned TrailBase process is unhealthy");
     } else if (!await portAvailable(this.options.listen)) {
@@ -193,7 +214,7 @@ export class TrailBaseProcess {
       endpoint: this.options.endpoint,
       processIds: running(this.child) && this.child.pid ? [this.child.pid] : [],
       deviations: [
-        "TrailBase list-rule denial returns an empty page; protected record denial is concealed as 404.",
+        "TrailBase list-rule denial returns an empty page rather than an authorization response.",
         "The v0.33.1 release schema and CLI verify command are incompatible; setup verifies registered users with a constrained owned-depot transaction.",
       ],
     };

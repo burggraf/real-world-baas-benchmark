@@ -11,6 +11,8 @@ import { datasetProfiles } from "../src/seed.js";
 
 const live = process.env.BENCH_LIVE === "1";
 const denied = (error: unknown): boolean => error instanceof BenchmarkOperationError && error.classification === "authorization";
+const invalidResponse = (error: unknown): boolean => error instanceof BenchmarkOperationError && error.classification === "invalid_response";
+const statusIs = (expected: number) => (error: unknown): boolean => typeof error === "object" && error !== null && "status" in error && (error as { status?: unknown }).status === expected;
 
 type LiveState = {
   dataDir: string;
@@ -112,12 +114,26 @@ test("TrailBase live lifecycle, shared correctness, and tenant boundaries", { sk
     const admin = await backend.createSession(fixture.admin);
     const member = await backend.createSession(fixture.member);
     const outsider = await backend.createSession(fixture.outsider);
+    let foreignCommentId = "";
     try {
       await assert.rejects(outsider.getTask({ organizationId: fixture.organizationId, projectId: fixture.projectId, taskId: fixture.taskId!, comments: { page: 0, pageSize: 10 } }), denied);
       await assert.rejects(admin.updateMembershipRole({ organizationId: fixture.organizationId, membershipId: fixture.foreignMembershipId, role: "admin" }), denied);
       await assert.rejects(member.updateMembershipRole({ organizationId: fixture.organizationId, membershipId: fixture.adminMembershipId, role: "member" }), denied);
       await assert.rejects(owner.createTask({ organizationId: fixture.organizationId, projectId: fixture.projectId, title: "bad assignee", description: "cross tenant", priority: "low", assigneeId: fixture.outsiderUserId }), denied);
       await assert.rejects(owner.updateTask({ organizationId: fixture.organizationId, projectId: fixture.projectId, taskId: fixture.taskId!, assigneeId: fixture.outsiderUserId }), denied);
+      const originalMemberProfile = await member.getProfile();
+      await assert.rejects(member.updateProfile({ displayName: "" }), invalidResponse);
+      assert.deepEqual(await member.getProfile(), originalMemberProfile);
+      const originalFixtureTask = (await member.getTask({ organizationId: fixture.organizationId, projectId: fixture.projectId, taskId: fixture.taskId!, comments: { page: 0, pageSize: 10 } })).task;
+      await assert.rejects(member.createTask({ organizationId: fixture.organizationId, projectId: fixture.projectId, title: "", description: "invalid", priority: "low" }), invalidResponse);
+      await assert.rejects(member.updateTask({ organizationId: fixture.organizationId, projectId: fixture.projectId, taskId: fixture.taskId!, title: "" }), invalidResponse);
+      assert.deepEqual((await member.getTask({ organizationId: fixture.organizationId, projectId: fixture.projectId, taskId: fixture.taskId!, comments: { page: 0, pageSize: 10 } })).task, originalFixtureTask);
+      await assert.rejects(member.addComment({ organizationId: fixture.organizationId, projectId: fixture.projectId, taskId: fixture.taskId!, body: "" }), invalidResponse);
+      const validComment = await member.addComment({ organizationId: fixture.organizationId, projectId: fixture.projectId, taskId: fixture.taskId!, body: "Not empty" });
+      await assert.rejects(member.updateComment({ organizationId: fixture.organizationId, projectId: fixture.projectId, taskId: fixture.taskId!, commentId: validComment.id, body: "" }), invalidResponse);
+      const preservedComment = (await member.getTask({ organizationId: fixture.organizationId, projectId: fixture.projectId, taskId: fixture.taskId!, comments: { page: 0, pageSize: 100 } })).comments.items.find(comment => comment.id === validComment.id);
+      assert.equal(preservedComment?.body, "Not empty");
+      foreignCommentId = (await outsider.addComment({ organizationId: fixture.secondOrganizationId, projectId: fixture.secondProjectId, taskId: fixture.foreignTaskId, body: "Foreign comment" })).id;
 
       const delegated = await owner.createTask({ organizationId: fixture.organizationId, projectId: fixture.projectId, title: "Delegated update", description: "owner created", priority: "low" });
       await member.updateTask({ organizationId: fixture.organizationId, projectId: fixture.projectId, taskId: delegated.id, title: "Member updated" });
@@ -126,9 +142,12 @@ test("TrailBase live lifecycle, shared correctness, and tenant boundaries", { sk
 
       const task = await member.createTask({ organizationId: fixture.organizationId, projectId: fixture.projectId, title: "Percent 100%_Done", description: "member created", priority: "low" });
       const wildcardDecoy = await member.createTask({ organizationId: fixture.organizationId, projectId: fixture.projectId, title: "Percent 100XXDone", description: "decoy", priority: "low" });
+      const mixedCase = await member.createTask({ organizationId: fixture.organizationId, projectId: fixture.projectId, title: "MixedCase Needle", description: "case check", priority: "low" });
       const search = await member.searchTasks({ organizationId: fixture.organizationId, projectId: fixture.projectId, query: "100%_Done", page: 0, pageSize: 10 });
       assert.deepEqual(search.items.map(item => item.id), [task.id]);
       assert.ok(!search.items.some(item => item.id === wildcardDecoy.id));
+      const lowerSearch = await member.searchTasks({ organizationId: fixture.organizationId, projectId: fixture.projectId, query: "needle", page: 0, pageSize: 10 });
+      assert.deepEqual(lowerSearch.items.map(item => item.id), [mixedCase.id]);
       await member.updateTask({ organizationId: fixture.organizationId, projectId: fixture.projectId, taskId: task.id, title: "activity updated" });
       const comment = await member.addComment({ organizationId: fixture.organizationId, projectId: fixture.projectId, taskId: task.id, body: "activity comment" });
       await member.updateComment({ organizationId: fixture.organizationId, projectId: fixture.projectId, taskId: task.id, commentId: comment.id, body: "activity comment updated" });
@@ -145,19 +164,82 @@ test("TrailBase live lifecycle, shared correctness, and tenant boundaries", { sk
       await Promise.all([owner.close(), admin.close(), member.close(), outsider.close()]);
     }
 
+    const directOutsider = initClient(state.endpoint);
+    await directOutsider.login(fixture.outsider.email, fixture.outsider.password);
+    const protectedIds: Record<string, number> = {};
+    try {
+      const protectedRows: [string, { column: string; op: "equal"; value: string }[]][] = [
+        ["profiles", [{ column: "publicId", op: "equal", value: fixture.outsiderUserId }]],
+        ["organizations", [{ column: "publicId", op: "equal", value: fixture.secondOrganizationId }]],
+        ["memberships", [{ column: "publicId", op: "equal", value: fixture.foreignMembershipId }]],
+        ["projects", [{ column: "publicId", op: "equal", value: fixture.secondProjectId }]],
+        ["tasks", [{ column: "publicId", op: "equal", value: fixture.foreignTaskId }]],
+        ["comments", [{ column: "publicId", op: "equal", value: foreignCommentId }]],
+        ["activities", [{ column: "organizationId", op: "equal", value: fixture.secondOrganizationId }]],
+      ];
+      for (const [table, filters] of protectedRows) {
+        const result = await directOutsider.records<Record<string, unknown>>(table).list({ filters, pagination: { limit: 1, offset: 0 } });
+        assert.equal(result.records.length, 1, table);
+        protectedIds[table] = Number(result.records[0]!.id);
+      }
+    } finally { await directOutsider.logout(); }
+
     const directMember = initClient(state.endpoint);
     await directMember.login(fixture.member.email, fixture.member.password);
     try {
-      const foreign = await directMember.records<Record<string, unknown>>("tasks").list({ filters: [{ column: "organizationId", op: "equal", value: fixture.secondOrganizationId }], pagination: { limit: 10, offset: 0 }, count: true });
-      assert.deepEqual(foreign.records, []);
-      await assert.rejects(directMember.records("tasks").create({ publicId: "fxbad0000000001", organizationId: fixture.secondOrganizationId, projectId: fixture.secondProjectId, creatorId: fixture.memberUserId, assigneeId: null, title: "bad", description: "bad", status: "todo", priority: "low", dueDate: null }), error => (error as { status?: number }).status === 403);
-      const ownTask = await directMember.records<Record<string, unknown>>("tasks").list({ filters: [{ column: "publicId", op: "equal", value: fixture.taskId! }], pagination: { limit: 1, offset: 0 } });
-      assert.equal(ownTask.records.length, 1);
-      await assert.rejects(directMember.records("tasks").update(Number(ownTask.records[0]!.id), { assigneeId: fixture.outsiderUserId }));
+      const hiddenRows: [string, { column: string; op: "equal"; value: string }[]][] = [
+        ["profiles", [{ column: "publicId", op: "equal", value: fixture.outsiderUserId }]],
+        ["organizations", [{ column: "publicId", op: "equal", value: fixture.secondOrganizationId }]],
+        ["memberships", [{ column: "publicId", op: "equal", value: fixture.foreignMembershipId }]],
+        ["projects", [{ column: "publicId", op: "equal", value: fixture.secondProjectId }]],
+        ["tasks", [{ column: "organizationId", op: "equal", value: fixture.secondOrganizationId }]],
+        ["comments", [{ column: "organizationId", op: "equal", value: fixture.secondOrganizationId }]],
+        ["activities", [{ column: "organizationId", op: "equal", value: fixture.secondOrganizationId }]],
+      ];
+      for (const [table, filters] of hiddenRows) {
+        const result = await directMember.records<Record<string, unknown>>(table).list({ filters, pagination: { limit: 10, offset: 0 }, count: true });
+        assert.deepEqual(result.records, [], table);
+      }
+      for (const [table, internalId] of Object.entries(protectedIds)) await assert.rejects(directMember.records(table).read(internalId), statusIs(403));
+
+      await assert.rejects(directMember.records("tasks").create({ publicId: "fxbad0000000001", organizationId: fixture.organizationId, projectId: fixture.secondProjectId, creatorId: fixture.memberUserId, assigneeId: null, title: "cross project", description: "bad", status: "todo", priority: "low", dueDate: null }), statusIs(403));
+      await assert.rejects(directMember.records("tasks").create({ publicId: "fxbad0000000002", organizationId: fixture.organizationId, projectId: fixture.projectId, creatorId: fixture.memberUserId, assigneeId: fixture.outsiderUserId, title: "cross assignee", description: "bad", status: "todo", priority: "low", dueDate: null }), statusIs(403));
+      await assert.rejects(directMember.records("comments").create({ publicId: "fxbad0000000003", organizationId: fixture.organizationId, projectId: fixture.projectId, taskId: fixture.foreignTaskId, authorId: fixture.memberUserId, body: "cross task" }), statusIs(403));
+
+      const directTaskId = await directMember.records<Record<string, unknown>>("tasks").create({ publicId: "fxdtk0000000001", organizationId: fixture.organizationId, projectId: fixture.projectId, creatorId: fixture.memberUserId, assigneeId: null, title: "Direct task", description: "valid", status: "todo", priority: "low", dueDate: null });
+      await directMember.records("tasks").update(directTaskId, { title: "Direct updated", updatedAt: new Date().toISOString(), _activityActorId: fixture.memberUserId });
+      const directCommentId = await directMember.records<Record<string, unknown>>("comments").create({ publicId: "fxdcm0000000001", organizationId: fixture.organizationId, projectId: fixture.projectId, taskId: "fxdtk0000000001", authorId: fixture.memberUserId, body: "Direct comment" });
+      await directMember.records("comments").update(directCommentId, { body: "Direct comment updated", updatedAt: new Date().toISOString(), _activityActorId: fixture.memberUserId });
+
+      await assert.rejects(directMember.records("tasks").update(directTaskId, { assigneeId: fixture.outsiderUserId, updatedAt: new Date().toISOString(), _activityActorId: fixture.memberUserId }), statusIs(403));
       const ownMembership = await directMember.records<Record<string, unknown>>("memberships").list({ filters: [{ column: "publicId", op: "equal", value: fixture.memberMembershipId }], pagination: { limit: 1, offset: 0 } });
-      await assert.rejects(directMember.records("memberships").update(Number(ownMembership.records[0]!.id), { role: "admin" }), error => (error as { status?: number }).status === 403);
-      await assert.rejects(directMember.records("activities").create({ publicId: "fxbad0000000002", organizationId: fixture.organizationId, projectId: fixture.projectId, actorId: fixture.memberUserId, action: "bad", subjectType: "task", subjectId: fixture.taskId }));
+      await assert.rejects(directMember.records("memberships").update(Number(ownMembership.records[0]!.id), { role: "admin" }), statusIs(403));
+      await assert.rejects(directMember.records("activities").create({ publicId: "fxbad0000000004", organizationId: fixture.organizationId, projectId: fixture.projectId, actorId: fixture.memberUserId, action: "bad", subjectType: "task", subjectId: fixture.taskId }), statusIs(403));
+
+      const count = async (table: string): Promise<number> => Number((await directMember.records(table).list({ filters: [{ column: "organizationId", op: "equal", value: fixture.organizationId }], pagination: { limit: 1, offset: 0 }, count: true })).total_count);
+      const beforeMalformed = { tasks: await count("tasks"), comments: await count("comments"), activities: await count("activities") };
+      const ownProfile = await directMember.records<Record<string, unknown>>("profiles").list({ filters: [{ column: "publicId", op: "equal", value: fixture.memberUserId! }], pagination: { limit: 1, offset: 0 } });
+      await assert.rejects(directMember.records("profiles").update(Number(ownProfile.records[0]!.id), { displayName: "" }));
+      await assert.rejects(directMember.records("tasks").create({ publicId: "fxbad0000000005", organizationId: fixture.organizationId, projectId: fixture.projectId, creatorId: fixture.memberUserId, assigneeId: null, title: "", description: "bad", status: "todo", priority: "low", dueDate: null }));
+      await assert.rejects(directMember.records("tasks").update(directTaskId, { title: "", updatedAt: new Date().toISOString(), _activityActorId: fixture.memberUserId }));
+      await assert.rejects(directMember.records("comments").create({ publicId: "fxbad0000000006", organizationId: fixture.organizationId, projectId: fixture.projectId, taskId: "fxdtk0000000001", authorId: fixture.memberUserId, body: "" }));
+      await assert.rejects(directMember.records("comments").update(directCommentId, { body: "", updatedAt: new Date().toISOString(), _activityActorId: fixture.memberUserId }));
+      assert.deepEqual({ tasks: await count("tasks"), comments: await count("comments"), activities: await count("activities") }, beforeMalformed);
+      assert.equal((await directMember.records<Record<string, unknown>>("profiles").read(Number(ownProfile.records[0]!.id))).displayName, "member");
+      assert.equal((await directMember.records<Record<string, unknown>>("tasks").read(directTaskId)).title, "Direct updated");
+      assert.equal((await directMember.records<Record<string, unknown>>("comments").read(directCommentId)).body, "Direct comment updated");
     } finally { await directMember.logout(); }
+
+    const directAdmin = initClient(state.endpoint);
+    await directAdmin.login(fixture.admin.email, fixture.admin.password);
+    try {
+      const memberMembership = await directAdmin.records<Record<string, unknown>>("memberships").list({ filters: [{ column: "publicId", op: "equal", value: fixture.memberMembershipId }], pagination: { limit: 1, offset: 0 } });
+      const memberMembershipId = Number(memberMembership.records[0]!.id);
+      await directAdmin.records("memberships").update(memberMembershipId, { role: "admin" });
+      assert.equal((await directAdmin.records<Record<string, unknown>>("memberships").read(memberMembershipId)).role, "admin");
+      await directAdmin.records("memberships").update(memberMembershipId, { role: "member" });
+      await assert.rejects(directAdmin.records("memberships").update(protectedIds.memberships!, { role: "admin" }), statusIs(403));
+    } finally { await directAdmin.logout(); }
 
     const db = new DatabaseSync(join(state.dataDir, "data/main.db"), { readOnly: true });
     try {

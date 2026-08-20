@@ -78,6 +78,9 @@ function enumString<T extends string>(source: Row, field: string, allowed: reado
   if (!allowed.includes(value as T)) throw new BenchmarkOperationError("invalid_response", { code: "record_enum" });
   return value as T;
 }
+function requireNonEmptyInput(value: string): void {
+  if (!value) throw new BenchmarkOperationError("invalid_response", { code: "record_field" });
+}
 
 export function recordInternalId(value: unknown): number {
   const id = row(value).id;
@@ -136,7 +139,7 @@ export function trailBaseTaskFilters(input: ListTasksInput | SearchTasksInput): 
   ];
   if ("status" in input && input.status !== undefined) filters.push({ column: "status", op: "equal", value: input.status });
   if ("assigneeId" in input && input.assigneeId !== undefined) filters.push(input.assigneeId === null ? { column: "assigneeId", op: "isNull", value: "" } : { column: "assigneeId", op: "equal", value: input.assigneeId });
-  if ("query" in input && input.query) filters.push({ column: "title", op: "regexp", value: escapeRegExp(input.query) });
+  if ("query" in input && input.query) filters.push({ column: "title", op: "regexp", value: `(?i:${escapeRegExp(input.query)})` });
   return filters;
 }
 
@@ -261,6 +264,7 @@ class TrailBaseSession implements AppSession {
   }
 
   async createTask(input: CreateTaskInput): Promise<Task> {
+    requireNonEmptyInput(input.title);
     await this.project(input.organizationId, input.projectId);
     await this.validateAssignee(input.organizationId, input.assigneeId);
     const id = await sdk(() => this.client.records<Row>("tasks").create({
@@ -271,6 +275,7 @@ class TrailBaseSession implements AppSession {
   }
 
   async updateTask(input: UpdateTaskInput): Promise<Task> {
+    if (input.title !== undefined) requireNonEmptyInput(input.title);
     const target = await this.task(input);
     if (input.assigneeId !== undefined) await this.validateAssignee(input.organizationId, input.assigneeId);
     const patch: Row = {};
@@ -284,6 +289,7 @@ class TrailBaseSession implements AppSession {
   }
 
   async addComment(input: AddCommentInput): Promise<Comment> {
+    requireNonEmptyInput(input.body);
     await this.task(input);
     const id = await sdk(() => this.client.records<Row>("comments").create({
       publicId: newId(), organizationId: input.organizationId, projectId: input.projectId, taskId: input.taskId, authorId: this.profileId(), body: input.body,
@@ -292,6 +298,7 @@ class TrailBaseSession implements AppSession {
   }
 
   async updateComment(input: UpdateCommentInput): Promise<Comment> {
+    requireNonEmptyInput(input.body);
     await this.task(input);
     const target = await oneRow(this.client, "comments", [
       { column: "publicId", op: "equal", value: input.commentId },
@@ -329,6 +336,7 @@ class TrailBaseSession implements AppSession {
   }
 
   async updateProfile(input: UpdateProfileInput): Promise<User> {
+    requireNonEmptyInput(input.displayName);
     this.authUser();
     const internalId = recordInternalId(this.profileRow);
     await sdk(() => this.client.records<Row>("profiles").update(internalId, { displayName: input.displayName }));

@@ -5,7 +5,7 @@ CREATE TABLE IF NOT EXISTS profiles (
   publicId TEXT NOT NULL UNIQUE CHECK(length(publicId) = 15 AND publicId NOT GLOB '*[^a-z0-9]*'),
   authId BLOB NOT NULL UNIQUE REFERENCES _user(id),
   email TEXT NOT NULL UNIQUE,
-  displayName TEXT NOT NULL DEFAULT '',
+  displayName TEXT NOT NULL DEFAULT '' CHECK(length(displayName) > 0),
   createdAt TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
   updatedAt TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
 ) STRICT;
@@ -49,7 +49,7 @@ CREATE TABLE IF NOT EXISTS tasks (
   projectId TEXT NOT NULL,
   creatorId TEXT NOT NULL,
   assigneeId TEXT,
-  title TEXT NOT NULL,
+  title TEXT NOT NULL CHECK(length(title) > 0),
   description TEXT NOT NULL DEFAULT '',
   status TEXT NOT NULL CHECK(status IN ('todo', 'in_progress', 'done', 'cancelled')),
   priority TEXT NOT NULL CHECK(priority IN ('low', 'medium', 'high', 'urgent')),
@@ -72,7 +72,7 @@ CREATE TABLE IF NOT EXISTS comments (
   projectId TEXT NOT NULL,
   taskId TEXT NOT NULL,
   authorId TEXT NOT NULL,
-  body TEXT NOT NULL,
+  body TEXT NOT NULL CHECK(length(body) > 0),
   createdAt TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
   updatedAt TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
   _seeded INTEGER NOT NULL DEFAULT 0 CHECK(_seeded IN (0, 1)),
@@ -103,7 +103,8 @@ CREATE INDEX IF NOT EXISTS memberships_org ON memberships(organizationId, role, 
 CREATE INDEX IF NOT EXISTS memberships_user ON memberships(userId, organizationId);
 CREATE INDEX IF NOT EXISTS projects_org ON projects(organizationId, createdAt, publicId);
 CREATE INDEX IF NOT EXISTS tasks_tenant_project ON tasks(organizationId, projectId, createdAt, publicId);
-CREATE INDEX IF NOT EXISTS tasks_assignee ON tasks(organizationId, assigneeId);
+CREATE INDEX IF NOT EXISTS tasks_status ON tasks(organizationId, projectId, status, createdAt, publicId);
+CREATE INDEX IF NOT EXISTS tasks_assignee ON tasks(organizationId, projectId, assigneeId, createdAt, publicId);
 CREATE INDEX IF NOT EXISTS comments_task ON comments(organizationId, projectId, taskId, createdAt, publicId);
 CREATE INDEX IF NOT EXISTS activities_org ON activities(organizationId, createdAt, publicId);
 
