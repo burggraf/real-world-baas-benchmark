@@ -1,4 +1,4 @@
-import { mkdir, rename, unlink, writeFile } from "node:fs/promises";
+import { link, lstat, mkdir, unlink, writeFile } from "node:fs/promises";
 import { basename, dirname } from "node:path";
 import type { Backend, BackendInfo } from "./backend.js";
 import { evaluateCapacity } from "./capacity.js";
@@ -21,7 +21,7 @@ export interface RunDependencies {
   now?: () => Date;
   monotonic?: () => number;
   write?: (path: string, text: string) => Promise<void>;
-  rename?: (from: string, to: string) => Promise<void>;
+  rename?: (from: string, to: string) => Promise<void>; // retained for dependency compatibility; atomic save does not overwrite
   overloadThresholds?: Parameters<typeof evaluateRunnerOverload>[1];
 }
 export interface RunOptions { backend: string; config: BenchmarkConfig; resultPath: string; dependencies?: RunDependencies; }
@@ -48,9 +48,11 @@ export function safeErrorMessage(error: unknown): string {
 
 const isoId = (date: Date, backend: string, config: string): string => `${date.toISOString().replace(/[^0-9TZ]/g, "-")}-${backend.replace(/[^A-Za-z0-9_-]/g, "-")}-${config.replace(/[^A-Za-z0-9_-]/g, "-")}`;
 const emptyCapacity = (): Capacity => ({ users: 0, saturation: false, reasons: ["capacity not evaluated"] });
-const atomic = async (path: string, text: string, write: (p: string, t: string) => Promise<void>, move: (a: string, b: string) => Promise<void>) => {
+const atomic = async (path: string, text: string, write: (p: string, t: string) => Promise<void>) => {
   const tmp = `${path}.tmp-${process.pid}-${Math.random().toString(36).slice(2, 8)}`;
-  try { await write(tmp, text); await move(tmp, path); } finally { await unlink(tmp).catch(() => undefined); }
+  try { await write(tmp, text); await link(tmp, path); }
+  catch (error) { if ((error as NodeJS.ErrnoException).code === "EEXIST") throw new Error("Result path already exists"); throw error; }
+  finally { await unlink(tmp).catch(() => undefined); }
 };
 const serialize = (value: unknown): string => JSON.stringify(value, (_key, v) => typeof v === "number" && !Number.isFinite(v) ? null : v, 2) + "\n";
 const sortedPids = (info: BackendInfo): number[] => [...(info.processIds ?? [])].sort((a, b) => a - b);
@@ -81,10 +83,10 @@ const conclusive = (evaluation: ReturnType<typeof evaluateCapacity>["stages"][nu
 export async function runBenchmark(options: RunOptions): Promise<{ result: BenchmarkResult; resultPath: string }> {
   if (!options || typeof options.backend !== "string" || !options.backend || !options.config || !options.resultPath || basename(options.resultPath).includes("..") || options.resultPath.includes("\0") || options.resultPath.split(/[\\/]/).includes("..")) throw new Error("invalid benchmark options");
   const d = options.dependencies ?? {};
+  if (await lstat(options.resultPath).then(() => true).catch(() => false)) throw new Error("Result path already exists");
   const load = d.loadBackend ?? (async name => (await import("./backend.js")).loadBackend(name) as Promise<SetupBackend>);
   const backend = await load(options.backend);
   const write = d.write ?? ((path, text) => writeFile(path, text, { encoding: "utf8", mode: 0o600 }));
-  const move = d.rename ?? rename;
   await mkdir(dirname(options.resultPath), { recursive: true });
   const started = (d.now ?? (() => new Date()))();
   const stageDurationMs = options.config.stageSeconds * 1_000;
@@ -124,7 +126,7 @@ export async function runBenchmark(options: RunOptions): Promise<{ result: Bench
     correctness: { findings: [], aborted: true, abortReason: "not run" },
     stages: [], resources: [], capacity: emptyCapacity(), failures: [], valid: false, validityReasons: ["run incomplete"],
   };
-  const save = async () => atomic(options.resultPath, serialize(result), write, move);
+  const save = async () => atomic(options.resultPath, serialize(result), write);
   let stopFailure: unknown;
   let baseline: BackendInfo | undefined;
   try {
@@ -153,8 +155,6 @@ export async function runBenchmark(options: RunOptions): Promise<{ result: Bench
       if (warmup.stageFailed) throw new Error("warmup failed");
     }
     if (users.length < options.config.maxConcurrency) throw new Error("backend returned insufficient workload users");
-    await save();
-
     const monotonic = d.monotonic ?? (() => performance.now());
     const resourceFn = d.resources ?? collectResources;
     const workloadFn = d.workload ?? runWorkload;
@@ -218,7 +218,6 @@ export async function runBenchmark(options: RunOptions): Promise<{ result: Bench
         const next = Math.min(options.config.maxConcurrency, requestedUsers * 2);
         if (next > requestedUsers && !stages.includes(next)) stages.push(next);
       }
-      await save();
       if (refinementStage === requestedUsers || (currentFailedConclusively && refinementStage === undefined)) break;
     }
     result.valid = result.correctness.findings.every(finding => finding.passed) && result.stages.length > 0 && result.stages.every(stage => stage.valid) && result.capacity.users > 0;

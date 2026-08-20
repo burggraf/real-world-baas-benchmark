@@ -58,6 +58,8 @@ test("renders deterministic valid Markdown and CSV with all required report sect
     "Resource samples",
     "250000000",
     "5800",
+    "aaaaaaaaaaaa",
+    "bbbbbbbbbbbb",
     "local SMTP \\| disabled",
     "timeout \\| \"safe\", retry, then stop",
     "[result-pass.json](./result-pass.json)",
@@ -115,8 +117,7 @@ test("writes both reports atomically with private permissions and refuses overwr
   await writeFile(written.markdownPath, "unrelated\n");
   await assert.rejects(writeBenchmarkReport(result, jsonPath), /already exists/i);
   assert.equal(await readFile(written.markdownPath, "utf8"), "unrelated\n");
-  await writeBenchmarkReport(result, jsonPath, { overwrite: true });
-  assert.match(await readFile(written.markdownPath, "utf8"), /# VALID benchmark result/);
+  await assert.rejects(writeBenchmarkReport(result, jsonPath), /already exists/i);
 });
 
 test("median spread uses odd values and the arithmetic mean of an even middle pair", () => {
@@ -131,6 +132,7 @@ test("aggregates capacity, throughput, classes, and resource maxima without a co
   assert.deepEqual(aggregate.capacityUsers, { median: 2, min: 1, max: 10 });
   assert.deepEqual(aggregate.stages[0]!.workflowTransactionsPerSecond, { median: 20, min: 10, max: 100 });
   assert.deepEqual(aggregate.stages[0]!.sdkOperationsPerSecond, { median: 40, min: 20, max: 200 });
+  assert.deepEqual(aggregate.stages[0]!.operationClasses.read.latencyP50Ms, { median: 20, min: 20, max: 20 });
   assert.deepEqual(aggregate.stages[0]!.operationClasses.read.latencyP95Ms, { median: 100, min: 90, max: 130 });
   assert.deepEqual(aggregate.stages[0]!.resources.runnerCpuPercent, { median: 20, min: 10, max: 30 });
   assert.equal("score" in aggregate, false);
@@ -155,6 +157,14 @@ test("lists exact aggregation incompatibilities and only compatibility override 
   const runs = await repeated(3); runs[2]!.backend.version = "different"; runs[2]!.environment.backend.version = "different";
   const aggregate = aggregateBenchmarkResults(runs, { override: true });
   assert.equal(aggregate.compatibilityMismatches[0]!.field, "backend.version");
+  const reordered = await repeated(3); const configEntries = Object.entries(reordered[1]!.config); reordered[1]!.config = Object.fromEntries(configEntries.reverse());
+  assert.doesNotThrow(() => aggregateBenchmarkResults(reordered));
+  const settingsChanged = await repeated(3); settingsChanged[1]!.settings.minClassSamples++;
+  assert.throws(() => aggregateBenchmarkResults(settingsChanged), /settings/);
+  const hostChanged = await repeated(3); hostChanged[1]!.environment.hostname = "other-host";
+  assert.throws(() => aggregateBenchmarkResults(hostChanged), /hardware/);
+  const projectChanged = await repeated(3); projectChanged[1]!.backend.supabaseProjectId = "other-project"; projectChanged[1]!.environment.backend.supabaseProjectId = "other-project";
+  assert.throws(() => aggregateBenchmarkResults(projectChanged), /supabaseProjectId/);
   const schemaRuns = await repeated(3); (schemaRuns[2] as { schemaVersion: number }).schemaVersion = 2;
   assert.equal(aggregateBenchmarkResults(schemaRuns, { override: true }).compatibilityMismatches[0]!.field, "schemaVersion");
 });

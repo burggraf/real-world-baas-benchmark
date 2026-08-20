@@ -3,13 +3,13 @@ import type { OperationClass } from "./config.js";
 import { stageResourceMaxima, validateBenchmarkResult, type StageResourceMaxima } from "./report.js";
 
 export interface Spread { median: number; min: number; max: number }
-export interface AggregationMismatch { runId: string; field: "backend.name" | "backend.version" | "environment.sdkVersion" | "config" | "dataset" | "seed" | "schemaVersion" | "hardware"; expected: string; actual: string }
+export interface AggregationMismatch { runId: string; field: string; expected: string; actual: string }
 export class AggregationCompatibilityError extends Error {
   constructor(readonly mismatches: AggregationMismatch[]) { super(`Incompatible benchmark runs: ${mismatches.map(item => `${item.runId} ${item.field}: ${item.expected} != ${item.actual}`).join("; ")}`); this.name = "AggregationCompatibilityError"; }
 }
 export interface AggregateOptions { override?: boolean; publishable?: boolean }
 export interface AggregateOperationClass {
-  latencyP95Ms: Spread; latencyP99Ms: Spread; errorRate: Spread;
+  latencyP50Ms: Spread; latencyP95Ms: Spread; latencyP99Ms: Spread; errorRate: Spread;
 }
 export interface AggregateResources {
   sampleCount: Spread;
@@ -26,10 +26,10 @@ export interface AggregateStage {
 export interface MissingAggregateStage { requestedUsers: number; missingRunIds: string[] }
 export interface BenchmarkAggregate {
   runCount: number; runIds: string[]; publishable: boolean;
-  identity: { backend: string; backendVersion: string; sdkVersion: string | null; config: BenchmarkResult["config"]; dataset: string; seed: number; schemaVersion: number; hardware: HardwareIdentity };
+  identity: { backend: string; backendVersion: string; sdkVersion: string | null; config: BenchmarkResult["config"]; settings: BenchmarkResult["settings"]; dataset: string; seed: number; schemaVersion: number; hardware: HardwareIdentity };
   capacityUsers: Spread; stages: AggregateStage[]; missingStages: MissingAggregateStage[]; compatibilityMismatches: AggregationMismatch[];
 }
-interface HardwareIdentity { cpuModel: string | null; logicalCores: number | null; totalMemoryBytes: number | null; architecture: string; os: string }
+interface HardwareIdentity { cpuModel: string | null; logicalCores: number | null; totalMemoryBytes: number | null; architecture: string; os: string; release: string; hostname: string }
 const operationClasses: OperationClass[] = ["read", "write", "authSearch"];
 
 export function medianSpread(values: number[]): Spread {
@@ -37,17 +37,19 @@ export function medianSpread(values: number[]): Spread {
   const sorted = [...values].sort((left, right) => left - right); const middle = Math.floor(sorted.length / 2);
   return { median: sorted.length % 2 ? sorted[middle]! : sorted[middle - 1]! / 2 + sorted[middle]! / 2, min: sorted[0]!, max: sorted[sorted.length - 1]! };
 }
-const hardware = (result: BenchmarkResult): HardwareIdentity => ({ cpuModel: result.environment.cpuModel, logicalCores: result.environment.logicalCores, totalMemoryBytes: result.environment.totalMemoryBytes, architecture: result.environment.architecture, os: result.environment.os });
-const encoded = (value: unknown): string => JSON.stringify(value);
+const hardware = (result: BenchmarkResult): HardwareIdentity => ({ cpuModel: result.environment.cpuModel, logicalCores: result.environment.logicalCores, totalMemoryBytes: result.environment.totalMemoryBytes, architecture: result.environment.architecture, os: result.environment.os, release: result.environment.release, hostname: result.environment.hostname });
+const canonical = (value: unknown): string => { if (Array.isArray(value)) return `[${value.map(canonical).join(",")}]`; if (value && typeof value === "object") return `{${Object.entries(value as Record<string, unknown>).sort(([a], [b]) => a.localeCompare(b)).map(([key, item]) => `${JSON.stringify(key)}:${canonical(item)}`).join(",")}}`; return JSON.stringify(value); };
+const encoded = (value: unknown): string => canonical(value);
 function compatibility(results: BenchmarkResult[]): AggregationMismatch[] {
-  const first = results[0]!; const checks: Array<[AggregationMismatch["field"], (result: BenchmarkResult) => unknown]> = [
-    ["backend.name", result => result.backend.name], ["backend.version", result => result.backend.version], ["environment.sdkVersion", result => result.environment.sdkVersion],
-    ["config", result => result.config], ["dataset", result => result.dataset], ["seed", result => result.seed], ["schemaVersion", result => result.schemaVersion], ["hardware", hardware],
+  const first = results[0]!; const checks: Array<[string, (result: BenchmarkResult) => unknown]> = [
+    ["backend.name", result => result.backend.name], ["backend.version", result => result.backend.version], ["backend.endpoint", result => result.backend.endpoint], ["backend.supabaseProjectId", result => result.backend.supabaseProjectId], ["backend.deviations", result => result.backend.deviations],
+    ["environment.sdkVersion", result => result.environment.sdkVersion], ["environment.npmVersion", result => result.environment.npmVersion], ["environment.dockerVersion", result => result.environment.dockerVersion], ["environment.supabaseVersion", result => result.environment.supabaseVersion],
+    ["config", result => result.config], ["settings", result => result.settings], ["dataset", result => result.dataset], ["seed", result => result.seed], ["schemaVersion", result => result.schemaVersion], ["hardware", hardware],
   ];
   return results.slice(1).flatMap(result => checks.flatMap(([field, get]) => encoded(get(result)) === encoded(get(first)) ? [] : [{ runId: String(result.runId), field, expected: encoded(get(first)), actual: encoded(get(result)) }]));
 }
 const nullableSpread = (values: Array<number | null>): Spread | null => values.every((value): value is number => value !== null) ? medianSpread(values) : null;
-const aggregateClass = (metrics: OperationClassMetric[]): AggregateOperationClass => ({ latencyP95Ms: medianSpread(metrics.map(metric => metric.latencyP95Ms)), latencyP99Ms: medianSpread(metrics.map(metric => metric.latencyP99Ms)), errorRate: medianSpread(metrics.map(metric => metric.errorRate)) });
+const aggregateClass = (metrics: OperationClassMetric[]): AggregateOperationClass => ({ latencyP50Ms: medianSpread(metrics.map(metric => metric.latencyP50Ms)), latencyP95Ms: medianSpread(metrics.map(metric => metric.latencyP95Ms)), latencyP99Ms: medianSpread(metrics.map(metric => metric.latencyP99Ms)), errorRate: medianSpread(metrics.map(metric => metric.errorRate)) });
 const aggregateResources = (values: StageResourceMaxima[]): AggregateResources => ({
   sampleCount: medianSpread(values.map(value => value.sampleCount)),
   runnerCpuPercent: nullableSpread(values.map(value => value.runnerCpuPercent)), runnerRssBytes: nullableSpread(values.map(value => value.runnerRssBytes)),
@@ -88,7 +90,7 @@ export function aggregateBenchmarkResults(results: BenchmarkResult[], options: A
   const first = results[0]!;
   return {
     runCount: results.length, runIds: results.map(result => result.runId), publishable: options.publishable ?? true,
-    identity: { backend: first.backend.name, backendVersion: first.backend.version, sdkVersion: first.environment.sdkVersion, config: structuredClone(first.config), dataset: first.dataset, seed: first.seed, schemaVersion: first.schemaVersion, hardware: hardware(first) },
+    identity: { backend: first.backend.name, backendVersion: first.backend.version, sdkVersion: first.environment.sdkVersion, config: structuredClone(first.config), settings: structuredClone(first.settings), dataset: first.dataset, seed: first.seed, schemaVersion: first.schemaVersion, hardware: hardware(first) },
     capacityUsers: medianSpread(results.map(result => result.capacity.users)), stages, missingStages, compatibilityMismatches: mismatches,
   };
 }

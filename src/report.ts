@@ -1,4 +1,4 @@
-import { link, lstat, mkdir, rename, unlink, writeFile } from "node:fs/promises";
+import { link, lstat, mkdir, unlink, writeFile } from "node:fs/promises";
 import { basename, dirname, extname } from "node:path";
 import { parseConfig } from "./config.js";
 import type { OperationClass } from "./config.js";
@@ -6,7 +6,6 @@ import type { BenchmarkResult, OperationClassMetric, StageMetrics } from "./resu
 
 export interface BenchmarkReport { markdown: string; csv: string }
 export interface WrittenBenchmarkReport { markdownPath: string; csvPath: string }
-export interface WriteReportOptions { overwrite?: boolean }
 
 const classes: OperationClass[] = ["read", "write", "authSearch"];
 type RecordValue = Record<string, unknown>;
@@ -190,6 +189,11 @@ export function createBenchmarkReport(result: BenchmarkResult, rawJsonPath: stri
   const resourceHeaders = ["Requested users", "Resource samples", "Runner CPU max (%)", "Runner RSS max (bytes)", "Backend CPU max (%)", "Backend RSS max (bytes)", "Event-loop p99 max (ms)", "Event-loop max (ms)", "Supabase CPU max (%)", "Supabase memory max (bytes)", "Supabase block read max (bytes)", "Supabase block write max (bytes)", "Unavailable reasons"];
   const resources = result.stages.map(stage => stageResourceMaxima(result, stage.requestedUsers));
   const resourceRows = result.stages.map((stage, index) => { const value = resources[index]!; return [stage.requestedUsers, value.sampleCount, resourceValue(value.runnerCpuPercent), resourceValue(value.runnerRssBytes), resourceValue(value.backendCpuPercent), resourceValue(value.backendRssBytes), resourceValue(value.eventLoopP99Ms), resourceValue(value.eventLoopMaxMs), resourceValue(value.supabaseCpuPercent), resourceValue(value.supabaseMemoryBytes), resourceValue(value.supabaseBlockReadBytes), resourceValue(value.supabaseBlockWriteBytes), value.unavailableReasons.join("; ") || "none"]; });
+  const architectureRows = result.resources.flatMap(resource => (resource.snapshots ?? []).flatMap(snapshot => [
+    [resource.name, "backend-process", "aggregate", snapshot.backend.totalCpuPercent, snapshot.backend.totalRssBytes, snapshot.backend.reason ?? ""],
+    ...(snapshot.backend.processes ?? []).map(process => [resource.name, "backend-process", process.pid, process.cpuPercent, process.rssBytes, process.reason ?? ""]),
+    ...(snapshot.containers ?? []).map(container => [resource.name, "supabase-container", container.containerId, container.cpuPercent, container.memoryBytes, `block read ${container.blockReadBytes}; block write ${container.blockWriteBytes}`]),
+  ]));
   const totalExamples = result.stages.reduce((total, stage) => total + stage.errorExamples.length, 0); const shownExamples: unknown[][] = []; const csvExamples = new Map<StageMetrics, StageMetrics["errorExamples"]>(); let remainingExamples = 20;
   for (const stage of result.stages) { const selected = stage.errorExamples.slice(0, remainingExamples); csvExamples.set(stage, selected); remainingExamples -= selected.length; shownExamples.push(...selected.map(example => [stage.requestedUsers, example.type, example.name, example.operationClass, example.classification, example.nameOfError, example.message, example.occurrences])); }
   const rawName = freeText(basename(rawJsonPath)); const rawTarget = `./${encodeURIComponent(rawName).replace(/%2F/gi, "/")}`;
@@ -202,7 +206,7 @@ export function createBenchmarkReport(result: BenchmarkResult, rawJsonPath: stri
     "## Correctness", "", `${passed} passed, ${failed} failed${result.correctness.aborted ? `; aborted (${mdCell(result.correctness.abortReason ?? "reason unavailable")})` : ""}.`, "", markdownTable(["Check", "Status", "Classification", "Message", "Evidence"], result.correctness.findings.map(finding => [finding.name, finding.passed ? "PASS" : "FAIL", finding.classification, finding.message ?? "", finding.evidence ?? ""])), "",
     "## Capacity", "", `Selected capacity: **${result.capacity.users} users**. Saturation: **${result.capacity.saturation ? "yes" : "no"}**.`, "", markdownTable(["Capacity reasons"], sectionRows(result.capacity.reasons)), "",
     "## Stage metrics", "", markdownTable(stageHeaders, stageRows), "",
-    "## Stage resources", "", markdownTable(resourceHeaders, resourceRows), "",
+    "## Stage resources", "", markdownTable(resourceHeaders, resourceRows), "", "### Resource architecture detail", "", markdownTable(["Stage", "Kind", "Identity", "CPU", "RSS/memory", "Detail"], architectureRows.length ? architectureRows : [["", "", "unavailable", "", "", "no architecture detail"]]), "",
     "## Backend deviations", "", markdownTable(["Deviation"], sectionRows(result.backend.deviations ?? [])), "",
     "## Bounded error examples", "", `showing ${shownExamples.length} of ${totalExamples}`, "", markdownTable(["Stage", "Type", "Name", "Class", "Classification", "Error", "Message", "Occurrences"], shownExamples.length ? shownExamples : [["", "", "", "", "", "", "none", ""]]), "",
     "## Raw result", "", `[${mdCell(rawName)}](${rawTarget})`, "",
@@ -214,18 +218,15 @@ export function createBenchmarkReport(result: BenchmarkResult, rawJsonPath: stri
 
 async function writePrivateTemp(path: string, content: string): Promise<void> { await writeFile(path, content, { encoding: "utf8", mode: 0o600, flag: "wx" }); }
 function outputPaths(jsonPath: string): WrittenBenchmarkReport { const base = jsonPath.slice(0, -extname(jsonPath).length); return { markdownPath: `${base}.md`, csvPath: `${base}-stages.csv` }; }
-export async function writeBenchmarkReport(result: BenchmarkResult, jsonPath: string, options: WriteReportOptions = {}): Promise<WrittenBenchmarkReport> {
+export async function writeBenchmarkReport(result: BenchmarkResult, jsonPath: string): Promise<WrittenBenchmarkReport> {
   if (typeof jsonPath !== "string" || jsonPath.includes("\0") || extname(jsonPath).toLowerCase() !== ".json") throw new Error("Invalid JSON input path");
   const input = await lstat(jsonPath).catch(() => null); if (!input?.isFile() || input.isSymbolicLink()) throw new Error("JSON input must be a regular non-symlink file");
   const report = createBenchmarkReport(result, jsonPath); const paths = outputPaths(jsonPath); await mkdir(dirname(jsonPath), { recursive: true });
   const suffix = `.tmp-${process.pid}-${Math.random().toString(36).slice(2)}`; const markdownTemp = `${paths.markdownPath}${suffix}`; const csvTemp = `${paths.csvPath}${suffix}`; let markdownCreated = false;
   try {
     await writePrivateTemp(markdownTemp, report.markdown); await writePrivateTemp(csvTemp, report.csv);
-    if (options.overwrite) { await rename(markdownTemp, paths.markdownPath); await rename(csvTemp, paths.csvPath); }
-    else {
-      try { await link(markdownTemp, paths.markdownPath); markdownCreated = true; await link(csvTemp, paths.csvPath); }
-      catch (error) { if (markdownCreated) await unlink(paths.markdownPath).catch(() => undefined); if ((error as NodeJS.ErrnoException).code === "EEXIST") throw new Error("Report output already exists"); throw error; }
-    }
+    try { await link(markdownTemp, paths.markdownPath); markdownCreated = true; await link(csvTemp, paths.csvPath); }
+    catch (error) { if (markdownCreated) await unlink(paths.markdownPath).catch(() => undefined); if ((error as NodeJS.ErrnoException).code === "EEXIST") throw new Error("Report output already exists"); throw error; }
     return paths;
   } finally { await unlink(markdownTemp).catch(() => undefined); await unlink(csvTemp).catch(() => undefined); }
 }
