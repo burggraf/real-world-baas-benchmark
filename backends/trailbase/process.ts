@@ -1,5 +1,5 @@
-import { closeSync, existsSync, openSync } from "node:fs";
-import { access, appendFile, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
+import { access, appendFile, cp, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
 import { dirname, isAbsolute, join, parse, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -54,7 +54,7 @@ export function resolveTrailBaseOptions(
     repoRoot: root,
     binary: absolute(root, env.TRAILBASE_BIN || `.tools/trailbase-${TRAILBASE_VERSION}/trailbase`),
     dataDir,
-    migrationsDir: join(root, "backends/trailbase/pb_migrations"),
+    migrationsDir: join(root, "backends/trailbase/migrations"),
     endpoint: endpointUrl.origin,
     listen: `${endpointUrl.hostname === "::1" ? "[::1]" : endpointUrl.hostname}:${port}`,
     logFile: join(root, ".data/logs/trailbase.log"),
@@ -62,7 +62,7 @@ export function resolveTrailBaseOptions(
 }
 
 export function buildTrailBaseArgs(options: TrailBaseProcessOptions, command: readonly string[]): string[] {
-  return ["--data-dir", options.dataDir, ...command];
+  return ["--depot", options.dataDir, ...command];
 }
 
 function running(child: ChildProcess | undefined): child is ChildProcess {
@@ -73,9 +73,9 @@ function findTrailBaseProcessUsing(dataDir: string): number | undefined {
   if (process.platform === "win32") return undefined;
   const result = spawnSync("/bin/ps", ["-axo", "pid=,command="], { encoding: "utf8", shell: false });
   if (result.error || result.status !== 0) return undefined;
-  const marker = `--dir=${resolve(dataDir)}`;
+  const marker = resolve(dataDir);
   for (const line of result.stdout.split("\n")) {
-    if (!line.includes(marker) || !line.toLowerCase().includes("trailbase")) continue;
+    if (!line.includes(marker) || !line.toLowerCase().includes("trail") || !line.includes("--depot")) continue;
     const pid = Number.parseInt(line.trim().split(/\s+/, 1)[0] || "", 10);
     if (Number.isInteger(pid) && pid !== process.pid) return pid;
   }
@@ -84,10 +84,9 @@ function findTrailBaseProcessUsing(dataDir: string): number | undefined {
 
 async function health(endpoint: string): Promise<boolean> {
   try {
-    const response = await fetch(`${endpoint}/api/health`, { signal: AbortSignal.timeout(750) });
-    if (!response.ok) return false;
-    const body = await response.json() as { code?: unknown };
-    return body.code === 200;
+    // v0.33.1 has no health route; a bounded GET to the auth endpoint proves the listener.
+    const response = await fetch(`${endpoint}/api/auth/v1/login`, { signal: AbortSignal.timeout(750) });
+    return response.status < 500;
   } catch {
     return false;
   }
@@ -134,8 +133,10 @@ export class TrailBaseProcess {
 
   async doctor(): Promise<BackendInfo> {
     await access(this.options.binary);
+    await access(join(this.options.repoRoot, "backends/trailbase/config.textproto"));
+    await access(this.options.migrationsDir);
     const version = spawnSync(this.options.binary, ["--version"], { encoding: "utf8", shell: false });
-    if (version.error || version.status !== 0 || !version.stdout.includes(`version ${TRAILBASE_VERSION}`)) {
+    if (version.error || version.status !== 0 || !version.stdout.includes(`v${TRAILBASE_VERSION}`)) {
       throw new Error(`Expected TrailBase ${TRAILBASE_VERSION} binary`);
     }
     if (running(this.child)) {
@@ -160,14 +161,18 @@ export class TrailBaseProcess {
     await this.doctor();
     await mkdir(this.options.dataDir, { recursive: true });
     await mkdir(dirname(this.options.logFile), { recursive: true });
-    const log = openSync(this.options.logFile, "a");
     const child = spawn(this.options.binary, buildTrailBaseArgs(this.options, ["run", "--address", this.options.listen]), {
       cwd: this.options.repoRoot,
       detached: false,
       shell: false,
-      stdio: ["ignore", log, log],
+      stdio: ["ignore", "pipe", "pipe"],
     });
-    closeSync(log);
+    const writeLog = (chunk: Buffer | string) => {
+      const safe = String(chunk).replace(/(password\s*[:=]\s*)['"]?[^'"\s]+/gi, "$1[REDACTED]");
+      void appendFile(this.options.logFile, safe.slice(0, 64 * 1024));
+    };
+    child.stdout?.on("data", writeLog);
+    child.stderr?.on("data", writeLog);
     this.child = child;
     try {
       await writeFile(join(this.options.dataDir, OWNER_FILE), JSON.stringify({ pid: child.pid, binary: this.options.binary }), { mode: 0o600 });
@@ -204,7 +209,10 @@ export class TrailBaseProcess {
     await rm(this.options.dataDir, { recursive: true, force: true });
     await mkdir(this.options.dataDir, { recursive: true });
     await mkdir(dirname(this.options.logFile), { recursive: true });
-    await this.runCommand(["migrate", "up"]);
+    await mkdir(join(this.options.dataDir, "migrations", "main"), { recursive: true });
+    await cp(this.options.migrationsDir, join(this.options.dataDir, "migrations", "main"), { recursive: true });
+    const config = join(this.options.repoRoot, "backends/trailbase/config.textproto");
+    await cp(config, join(this.options.dataDir, "config.textproto"));
     await this.start();
   }
 

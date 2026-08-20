@@ -17,6 +17,7 @@
   },
   "dependencies": {
     "@supabase/supabase-js": "2.112.3",
-    "pocketbase": "0.28.0"
+    "pocketbase": "0.28.0",
+    "trailbase": "0.14.0"
   }
 }

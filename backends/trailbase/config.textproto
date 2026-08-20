@@ -1,2 +1,11 @@
-# TrailBase v0.33.1 depot configuration is generated/owned by the local process.
-# Record API declarations are applied by migrations in this repository.
+email {}
+server { application_name: "Bench TrailBase" logs_retention_sec: 604800 }
+auth { auth_token_ttl_sec: 3600 refresh_token_ttl_sec: 2592000 }
+jobs {}
+record_apis: { name: "profiles" table_name: "profiles" acl_authenticated: [READ, UPDATE] update_access_rule: "_ROW_.userId = _USER_.id AND 'displayName' IN _REQ_FIELDS_" }
+record_apis: { name: "organizations" table_name: "organizations" acl_authenticated: [READ] read_access_rule: "EXISTS(SELECT 1 FROM memberships WHERE organizationId = _ROW_.publicId AND userId = _USER_.id)" }
+record_apis: { name: "memberships" table_name: "memberships" acl_authenticated: [READ, UPDATE] }
+record_apis: { name: "projects" table_name: "projects" acl_authenticated: [READ] }
+record_apis: { name: "tasks" table_name: "tasks" acl_authenticated: [READ, CREATE, UPDATE, DELETE] }
+record_apis: { name: "comments" table_name: "comments" acl_authenticated: [READ, CREATE, UPDATE, DELETE] }
+record_apis: { name: "activities" table_name: "activities" acl_authenticated: [READ] }
