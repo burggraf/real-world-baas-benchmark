@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { backend, createSupabaseClient, seedSupabaseCorrectnessFixture } from "../backends/supabase/adapter.js";
 import { runSynchronousProbe, supabaseProcess } from "../backends/supabase/process.js";
 import { BenchmarkOperationError, runCorrectness } from "../src/correctness.js";
-import { datasetProfiles } from "../src/seed.js";
+import { profileExpectedCounts } from "../src/seed.js";
 
 const live = process.env.BENCH_LIVE === "1";
 const denied = (error: unknown): boolean => error instanceof BenchmarkOperationError && error.classification === "authorization";
@@ -107,8 +107,8 @@ test("Supabase full small seed clears repeatably and verifies auth plus table co
   const before = supaflareState();
   try {
     await backend.reset();
-    await backend.seed({ name: "small", definition: { ...datasetProfiles.small } }, 42);
-    await backend.seed({ name: "small", definition: { ...datasetProfiles.small } }, 42);
+    await backend.seed({ name: "small", definition: { ...profileExpectedCounts("small") } }, 42);
+    await backend.seed({ name: "small", definition: { ...profileExpectedCounts("small") } }, 42);
   } finally {
     await backend.stop();
     assert.deepEqual(benchmarkContainers(), []);

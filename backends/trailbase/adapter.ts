@@ -8,7 +8,7 @@ import type {
   TaskPriority, TaskStatus, UpdateCommentInput, UpdateMembershipRoleInput, UpdateProfileInput, UpdateTaskInput, User,
 } from "../../src/domain.js";
 import { BenchmarkOperationError, type CorrectnessFixture } from "../../src/correctness.js";
-import { datasetProfiles, entityId, seedDataset, buildSeedVirtualUserSpecs, type EntityName, type ProfileName, type SeedRecord } from "../../src/seed.js";
+import { datasetProfiles, entityId, seedDataset, buildSeedVirtualUserSpecs, profileExpectedCounts, type EntityName, type ProfileName, type SeedRecord } from "../../src/seed.js";
 import {
   LOCAL_BENCHMARK_PASSWORD, LOCAL_SETUP_EMAIL, LOCAL_SETUP_PASSWORD, resolveTrailBaseOptions,
   trailBaseProcess, TRAILBASE_VERSION,
@@ -501,7 +501,8 @@ export async function seedTrailBaseCorrectnessFixture(): Promise<TrailBaseCorrec
 }
 
 function profileName(profile: DatasetProfile): ProfileName {
-  if (!Object.hasOwn(datasetProfiles, profile.name) || JSON.stringify(profile.definition) !== JSON.stringify(datasetProfiles[profile.name])) throw new RangeError("Invalid dataset profile");
+  try { profileExpectedCounts(profile.name, profile.definition); }
+  catch { throw new RangeError("Invalid dataset profile"); }
   return profile.name;
 }
 
@@ -541,16 +542,8 @@ function seedRow(record: SeedRecord, entity: EntityName, profile: ProfileName, a
 const tableFor: Record<EntityName, string> = { user: "profiles", organization: "organizations", membership: "memberships", project: "projects", task: "tasks", comment: "comments", activity: "activities" };
 
 async function verifySeed(client: Client, profile: ProfileName, authEmails: string[]): Promise<void> {
-  const expected: Record<string, number> = {
-    profiles: datasetProfiles[profile].users,
-    organizations: datasetProfiles[profile].organizations,
-    memberships: datasetProfiles[profile].users,
-    projects: datasetProfiles[profile].projects,
-    tasks: datasetProfiles[profile].tasks,
-    comments: datasetProfiles[profile].comments,
-    activities: datasetProfiles[profile].activities,
-  };
-  for (const [table, count] of Object.entries(expected)) {
+  const { users, ...counts } = profileExpectedCounts(profile);
+  for (const [table, count] of Object.entries({ profiles: users, ...counts })) {
     const page = await listRows(client, table, 0, 1, { filters: [{ column: "publicId", op: "regexp", value: `^[a-z]{3}${profile[0]}[0-9a-z]{11}$` }] });
     if (page.total !== count) throw new BenchmarkOperationError("invalid_response", { code: "seed_count_mismatch" });
   }

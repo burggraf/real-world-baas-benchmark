@@ -12,6 +12,7 @@ import {
   SUPABASE_PROJECT_ID,
 } from "../backends/supabase/process.js";
 import {
+  backend,
   checkedSupabaseResponse,
   createSupabaseClient,
   escapeLikePattern,
@@ -28,6 +29,11 @@ import {
   requiredSupabaseObject,
   seedRecord,
 } from "../backends/supabase/adapter.js";
+import { profileExpectedCounts } from "../src/seed.js";
+
+test("Supabase rejects noncanonical seed counts before setup", async () => {
+  await assert.rejects(backend.seed({ name: "small", definition: { ...profileExpectedCounts("small"), tasks: Number.NaN } }, 42), /profile/i);
+});
 
 test("Supabase lifecycle uses PATH binary, absolute workdir, and scrubbed CLI overrides", () => {
   const options = resolveSupabaseOptions({ SUPABASE_BIN: "supabase" }, "/tmp/benchmark repo");

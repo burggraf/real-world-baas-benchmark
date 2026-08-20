@@ -5,8 +5,9 @@ import { loadConfig, parseConfig } from "../src/config.js";
 
 const quick = loadConfig("configs/quick.json");
 const full = loadConfig("configs/full.json");
+const large = loadConfig("configs/large.json");
 
-test("loads every required value from the approved quick and full configurations", () => {
+test("loads every required value from the approved quick, full, and large configurations", () => {
   const weights = { dashboard: 20, taskList: 25, taskDetail: 15, createTask: 10, updateTask: 12, addComment: 10, search: 5, profileUpdate: 1, signIn: 2 };
   const slos = { read: { p95Ms: 500, maxErrorRate: 0.01 }, write: { p95Ms: 750, maxErrorRate: 0.01 }, authSearch: { p95Ms: 1000, maxErrorRate: 0.01 } };
   assert.deepEqual(quick, {
@@ -17,10 +18,17 @@ test("loads every required value from the approved quick and full configurations
     name: "full", publishable: true, dataset: "medium", seed: 42, warmupSeconds: 120, stageSeconds: 300,
     concurrency: [1, 5, 10, 25, 50], maxConcurrency: 1000, timeoutMs: 5000, thinkTimeMs: { min: 1000, max: 5000 }, weights, slos,
   });
+  assert.deepEqual(large, {
+    name: "large", publishable: false, dataset: "large", seed: 42, warmupSeconds: 120, stageSeconds: 300,
+    concurrency: [1, 5, 10, 25, 50], maxConcurrency: 1000, timeoutMs: 5000, thinkTimeMs: { min: 1000, max: 5000 }, weights, slos,
+  });
+  assert.equal(large.maxConcurrency <= 100_000, true);
 });
 
-test("parses JSON text through the unknown boundary", () => {
-  assert.equal(parseConfig(JSON.parse(readFileSync("configs/quick.json", "utf8"))).seed, 42);
+test("strictly parses full and large JSON through the unknown boundary", () => {
+  assert.equal(parseConfig(JSON.parse(readFileSync("configs/full.json", "utf8"))).publishable, true);
+  assert.equal(parseConfig(JSON.parse(readFileSync("configs/large.json", "utf8"))).publishable, false);
+  assert.throws(() => parseConfig({ ...JSON.parse(readFileSync("configs/large.json", "utf8")), extra: true }), /top-level keys/i);
   assert.throws(() => parseConfig(null), /object/i);
 });
 

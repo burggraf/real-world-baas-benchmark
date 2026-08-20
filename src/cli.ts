@@ -6,14 +6,16 @@ import { loadBackend, type Backend } from "./backend.js";
 import { loadConfig } from "./config.js";
 import { runCorrectness } from "./correctness.js";
 import { runBenchmark, safeErrorMessage } from "./run.js";
-import { profileMetadata } from "./seed.js";
+import { profileExpectedCounts, type ProfileName } from "./seed.js";
 import { validateBenchmarkResult, writeBenchmarkReport } from "./report.js";
 
-export type ParsedArgs = { command: string; [option: string]: string };
+export type ParsedArgs = {
+  command: string; backend?: string; backends?: string; config?: string; dataset?: string; seed?: string; result?: string; input?: string; confirmLarge?: boolean;
+};
 const allowedOptions = {
   doctor: ["backend"], up: ["backend"], down: ["backend"],
-  reset: ["backend", "config", "dataset", "seed"], correctness: ["backend", "config", "dataset", "seed"],
-  run: ["backend", "config", "result"], compare: ["backend", "backends", "config"], report: [],
+  reset: ["backend", "config", "dataset", "seed", "confirm-large"], correctness: ["backend", "config", "dataset", "seed", "confirm-large"],
+  run: ["backend", "config", "result", "confirm-large"], compare: ["backend", "backends", "config", "confirm-large"], report: [],
 } as const;
 const commands = new Set(Object.keys(allowedOptions));
 const backendNames = new Set(["pocketbase", "supabase", "trailbase"]);
@@ -30,16 +32,21 @@ export function parseArgs(argv: string[]): ParsedArgs {
   const names = new Set(["command"]);
   const allowed = new Set<string>(allowedOptions[command as keyof typeof allowedOptions]);
   let unknownOption: string | undefined;
-  for (let index = 0; index < options.length; index += 2) {
+  for (let index = 0; index < options.length;) {
     const option = options[index];
     if (!option?.startsWith("--") || option.length === 2) throw new Error(`Expected an option, received ${option ?? "nothing"}`);
     const name = option.slice(2);
     if (names.has(name)) throw new Error(`Duplicate option: ${option}`);
+    if (name === "confirm-large") {
+      if (!allowed.has(name)) throw new Error(`Unknown option for ${command}: ${option}`);
+      names.add(name); parsed.confirmLarge = true; index++; continue;
+    }
     if (!allowed.has(name)) unknownOption ??= option;
     const value = options[index + 1];
     if (value === undefined || value === "" || value.startsWith("--")) throw new Error(`Missing value for ${option}`);
     names.add(name);
-    parsed[name] = value;
+    (parsed as unknown as Record<string, string>)[name] = value;
+    index += 2;
   }
   if (unknownOption) throw new Error(`Unknown option for ${command}: ${unknownOption}`);
   if (parsed.backend && !backendNames.has(parsed.backend)) throw new Error(`Unknown backend: ${parsed.backend}`);
@@ -54,8 +61,9 @@ export function parseArgs(argv: string[]): ParsedArgs {
   return parsed;
 }
 
-const help = `Usage: npm run bench -- <command> [options]\n\nCommands:\n  doctor\n  up\n  reset\n  correctness\n  run\n  compare\n  down\n  report\n`;
-const required = (args: ParsedArgs, name: string): string => { const value = args[name]; if (!value) throw new Error(`Missing --${name}`); return value; };
+const help = `Usage: npm run bench -- <command> [options]\n\nCommands:\n  doctor\n  up\n  reset\n  correctness\n  run\n  compare\n  down\n  report\n\nLarge datasets:\n  --confirm-large\n`;
+const required = (args: ParsedArgs, name: "backend" | "config"): string => { const value = args[name]; if (!value) throw new Error(`Missing --${name}`); return value; };
+const requireLargeConfirmation = (dataset: ProfileName, confirmed?: boolean): void => { if (dataset === "large" && confirmed !== true) throw new Error("Large dataset requires --confirm-large"); };
 const configPath = (value: string): string => { if (value.includes("\0") || value.includes("..")) throw new Error("Unsafe config path"); return resolve(value); };
 
 export function resolveResultPath(value: string, repository = process.cwd()): string {
@@ -99,10 +107,10 @@ async function refuseExistingResult(path: string): Promise<void> {
 
 export interface CompareTarget { backend: string; resultPath: string }
 export interface CompareOutcome extends CompareTarget { status: "valid" | "invalid" | "failed"; error?: string }
-export async function executeCompareSequentially(targets: CompareTarget[], execute: (target: CompareTarget) => Promise<{ result: { valid: boolean }; resultPath: string }>): Promise<CompareOutcome[]> {
+export async function executeCompareSequentially(targets: CompareTarget[], execute: (target: CompareTarget, confirmLarge: boolean) => Promise<{ result: { valid: boolean }; resultPath: string }>, confirmLarge = false): Promise<CompareOutcome[]> {
   const outcomes: CompareOutcome[] = [];
   for (const target of targets) {
-    try { const output = await execute(target); outcomes.push({ ...target, resultPath: output.resultPath, status: output.result.valid ? "valid" : "invalid" }); }
+    try { const output = await execute(target, confirmLarge); outcomes.push({ ...target, resultPath: output.resultPath, status: output.result.valid ? "valid" : "invalid" }); }
     catch (error) { outcomes.push({ ...target, status: "failed", error: safeErrorMessage(error) }); }
   }
   return outcomes;
@@ -156,14 +164,16 @@ export async function main(argv: string[]): Promise<number> {
     const backendName = args.backend ?? (args.command === "compare" ? "" : required(args, "backend"));
     if (args.command === "reset" || args.command === "correctness") {
       const config = args.config ? loadConfig(configPath(args.config)) : undefined;
-      const dataset = (args.dataset ?? config?.dataset ?? "small") as keyof typeof profileMetadata;
+      const dataset = (args.dataset ?? config?.dataset ?? "small") as ProfileName;
       const seed = args.seed === undefined ? (config?.seed ?? 0) : Number(args.seed);
-      if (!Object.hasOwn(profileMetadata, dataset) || !Number.isSafeInteger(seed) || seed < 0) throw new Error("invalid dataset or seed");
+      let definition: ReturnType<typeof profileExpectedCounts>; try { definition = profileExpectedCounts(dataset); } catch { throw new Error("invalid dataset or seed"); }
+      if (!Number.isSafeInteger(seed) || seed < 0) throw new Error("invalid dataset or seed");
+      requireLargeConfirmation(dataset, args.confirmLarge);
       const backend = await loadBackend(backendName);
       try {
         await backend.start();
         await backend.reset();
-        await backend.seed({ name: dataset, definition: { ...profileMetadata[dataset] } }, seed);
+        await backend.seed({ name: dataset, definition: { ...definition } }, seed);
         if (args.command === "correctness") {
           if (!backend.seedCorrectnessFixture) throw new Error("backend correctness fixture unavailable");
           const check = await runCorrectness(backend, await backend.seedCorrectnessFixture());
@@ -181,18 +191,18 @@ export async function main(argv: string[]): Promise<number> {
     }
     if (args.command === "run") {
       const pathToConfig = configPath(required(args, "config"));
-      const config = loadConfig(pathToConfig);
+      const config = loadConfig(pathToConfig); requireLargeConfirmation(config.dataset, args.confirmLarge);
       const path = resolveResultPath(args.result ?? defaultResultPath(config.name, backendName)); await refuseExistingResult(path);
-      const output = await runBenchmark({ backend: backendName, config, resultPath: path });
+      const output = await runBenchmark({ backend: backendName, config, resultPath: path, confirmLarge: args.confirmLarge });
       console.log(`${safeErrorMessage(new Error(relative(process.cwd(), output.resultPath)))} ${output.result.valid ? "valid" : "invalid"}`);
       return output.result.valid ? 0 : 1;
     }
     if (args.command === "compare") {
-      const config = loadConfig(configPath(required(args, "config")));
+      const config = loadConfig(configPath(required(args, "config"))); requireLargeConfirmation(config.dataset, args.confirmLarge);
       const names = (args.backends ?? args.backend ?? "pocketbase,supabase,trailbase").split(",").map(name => name.trim()); const timestamp = new Date();
       const targets = names.map(backend => ({ backend, resultPath: resolveResultPath(defaultResultPath(config.name, backend, timestamp)) }));
       for (const target of targets) await refuseExistingResult(target.resultPath);
-      const outcomes = await executeCompareSequentially(targets, target => runBenchmark({ backend: target.backend, config, resultPath: target.resultPath }));
+      const outcomes = await executeCompareSequentially(targets, (target, confirmLarge) => runBenchmark({ backend: target.backend, config, resultPath: target.resultPath, confirmLarge }), args.confirmLarge);
       for (const outcome of outcomes) {
         console.log(`${safeErrorMessage(new Error(relative(process.cwd(), outcome.resultPath)))} ${outcome.status}`);
         if (outcome.error) console.error(`${outcome.backend} failed: ${outcome.error}`);

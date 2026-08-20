@@ -30,7 +30,7 @@ import type {
   User,
 } from "../../src/domain.js";
 import { BenchmarkOperationError, type CorrectnessFixture } from "../../src/correctness.js";
-import { datasetProfiles, entityId, seedDataset, buildSeedVirtualUserSpecs, type EntityName, type ProfileName, type SeedRecord } from "../../src/seed.js";
+import { datasetProfiles, entityId, seedDataset, buildSeedVirtualUserSpecs, profileExpectedCounts, type EntityName, type ProfileName, type SeedRecord } from "../../src/seed.js";
 import {
   LOCAL_BENCHMARK_PASSWORD,
   LOCAL_SETUP_EMAIL,
@@ -549,7 +549,8 @@ async function setupClient(): Promise<PocketBase> {
 }
 
 function profileName(profile: DatasetProfile): ProfileName {
-  if (!Object.hasOwn(datasetProfiles, profile.name)) throw new BenchmarkOperationError("application", { code: "invalid_profile" });
+  try { profileExpectedCounts(profile.name, profile.definition); }
+  catch { throw new BenchmarkOperationError("application", { code: "invalid_profile" }); }
   return profile.name;
 }
 
@@ -642,16 +643,7 @@ async function seed(profile: DatasetProfile, seedValue: number): Promise<void> {
     for await (const batchData of seedDataset(name, seedValue, BATCH_SIZE)) {
       await upsertRecords(pb, collectionFor[batchData.entity], batchData.records.map((item) => seedBody(batchData.entity, item, name)));
     }
-    const expected: Record<string, number> = {
-      organizations: datasetProfiles[name].organizations,
-      users: datasetProfiles[name].users,
-      memberships: datasetProfiles[name].users,
-      projects: datasetProfiles[name].projects,
-      tasks: datasetProfiles[name].tasks,
-      comments: datasetProfiles[name].comments,
-      activities: datasetProfiles[name].activities,
-    };
-    for (const [collection, count] of Object.entries(expected)) {
+    for (const [collection, count] of Object.entries(profileExpectedCounts(name))) {
       const result = await sdk(() => pb.collection(collection).getList(1, 1, { fields: "id" }));
       if (result.totalItems !== count) throw new BenchmarkOperationError("invalid_response", { code: "seed_count_mismatch" });
     }

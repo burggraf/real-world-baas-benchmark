@@ -5,7 +5,7 @@ import { copyFile, mkdir, mkdtemp, readFile, symlink, writeFile } from "node:fs/
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import test from "node:test";
-import { defaultResultPath, executeCompareSequentially, holdBackendUntilSignal, parseArgs, resolveReportInputPath, resolveResultPath } from "../src/cli.js";
+import { defaultResultPath, executeCompareSequentially, holdBackendUntilSignal, main, parseArgs, resolveReportInputPath, resolveResultPath } from "../src/cli.js";
 import { safeErrorMessage } from "../src/run.js";
 
 test("parses a command and options", () => {
@@ -24,6 +24,16 @@ test("rejects duplicate options", () => {
     () => parseArgs(["reset", "--seed", "1", "--seed", "2"]),
     /duplicate option.*--seed/i,
   );
+});
+
+test("parses confirm-large as a valueless flag only on destructive or benchmark commands", () => {
+  for (const command of ["reset", "correctness", "run", "compare"]) {
+    assert.equal(parseArgs([command, "--confirm-large"]).confirmLarge, true);
+    assert.throws(() => parseArgs([command, "--confirm-large", "true"]), /expected an option/i);
+    assert.throws(() => parseArgs([command, "--confirm-large", "--confirm-large"]), /duplicate option/i);
+  }
+  for (const command of ["doctor", "up", "down"]) assert.throws(() => parseArgs([command, "--confirm-large"]), /unknown option/i);
+  assert.throws(() => parseArgs(["report", "--confirm-large"]), /positional/i);
 });
 
 test("reserves the command name", () => {
@@ -110,16 +120,17 @@ test("default result paths include UTC milliseconds and sanitized config/backend
   assert.equal(defaultResultPath("full config", "pocket/base", new Date("2026-01-02T03:04:05.006Z")), "results/2026-01-02T03-04-05-006Z-full-config-pocket-base.json");
 });
 
-test("compare execution is strictly sequential and continues after invalid and thrown runs", async () => {
+test("compare execution is strictly sequential, propagates large confirmation, and continues after invalid and thrown runs", async () => {
   const targets = ["pocketbase", "supabase", "trailbase"].map(backend => ({ backend, resultPath: `results/${backend}.json` }));
-  let active = 0; let maxActive = 0; const started: string[] = [];
-  const outcomes = await executeCompareSequentially(targets, async target => {
-    started.push(target.backend); active++; maxActive = Math.max(maxActive, active);
+  let active = 0; let maxActive = 0; const started: string[] = []; const confirmations: boolean[] = [];
+  const outcomes = await executeCompareSequentially(targets, async (target, confirmLarge) => {
+    confirmations.push(confirmLarge); started.push(target.backend); active++; maxActive = Math.max(maxActive, active);
     await new Promise(resolveDelay => setTimeout(resolveDelay, 5)); active--;
     if (target.backend === "supabase") throw new Error("Authorization: Bearer compare.secret.token password=unsafe");
     return { result: { valid: target.backend !== "pocketbase" }, resultPath: target.resultPath };
-  });
+  }, true);
   assert.deepEqual(started, ["pocketbase", "supabase", "trailbase"]); assert.equal(maxActive, 1);
+  assert.deepEqual(confirmations, [true, true, true]);
   assert.deepEqual(outcomes.map(outcome => outcome.status), ["invalid", "failed", "valid"]);
   assert.deepEqual(outcomes.map(outcome => outcome.resultPath), targets.map(target => target.resultPath));
   assert.doesNotMatch(outcomes[1]!.error ?? "", /unsafe|compare\.secret\.token/);
@@ -133,6 +144,21 @@ test("report CLI creates reports, rejects overwrite, and prints only safe relati
   assert.match(await readFile(join(root, "result.md"), "utf8"), /# VALID benchmark result/);
   const second = spawnSync(process.execPath, [cli, "report", "result.json"], { cwd: root, encoding: "utf8" });
   assert.notEqual(second.status, 0); assert.match(second.stderr, /already exists/i);
+});
+
+test("every effective large CLI dataset refuses without confirmation before command side effects", async () => {
+  const errors: string[] = []; const original = console.error;
+  console.error = (...values: unknown[]) => { errors.push(values.join(" ")); };
+  try {
+    for (const argv of [
+      ["reset", "--backend", "pocketbase", "--dataset", "large"],
+      ["correctness", "--backend", "pocketbase", "--config", resolve("configs/large.json")],
+      ["run", "--backend", "pocketbase", "--config", resolve("configs/large.json")],
+      ["compare", "--backend", "pocketbase", "--config", resolve("configs/large.json")],
+    ]) assert.equal(await main(argv), 1);
+  } finally { console.error = original; }
+  assert.equal(errors.length, 4);
+  assert.equal(errors.every(message => /confirm-large/i.test(message)), true);
 });
 
 test("run refuses an existing explicit result before loading a backend", async () => {

@@ -8,9 +8,20 @@ export const datasetProfiles = Object.freeze({
   large: Object.freeze({ organizations: 10_000, users: 100_000, projects: 50_000, tasks: 1_000_000, comments: 3_000_000, activities: 2_000_000 }),
 } as const);
 export type ProfileName = keyof typeof datasetProfiles;
+export type ProfileExpectedCounts = Readonly<{ organizations: number; users: number; memberships: number; projects: number; tasks: number; comments: number; activities: number }>;
 export const profileMetadata = Object.freeze(Object.fromEntries(
   Object.entries(datasetProfiles).map(([name, definition]) => [name, Object.freeze({ ...definition, memberships: definition.users })]),
-) as { [P in ProfileName]: typeof datasetProfiles[P] & { readonly memberships: number } });
+) as Readonly<Record<ProfileName, ProfileExpectedCounts>>);
+export function profileExpectedCounts(profile: ProfileName, counts?: Readonly<Record<string, number>>): ProfileExpectedCounts {
+  checkProfile(profile);
+  const expected = profileMetadata[profile];
+  if (counts !== undefined) {
+    const actualKeys = counts && typeof counts === "object" && !Array.isArray(counts) ? Object.keys(counts).sort() : [];
+    const expectedKeys = Object.keys(expected).sort();
+    if (actualKeys.length !== expectedKeys.length || actualKeys.some((key, index) => key !== expectedKeys[index]) || expectedKeys.some(key => counts[key] !== expected[key as keyof ProfileExpectedCounts])) throw new RangeError("Invalid profile counts");
+  }
+  return expected;
+}
 export const datasetCounts = profileMetadata;
 export const PROFILES = datasetProfiles;
 export const profiles = datasetProfiles;
@@ -89,12 +100,13 @@ export async function* seedDataset(profile: ProfileName, seed: number, batchSize
 export type { RecordType as SeedRecord };
 
 export async function buildSeedVirtualUserSpecs(profile: ProfileName, count: number, seed: number, email: (id: string, canonical: string) => string, password: string): Promise<BenchmarkVirtualUserSpec[]> {
-  if (!Number.isSafeInteger(count) || count < 1 || count > profileMetadata[profile].users) throw new RangeError("requested users exceed seeded profile");
+  const expected = profileExpectedCounts(profile);
+  if (!Number.isSafeInteger(count) || count < 1 || count > expected.users) throw new RangeError("requested users exceed seeded profile");
   const users: Array<{ id: string; email: string }> = [];
   for await (const batch of seedDataset(profile, seed, Math.max(1000, count))) {
     if (batch.entity !== "user") continue;
     users.push(...(batch.records.slice(0, count) as Array<{ id: string; email: string }>));
     if (users.length >= count) break;
   }
-  return users.map((user, i) => ({ credentials: { email: email(user.id, user.email), password }, organizationId: entityId("organization", profile, i % profileMetadata[profile].organizations), projectId: entityId("project", profile, i % profileMetadata[profile].projects), taskId: entityId("task", profile, i % profileMetadata[profile].tasks) }));
+  return users.map((user, i) => ({ credentials: { email: email(user.id, user.email), password }, organizationId: entityId("organization", profile, i % expected.organizations), projectId: entityId("project", profile, i % expected.projects), taskId: entityId("task", profile, i % expected.tasks) }));
 }

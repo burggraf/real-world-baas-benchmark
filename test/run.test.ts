@@ -37,7 +37,7 @@ const info = (processIds = [101]): BackendInfo => ({ name: "pocketbase", version
 const snapshot = (cpuPercent = 1, timestampMs = 1): ResourceSnapshot => ({ timestampMs, runner: { pid: 1, cpuPercent, rssBytes: 100 }, backend: { totalCpuPercent: 1, totalRssBytes: 100, processes: [{ pid: 101, cpuPercent: 1, rssBytes: 100 }] }, containers: null, containerTotals: null, containerReason: "not required", eventLoop: { p99Ms: 1, maxMs: 2 } });
 const summary = (users: number) => ({ requestedUsers: users, startedUsers: users, completedWorkflowCount: 1, failedWorkflowCount: 0, graceExpired: false, stageFailed: false, closeErrors: 0 });
 
-async function fakeRun(options: { config?: ReturnType<typeof measuredConfig>; doctor?: () => Promise<BackendInfo>; phaseFailure?: "start" | "reset" | "seed" | "correctness"; stopFailure?: boolean; unsafeCorrectness?: boolean; workload?: (opts: any) => Promise<any>; resources?: (opts: any) => Promise<any>; overloadThresholds?: { cpuPercent?: number; p99Ms?: number; maxMs?: number; consecutiveSamples?: number }; write?: (path: string, text: string, options: { flag: "wx" }) => Promise<void>; rename?: (from: string, to: string) => Promise<void>; onStop?: (resultPath: string) => void } = {}) {
+async function fakeRun(options: { config?: ReturnType<typeof measuredConfig>; confirmLarge?: boolean; doctor?: () => Promise<BackendInfo>; phaseFailure?: "start" | "reset" | "seed" | "correctness"; stopFailure?: boolean; unsafeCorrectness?: boolean; workload?: (opts: any) => Promise<any>; resources?: (opts: any) => Promise<any>; overloadThresholds?: { cpuPercent?: number; p99Ms?: number; maxMs?: number; consecutiveSamples?: number }; write?: (path: string, text: string, options: { flag: "wx" }) => Promise<void>; rename?: (from: string, to: string) => Promise<void>; onStop?: (resultPath: string) => void } = {}) {
   const dir = await mkdtemp(join(tmpdir(), "bench-run-hardening-")); const resultPath = join(dir, "result.json"); const events: string[] = []; let workloadCalls = 0; let stopCalls = 0;
   const fail = (phase: string) => { if (options.phaseFailure === phase) throw new Error("Authorization: Bearer abc.def.ghi password=hunter2 api_key=sekret"); };
   const backend = {
@@ -54,9 +54,28 @@ async function fakeRun(options: { config?: ReturnType<typeof measuredConfig>; do
   const workload = async (_backend: unknown, _config: unknown, opts: any) => { workloadCalls++; if (options.workload) return options.workload(opts); opts.onSample?.({ type: "workflow", name: "dashboard", workflow: "dashboard", operationClass: "read", kind: "read", elapsedMs: 1, success: true }); return summary(opts.users.length); };
   const correctness = async () => { events.push("correctness"); fail("correctness"); return { findings: [{ name: options.unsafeCorrectness ? "password=name-secret" : "ok", passed: !options.unsafeCorrectness, classification: "application" as const, message: options.unsafeCorrectness ? "Authorization: Bearer finding-secret" : undefined, evidence: options.unsafeCorrectness ? "api_key=evidence-secret" : undefined }] }; };
   const resources = options.resources ?? (async () => ({ samples: [snapshot()], valid: true, validityReasons: [] }));
-  const output = runBenchmark({ backend: "pocketbase", config: options.config ?? measuredConfig(), resultPath, dependencies: { loadBackend: async () => backend as any, captureEnvironment: async backendInfo => ({ backend: backendInfo, runtimeVersion: "v1", sdkVersion: "1.0.0" } as any), correctness, workload: workload as any, resources: resources as any, write: options.write, rename: options.rename, overloadThresholds: options.overloadThresholds, now: () => new Date("2026-01-01T00:00:00.000Z"), monotonic: (() => { let value = 0; return () => (value += 1000); })() } });
+  const output = runBenchmark({ backend: "pocketbase", config: options.config ?? measuredConfig(), resultPath, confirmLarge: options.confirmLarge, dependencies: { loadBackend: async () => backend as any, captureEnvironment: async backendInfo => ({ backend: backendInfo, runtimeVersion: "v1", sdkVersion: "1.0.0" } as any), correctness, workload: workload as any, resources: resources as any, write: options.write, rename: options.rename, overloadThresholds: options.overloadThresholds, now: () => new Date("2026-01-01T00:00:00.000Z"), monotonic: (() => { let value = 0; return () => (value += 1000); })() } });
   return { output, resultPath, dir, events, get workloadCalls() { return workloadCalls; }, get stopCalls() { return stopCalls; } };
 }
+
+test("large runs refuse before backend load or filesystem writes unless explicitly confirmed", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "bench-run-large-refusal-")); const resultPath = join(dir, "nested", "result.json");
+  let loads = 0; let writes = 0;
+  await assert.rejects(runBenchmark({
+    backend: "pocketbase", config: measuredConfig({ dataset: "large" }), resultPath,
+    dependencies: {
+      loadBackend: async () => { loads++; throw new Error("backend loaded"); },
+      write: async () => { writes++; },
+    },
+  }), /confirm-large/i);
+  assert.equal(loads, 0); assert.equal(writes, 0); assert.equal(existsSync(join(dir, "nested")), false);
+
+  const confirmed = await fakeRun({ config: measuredConfig({ dataset: "large" }), confirmLarge: true });
+  assert.equal((await confirmed.output).result.dataset, "large");
+  assert.equal(confirmed.stopCalls, 1);
+  const medium = await fakeRun({ config: measuredConfig({ dataset: "medium" }) });
+  assert.equal((await medium.output).result.dataset, "medium");
+});
 
 test("phase failures prevent workload, stop once, and save redacted partial JSON", async () => {
   for (const phase of ["start", "reset", "seed", "correctness"] as const) {

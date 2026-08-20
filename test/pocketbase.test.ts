@@ -2,11 +2,16 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import PocketBase, { ClientResponseError } from "pocketbase";
 import { buildPocketBaseArgs, LOCAL_BENCHMARK_PASSWORD, LOCAL_SETUP_PASSWORD, resolvePocketBaseOptions, assertResetDataDirectorySafe } from "../backends/pocketbase/process.js";
-import { batchRecord, mapPocketBasePage, mapPocketBaseTask, normalizePocketBaseError, taskListFilter } from "../backends/pocketbase/adapter.js";
+import { backend, batchRecord, mapPocketBasePage, mapPocketBaseTask, normalizePocketBaseError, taskListFilter } from "../backends/pocketbase/adapter.js";
+import { profileExpectedCounts } from "../src/seed.js";
 import { BenchmarkOperationError } from "../src/correctness.js";
 
 test("PocketBase setup and measured users use distinct passwords", () => {
   assert.notEqual(LOCAL_SETUP_PASSWORD, LOCAL_BENCHMARK_PASSWORD);
+});
+
+test("PocketBase rejects noncanonical seed counts before setup", async () => {
+  await assert.rejects(backend.seed({ name: "small", definition: { ...profileExpectedCounts("small"), users: 999 } }, 42), /profile/i);
 });
 
 test("PocketBase reset refuses repository ancestors and unowned non-empty data", () => {

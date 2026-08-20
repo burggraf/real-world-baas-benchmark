@@ -6,7 +6,7 @@ import type { BenchmarkConfig } from "./config.js";
 import { runCorrectness, type CorrectnessFixture } from "./correctness.js";
 import { StageMetricsAccumulator } from "./metrics.js";
 import type { BenchmarkResult, Capacity, Correctness } from "./result.js";
-import { buildSeedVirtualUserSpecs, profileMetadata } from "./seed.js";
+import { buildSeedVirtualUserSpecs, profileExpectedCounts } from "./seed.js";
 import { captureEnvironment, collectResources, evaluateRunnerOverload, type ResourceCollection } from "./system.js";
 import { runWorkload, type WorkloadSummary } from "./workload.js";
 export { buildSeedVirtualUserSpecs } from "./seed.js";
@@ -24,7 +24,7 @@ export interface RunDependencies {
   rename?: (from: string, to: string) => Promise<void>;
   overloadThresholds?: Parameters<typeof evaluateRunnerOverload>[1];
 }
-export interface RunOptions { backend: string; config: BenchmarkConfig; resultPath: string; dependencies?: RunDependencies; }
+export interface RunOptions { backend: string; config: BenchmarkConfig; resultPath: string; confirmLarge?: boolean; dependencies?: RunDependencies; }
 
 const RESOURCE_INTERVAL_MS = 1_000;
 const MAX_LATENCY_SAMPLES = 2_000_000;
@@ -87,6 +87,8 @@ const conclusive = (evaluation: ReturnType<typeof evaluateCapacity>["stages"][nu
 
 export async function runBenchmark(options: RunOptions): Promise<{ result: BenchmarkResult; resultPath: string }> {
   if (!options || typeof options.backend !== "string" || !options.backend || !options.config || !options.resultPath || basename(options.resultPath).includes("..") || options.resultPath.includes("\0") || options.resultPath.split(/[\\/]/).includes("..")) throw new Error("invalid benchmark options");
+  const expectedCounts = profileExpectedCounts(options.config.dataset);
+  if (options.config.dataset === "large" && options.confirmLarge !== true) throw new Error("Large dataset requires --confirm-large");
   const d = options.dependencies ?? {};
   try { await lstat(options.resultPath); throw new Error("Result path already exists"); } catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
   const load = d.loadBackend ?? (async name => (await import("./backend.js")).loadBackend(name) as Promise<SetupBackend>);
@@ -146,7 +148,7 @@ export async function runBenchmark(options: RunOptions): Promise<{ result: Bench
     // Process-backed resets restart the owned server; this is the stable post-lifecycle-start identity.
     baseline = await backend.doctor();
     result.backend = baseline;
-    await backend.seed({ name: options.config.dataset, definition: { ...profileMetadata[options.config.dataset] } }, options.config.seed);
+    await backend.seed({ name: options.config.dataset, definition: { ...expectedCounts } }, options.config.seed);
     const fixture = backend.seedCorrectnessFixture ? await backend.seedCorrectnessFixture() : undefined;
     if (!fixture) throw new Error("backend correctness fixture setup unavailable");
     result.correctness = sanitizeCorrectness(await (d.correctness ?? runCorrectness)(backend, fixture));

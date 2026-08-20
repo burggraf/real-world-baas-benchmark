@@ -7,7 +7,7 @@ import { basename, dirname, join, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { initClient } from "trailbase";
 import { BenchmarkOperationError, runCorrectness } from "../src/correctness.js";
-import { datasetProfiles } from "../src/seed.js";
+import { profileExpectedCounts } from "../src/seed.js";
 
 const live = process.env.BENCH_LIVE === "1";
 const denied = (error: unknown): boolean => error instanceof BenchmarkOperationError && error.classification === "authorization";
@@ -263,7 +263,7 @@ test("TrailBase full small seed clears repeatably and verifies auth plus table c
   const state = await liveState();
   try {
     await state.modules.backend.reset();
-    const profile = { name: "small" as const, definition: { ...datasetProfiles.small } };
+    const profile = { name: "small" as const, definition: { ...profileExpectedCounts("small") } };
     await state.modules.backend.seed(profile, 42);
     await state.modules.backend.seed(profile, 42);
   } finally {

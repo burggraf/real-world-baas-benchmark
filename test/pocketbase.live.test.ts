@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import PocketBase, { ClientResponseError } from "pocketbase";
 import { backend, seedPocketBaseCorrectnessFixture } from "../backends/pocketbase/adapter.js";
 import { BenchmarkOperationError, runCorrectness } from "../src/correctness.js";
-import { datasetProfiles } from "../src/seed.js";
+import { profileExpectedCounts } from "../src/seed.js";
 
 const live = process.env.BENCH_LIVE === "1";
 const denied = (error: unknown): boolean => error instanceof BenchmarkOperationError && error.classification === "authorization";
@@ -94,7 +94,7 @@ test("PocketBase full small seed", {
   try {
     await backend.reset();
     started = true;
-    await backend.seed({ name: "small", definition: { ...datasetProfiles.small } }, 42);
+    await backend.seed({ name: "small", definition: { ...profileExpectedCounts("small") } }, 42);
   } finally {
     await backend.stop();
     if (started) assert.deepEqual((await backend.doctor()).processIds, []);

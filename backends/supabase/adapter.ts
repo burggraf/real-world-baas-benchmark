@@ -8,7 +8,7 @@ import type {
   UpdateCommentInput, UpdateMembershipRoleInput, UpdateProfileInput, UpdateTaskInput, User,
 } from "../../src/domain.js";
 import { BenchmarkOperationError, type CorrectnessFixture } from "../../src/correctness.js";
-import { datasetProfiles, entityId, seedDataset, buildSeedVirtualUserSpecs, type EntityName, type ProfileName, type SeedRecord } from "../../src/seed.js";
+import { datasetProfiles, entityId, seedDataset, buildSeedVirtualUserSpecs, profileExpectedCounts, type EntityName, type ProfileName, type SeedRecord } from "../../src/seed.js";
 import { LOCAL_BENCHMARK_PASSWORD, SUPABASE_PROJECT_ID, supabaseProcess, type SupabaseStatus } from "./process.js";
 
 const SEED_BATCH_SIZE = 100;
@@ -288,7 +288,8 @@ async function adminClient(): Promise<SupabaseClient> {
   return createSupabaseClient(status.API_URL, serviceKey, SUPABASE_PROJECT_ID, "admin");
 }
 function profileName(profile: DatasetProfile): ProfileName {
-  if (!Object.hasOwn(datasetProfiles, profile.name)) throw new BenchmarkOperationError("application", { code: "invalid_profile" });
+  try { profileExpectedCounts(profile.name, profile.definition); }
+  catch { throw new BenchmarkOperationError("application", { code: "invalid_profile" }); }
   return profile.name;
 }
 function ordinalFromId(id: string): number {
@@ -367,8 +368,8 @@ async function seed(profile: DatasetProfile, seedValue: number): Promise<void> {
     if (batch.entity === "user") await createAuthProfiles(client, batch.records as User[], name);
     else await insertRows(client, tableFor[batch.entity], batch.records.map(value => seedRecord(batch.entity, value, name)));
   }
-  const counts = datasetProfiles[name];
-  await verifyCounts(client, { profiles: counts.users, organizations: counts.organizations, memberships: counts.users, projects: counts.projects, tasks: counts.tasks, comments: counts.comments, activities: counts.activities });
+  const { users, ...counts } = profileExpectedCounts(name);
+  await verifyCounts(client, { profiles: users, ...counts });
   await client.auth.signOut().catch(() => undefined);
 }
 

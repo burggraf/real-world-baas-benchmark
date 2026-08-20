@@ -15,11 +15,18 @@ import {
   trailBaseBinarySha256,
 } from "../backends/trailbase/process.js";
 import {
+  backend,
   mapTrailBaseTask,
   trailBaseTaskFilters,
   normalizeTrailBaseError,
   recordInternalId,
 } from "../backends/trailbase/adapter.js";
+import { profileExpectedCounts } from "../src/seed.js";
+
+test("TrailBase rejects noncanonical seed counts before setup", async () => {
+  const { activities: _, ...missing } = profileExpectedCounts("small");
+  await assert.rejects(backend.seed({ name: "small", definition: missing }, 42), /profile/i);
+});
 
 test("TrailBase options are local, absolute, and use the pinned trail executable", () => {
   const options = resolveTrailBaseOptions({ TRAILBASE_URL: "http://127.0.0.1:8191", TRAILBASE_DATA_DIR: ".data/tb" }, "/tmp/repo");
