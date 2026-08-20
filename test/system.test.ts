@@ -24,7 +24,7 @@ test("resource sampling scopes owned PIDs and cleans up without waiting", async 
   assert.deepEqual(calls[0], ["ps","-o","pid=,pcpu=,rss=,comm=","-p","10,11"]);
   assert.equal(one.backend.totalCpuPercent, 2.5); assert.equal(one.eventLoop.p99Ms, 5); assert.equal(one.eventLoop.maxMs, 8);
   const result = await collectResources({backend:{name:"pocketbase",version:"1",endpoint:"",processIds:[11],processExecutable:"pocketbase"},runnerPid:10,commandRunner,eventLoop,maxSamples:2,sleep:async()=>{},nowNs:()=>7_000_000});
-  assert.equal(result.samples.length, 2); assert.equal(disabled, 1);
+  assert.equal(result.samples.length, 2); assert.equal(disabled, 0);
 });
 
 test("Supabase sampling discovers then scopes exact container IDs", async () => {
@@ -70,11 +70,14 @@ test("captured environment and resource snapshots serialize as BenchmarkResult",
 test("collector samples immediately, serializes commands, enforces ceilings, aborts cleanly, and cleans monitors", async () => {
   const backend={name:"pocketbase" as const,version:"1",endpoint:"",processIds:[11],processExecutable:"/tools/pocketbase"}; let calls=0; let active=0; let maxActive=0; let now=0; let resets=0; let disabled=0;
   const eventLoop={percentile:()=>1e6,max:1e6,reset(){resets++;},disable(){disabled++;}}; const runner=async()=>{active++; maxActive=Math.max(maxActive,active); await Promise.resolve(); active--; calls++; return {stdout:"10 1 20 node\n11 2.5 30 pocketbase",stderr:""};};
-  const bounded=await collectResources({backend,runnerPid:10,commandRunner:runner,eventLoop,maxSamples:2,sleep:async()=>{},nowNs:()=>++now}); assert.equal(calls,2); assert.equal(bounded.samples.length,2); assert.equal(bounded.valid,false); assert.deepEqual(bounded.validityReasons,["maxSamples ceiling exceeded"]); assert.equal(maxActive,1); assert.equal(resets,2); assert.equal(disabled,1);
+  const bounded=await collectResources({backend,runnerPid:10,commandRunner:runner,eventLoop,maxSamples:2,sleep:async()=>{},nowNs:()=>++now}); assert.equal(calls,2); assert.equal(bounded.samples.length,2); assert.equal(bounded.valid,false); assert.deepEqual(bounded.validityReasons,["maxSamples ceiling exceeded"]); assert.equal(maxActive,1); assert.equal(resets,2); assert.equal(disabled,0);
   calls=0; now=0; const stopped=await collectResources({backend,runnerPid:10,commandRunner:runner,eventLoop:{...eventLoop,disable(){}},maxSamples:2,sleep:async()=>{},shouldStop:()=>calls===2,nowNs:()=>++now}); assert.equal(stopped.valid,true); assert.equal(stopped.samples.length,2);
   const controller=new AbortController(); const aborted=await collectResources({backend,runnerPid:10,commandRunner:runner,eventLoop:{...eventLoop,disable(){}},maxSamples:3,sleep:async()=>{controller.abort();throw new Error("aborted");},signal:controller.signal,nowNs:()=>++now}); assert.equal(aborted.valid,true); assert.equal(aborted.samples.length,1);
   await assert.rejects(() => collectResources({backend,intervalMs:0,eventLoop:{...eventLoop,disable(){throw new Error("must not monitor");}}}),/intervalMs/);
   let ownedWarmups=0,ownedDisables=0,ownedCalls=0; const owned=await collectResources({backend,runnerPid:10,commandRunner:async()=>{ownedCalls++;return {stdout:"10 1 20 node\n11 2 30 pocketbase",stderr:""};},monitorFactory:()=>({percentile:()=>1e6,max:1e6,reset(){},disable(){ownedDisables++;}}),warmupSleep:async()=>{ownedWarmups++;},sleep:async()=>{},shouldStop:()=>ownedCalls===2,nowNs:()=>++now}); assert.equal(owned.valid,true); assert.equal(ownedWarmups,1); assert.equal(ownedDisables,1);
+  let exits=0; const factory=()=>({percentile:()=>1e6,max:1e6,reset(){},disable(){exits++;}}); const ceiling=await collectResources({backend,runnerPid:10,commandRunner:async()=>({stdout:"10 1 20 node\n11 2 30 pocketbase",stderr:""}),monitorFactory:factory,warmupSleep:async()=>{},sleep:async()=>{},maxSamples:1,nowNs:()=>1e6}); assert.equal(ceiling.valid,false); assert.equal(exits,1);
+  const abortedController=new AbortController(); const aborted2=await collectResources({backend,runnerPid:10,commandRunner:async()=>({stdout:"10 1 20 node\n11 2 30 pocketbase",stderr:""}),monitorFactory:factory,warmupSleep:async()=>{},sleep:async()=>{abortedController.abort();throw new Error("aborted");},signal:abortedController.signal,nowNs:()=>1e6}); assert.equal(aborted2.valid,true); assert.equal(exits,2);
+  const failed=await collectResources({backend,runnerPid:10,commandRunner:async()=>{throw new Error("probe failed");},monitorFactory:factory,warmupSleep:async()=>{},sleep:async()=>{},maxSamples:1,nowNs:()=>1e6}); assert.equal(failed.valid,false); assert.equal(exits,3);
 });
 
 test("runner overload requires consecutive samples", () => {
