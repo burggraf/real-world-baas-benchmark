@@ -78,6 +78,15 @@ test("resource invalidity and default runner overload invalidate measured stages
   const overloadedOutput = await overloaded.output; assert.equal(overloadedOutput.result.stages[0]!.valid, false); assert.match(overloadedOutput.result.stages[0]!.validityReasons.join(" "), /cpuPercent sustained above threshold/);
 });
 
+test("checkpoints correctness and stages in a private partial file, then removes it after final publish", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "bench-partial-")); const resultPath = join(dir, "result.json"); const events: string[] = [];
+  const run = await fakeRun({
+    workload: async opts => { events.push("workload"); opts.onSample?.({ type: "workflow", name: "dashboard", workflow: "dashboard", operationClass: "read", kind: "read", elapsedMs: 1, success: true }); return summary(opts.users.length); },
+  });
+  const output = await run.output; const files = await import("node:fs/promises").then(fs => fs.readdir(dir));
+  assert.equal(files.filter(file => file.endsWith(".partial.json")).length, 0); assert.deepEqual(JSON.parse(await readFile(run.resultPath, "utf8")), output.result);
+});
+
 test("publishes once after cleanup and records stop failure on disk", async () => {
   const run = await fakeRun({ stopFailure: true }); await assert.rejects(run.output, /stop failed/);
   const saved = JSON.parse(await readFile(run.resultPath, "utf8")); assert.equal(saved.valid, false); assert.deepEqual(saved.failures, ["stop failed"]); assert.match(saved.validityReasons.join(" "), /backend stop failed/);

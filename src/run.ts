@@ -1,4 +1,4 @@
-import { link, lstat, mkdir, unlink, writeFile } from "node:fs/promises";
+import { link, lstat, mkdir, rename as fsRename, unlink, writeFile } from "node:fs/promises";
 import { basename, dirname } from "node:path";
 import type { Backend, BackendInfo } from "./backend.js";
 import { evaluateCapacity } from "./capacity.js";
@@ -21,6 +21,7 @@ export interface RunDependencies {
   now?: () => Date;
   monotonic?: () => number;
   write?: (path: string, text: string, options: { flag: "wx" }) => Promise<void>;
+  rename?: (from: string, to: string) => Promise<void>;
   overloadThresholds?: Parameters<typeof evaluateRunnerOverload>[1];
 }
 export interface RunOptions { backend: string; config: BenchmarkConfig; resultPath: string; dependencies?: RunDependencies; }
@@ -51,6 +52,11 @@ const atomic = async (path: string, text: string, write: (p: string, t: string, 
   const tmp = `${path}.tmp-${process.pid}-${Math.random().toString(36).slice(2, 8)}`;
   try { await write(tmp, text, { flag: "wx" }); await link(tmp, path); }
   catch (error) { if ((error as NodeJS.ErrnoException).code === "EEXIST") throw new Error("Result path already exists"); throw error; }
+  finally { await unlink(tmp).catch(() => undefined); }
+};
+const atomicReplace = async (path: string, text: string, write: (p: string, t: string, options: { flag: "wx" }) => Promise<void>, move: (from: string, to: string) => Promise<void>) => {
+  const tmp = `${path}.tmp-${process.pid}-${Math.random().toString(36).slice(2, 8)}`;
+  try { await write(tmp, text, { flag: "wx" }); await move(tmp, path); }
   finally { await unlink(tmp).catch(() => undefined); }
 };
 const serialize = (value: unknown): string => JSON.stringify(value, (_key, v) => typeof v === "number" && !Number.isFinite(v) ? null : v, 2) + "\n";
@@ -125,7 +131,10 @@ export async function runBenchmark(options: RunOptions): Promise<{ result: Bench
     correctness: { findings: [], aborted: true, abortReason: "not run" },
     stages: [], resources: [], capacity: emptyCapacity(), failures: [], valid: false, validityReasons: ["run incomplete"],
   };
+  const move = d.rename ?? fsRename;
+  const partialPath = `${options.resultPath.slice(0, -5)}.${result.runId}.partial.json`;
   const save = async () => atomic(options.resultPath, serialize(result), write);
+  const savePartial = async () => atomicReplace(partialPath, serialize(result), write, move);
   let runFailure: unknown; let stopFailure: unknown; let saveFailure: unknown;
   let baseline: BackendInfo | undefined;
   try {
@@ -141,6 +150,7 @@ export async function runBenchmark(options: RunOptions): Promise<{ result: Bench
     const fixture = backend.seedCorrectnessFixture ? await backend.seedCorrectnessFixture() : undefined;
     if (!fixture) throw new Error("backend correctness fixture setup unavailable");
     result.correctness = sanitizeCorrectness(await (d.correctness ?? runCorrectness)(backend, fixture));
+    await savePartial();
     if (result.correctness.aborted || result.correctness.findings.some(finding => !finding.passed)) throw new Error("correctness checks failed");
     const users = backend.buildVirtualUserSpecs ? await backend.buildVirtualUserSpecs(options.config.dataset, options.config.maxConcurrency, options.config.seed) : [];
     const ready = await backend.doctor();
@@ -217,16 +227,20 @@ export async function runBenchmark(options: RunOptions): Promise<{ result: Bench
         const next = Math.min(options.config.maxConcurrency, requestedUsers * 2);
         if (next > requestedUsers && !stages.includes(next)) stages.push(next);
       }
+      await savePartial();
       if (refinementStage === requestedUsers || (currentFailedConclusively && refinementStage === undefined)) break;
     }
     result.valid = result.correctness.findings.every(finding => finding.passed) && result.stages.length > 0 && result.stages.every(stage => stage.valid) && result.capacity.users > 0;
     result.validityReasons = result.valid ? [] : ["one or more benchmark prerequisites failed"];
   } catch (error) {
     runFailure = error; result.failures.push(safeErrorMessage(error)); result.valid = false; result.validityReasons = ["benchmark failed"];
+    await savePartial().catch(() => undefined);
   } finally {
     try { await backend.stop(); }
     catch (error) { stopFailure = error; result.failures.push(safeErrorMessage(error)); result.valid = false; result.validityReasons.push("backend stop failed"); }
     try { await save(); } catch (error) { saveFailure = error; }
+    if (!runFailure && !stopFailure && !saveFailure) await unlink(partialPath).catch(() => undefined);
+    else await savePartial().catch(() => undefined);
   }
   if (runFailure) throw runFailure;
   if (stopFailure) throw stopFailure;
