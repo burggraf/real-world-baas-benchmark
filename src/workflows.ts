@@ -36,7 +36,7 @@ export const workflowOperationClass: Readonly<Record<WorkflowName | "signOutIn",
   addComment: "write", search: "authSearch", profileUpdate: "write", signIn: "authSearch", signOutIn: "authSearch",
 };
 export const operationClassForWorkflow = (workflow: WorkflowName | "signOutIn"): OperationClass => workflowOperationClass[workflow];
-const workflowKind = (workflow: JourneyName): SampleKind => workflow === "profileUpdate" || workflow === "createTask" || workflow === "updateTask" || workflow === "addComment" ? "write" : "read";
+export const workflowKindForWorkflow = (workflow: WorkflowName | "signOutIn"): SampleKind => workflow === "profileUpdate" || workflow === "createTask" || workflow === "updateTask" || workflow === "addComment" ? "write" : "read";
 
 /** Cumulative selection uses configured percentage weights, with 1.0 included in the final bucket. */
 export function selectWorkflow(weights: BenchmarkConfig["weights"], random: () => number): WorkflowName {
@@ -202,9 +202,9 @@ export async function runWorkflow(name: WorkflowName | "signOutIn", context: Wor
   const started = context.now();
   try {
     await (workflow === "signOutIn" ? runSignOutIn(context) : implementations[workflow](context));
-    context.sample({ type: "workflow", name: workflow, workflow, kind: workflowKind(workflow), operationClass: operationClassForWorkflow(name), elapsedMs: Math.max(0, context.now() - started), success: true });
+    context.sample({ type: "workflow", name: workflow, workflow, kind: workflowKindForWorkflow(workflow), operationClass: operationClassForWorkflow(name), elapsedMs: Math.max(0, context.now() - started), success: true });
   } catch (error) {
-    context.sample({ type: "workflow", name: workflow, workflow, kind: workflowKind(workflow), operationClass: operationClassForWorkflow(name), elapsedMs: Math.max(0, context.now() - started), success: false, error: errorData(error) });
+    context.sample({ type: "workflow", name: workflow, workflow, kind: workflowKindForWorkflow(workflow), operationClass: operationClassForWorkflow(name), elapsedMs: Math.max(0, context.now() - started), success: false, error: errorData(error) });
     throw error;
   }
 }

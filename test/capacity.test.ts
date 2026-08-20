@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { loadConfig, type BenchmarkConfig, type OperationClass } from "../src/config.js";
+import { loadConfig, type OperationClass } from "../src/config.js";
 import { evaluateCapacity } from "../src/capacity.js";
 import type { OperationClassMetric, StageMetrics } from "../src/result.js";
 
@@ -16,8 +16,6 @@ const pass = (users: number, tps = users, metrics = passMetrics()): StageMetrics
   workflowTransactionsPerSecondByName: {}, sdkOperationsPerSecond: 0, readOperationsPerSecond: 0, writeOperationsPerSecond: 0,
   workflowCompletionCountByName: {}, operations: {}, operationClassMetrics: metrics, errorExamples: [], valid: true, validityReasons: [],
 });
-const withConfig = (changes: Partial<BenchmarkConfig>): BenchmarkConfig => ({ ...config, ...changes });
-
 test("all stages pass and selects the highest users", () => {
   const result = evaluateCapacity([pass(25), pass(50), pass(100)], config);
   assert.equal(result.users, 100);
@@ -83,6 +81,10 @@ test("plateau requires material increase, under ten percent gain, and rising act
   const decrease = evaluateCapacity([pass(25, 100, passMetrics(100)), pass(50, 90, passMetrics(120))], config);
   assert.equal(decrease.saturation, true);
   assert.equal(decrease.saturationEvidence?.tpsGain, -0.1);
+  assert.equal(evaluateCapacity([pass(25, 100, passMetrics(100)), pass(30, 109, passMetrics(120))], config).saturation, true);
+  assert.equal(evaluateCapacity([pass(25, 100, passMetrics(100)), pass(29, 109, passMetrics(120))], config).saturation, false);
+  assert.equal(evaluateCapacity([pass(25, 100, passMetrics(100)), pass(30, 110, passMetrics(120))], config).saturation, false);
+  assert.equal(evaluateCapacity([pass(25, 100, passMetrics(100)), pass(30, 109.999, passMetrics(120))], config).saturation, true);
 });
 
 test("zero-weight classes are not required", () => {
@@ -95,6 +97,16 @@ test("zero-weight classes are not required", () => {
   assert.equal(result.users, 25);
 });
 
+test("impossible class latency summaries and inconsistent validity are rejected", () => {
+  const inversions: Array<[string, Partial<OperationClassMetric>]> = [
+    ["min/p50", { latencyMinMs: 51 }], ["p50/p95", { latencyP50Ms: 101 }],
+    ["p95/p99", { latencyP95Ms: 101 }], ["p99/max", { latencyP99Ms: 101 }],
+  ];
+  for (const [label, change] of inversions) assert.throws(() => evaluateCapacity([pass(25, 25, { ...passMetrics(), read: { ...metric(), ...change } })], config), /latency|ordered/, label);
+  assert.throws(() => evaluateCapacity([{ ...pass(25), validityReasons: ["stale reason"] }], config), /validity/);
+  assert.throws(() => evaluateCapacity([{ ...pass(25), valid: false, validityReasons: [] }], config), /validity/);
+});
+
 test("malformed stage inputs are rejected without mutating caller stages", () => {
   const stages = [pass(25), pass(50)];
   const before = JSON.stringify(stages);
@@ -104,5 +116,3 @@ test("malformed stage inputs are rejected without mutating caller stages", () =>
   evaluateCapacity(stages, config);
   assert.equal(JSON.stringify(stages), before);
 });
-
-void withConfig;

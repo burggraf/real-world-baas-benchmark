@@ -23,11 +23,8 @@ const record = (value: unknown, label: string): Record<string, unknown> => {
 
 export interface CapacityOptions {
   minAchievedRatio?: number;
-  achievedRatioThreshold?: number;
   minSamples?: number;
-  minWorkflowSamples?: number;
   materialIncrease?: number;
-  materialUserIncrease?: number;
   maxThroughputGain?: number;
 }
 export interface CapacityClassEvaluation extends OperationClassMetric {
@@ -93,6 +90,7 @@ const validateMetric = (value: unknown, label: string): OperationClassMetric => 
   for (const name of metricNumbers) finiteNonnegative(metric[name], `${label}.${name}`);
   if (metric.completed! + metric.failed! !== metric.attempted!) throw new Error(`${label} completed+failed must equal attempted`);
   if (metric.errorRate! > 1 || metric.errorRate !== (metric.attempted ? metric.failed! / metric.attempted! : 0)) throw new Error(`${label}.errorRate is inconsistent with attempted/failed`);
+  if (!(metric.latencyMinMs! <= metric.latencyP50Ms! && metric.latencyP50Ms! <= metric.latencyP95Ms! && metric.latencyP95Ms! <= metric.latencyP99Ms! && metric.latencyP99Ms! <= metric.latencyMaxMs!)) throw new Error(`${label} latency percentiles must be ordered`);
   return metric as OperationClassMetric;
 };
 
@@ -104,6 +102,7 @@ const validateStage = (stage: StageMetrics, index: number): Record<string, Opera
   if (typeof requestedUsers !== "number" || !Number.isSafeInteger(requestedUsers) || requestedUsers < 1) throw new Error(`stage ${index}.requestedUsers must be a positive safe integer`);
   if (typeof achievedUsers !== "number" || !Number.isSafeInteger(achievedUsers) || achievedUsers < 0 || achievedUsers > requestedUsers) throw new Error(`stage ${index}.achievedUsers must be a nonnegative count no greater than requestedUsers`);
   if (typeof raw.valid !== "boolean" || !Array.isArray(raw.validityReasons) || raw.validityReasons.some(reason => typeof reason !== "string")) throw new Error(`stage ${index} validity is malformed`);
+  if ((raw.valid === true && raw.validityReasons.length > 0) || (raw.valid === false && raw.validityReasons.length === 0)) throw new Error(`stage ${index} validity state is inconsistent`);
   const metricsRaw = record(raw.operationClassMetrics ?? {}, `stage ${index}.operationClassMetrics`);
   for (const name of Object.keys(metricsRaw)) if (!classes.includes(name as OperationClass)) throw new Error(`Unknown operation class ${name}`);
   return Object.fromEntries(Object.entries(metricsRaw).map(([name, metric]) => [name, validateMetric(metric, `stage ${index}.${name}`)]));
@@ -112,9 +111,9 @@ const validateStage = (stage: StageMetrics, index: number): Record<string, Opera
 export function evaluateCapacity(stages: readonly StageMetrics[], config: BenchmarkConfig, options: CapacityOptions = {}): CapacityEvaluation {
   if (!Array.isArray(stages)) throw new Error("stages must be an array");
   const activeWeights = validateConfig(config);
-  const minAchievedRatio = options.minAchievedRatio ?? options.achievedRatioThreshold ?? 0.95;
-  const minSamples = options.minSamples ?? options.minWorkflowSamples ?? 20;
-  const materialIncrease = options.materialIncrease ?? options.materialUserIncrease ?? 0.2;
+  const minAchievedRatio = options.minAchievedRatio ?? 0.95;
+  const minSamples = options.minSamples ?? 20;
+  const materialIncrease = options.materialIncrease ?? 0.2;
   const maxThroughputGain = options.maxThroughputGain ?? 0.1;
   if (!Number.isFinite(minAchievedRatio) || minAchievedRatio < 0 || minAchievedRatio > 1) throw new Error("minAchievedRatio must be between 0 and 1");
   if (!Number.isSafeInteger(minSamples) || minSamples < 1) throw new Error("minSamples must be a positive safe integer");
@@ -144,9 +143,9 @@ export function evaluateCapacity(stages: readonly StageMetrics[], config: Benchm
   let firstSaturation: { index: number; evidence: SaturationEvidence } | undefined;
   for (let index = 1; index < validated.length; index++) {
     const previous = validated[index - 1]!.stage; const current = validated[index]!.stage;
-    if (!evaluations[index - 1]!.passed || !evaluations[index]!.passed || current.requestedUsers / previous.requestedUsers - 1 < materialIncrease || previous.workflowTransactionsPerSecond <= 0) continue;
+    if (!evaluations[index - 1]!.passed || !evaluations[index]!.passed || current.requestedUsers < previous.requestedUsers + previous.requestedUsers * materialIncrease || previous.workflowTransactionsPerSecond <= 0) continue;
     const tpsGain = (current.workflowTransactionsPerSecond - previous.workflowTransactionsPerSecond) / previous.workflowTransactionsPerSecond;
-    if (!Number.isFinite(tpsGain) || !(tpsGain < maxThroughputGain)) continue;
+    if (!Number.isFinite(tpsGain) || !(current.workflowTransactionsPerSecond < previous.workflowTransactionsPerSecond + previous.workflowTransactionsPerSecond * maxThroughputGain)) continue;
     const increasedLatencies = Object.fromEntries(classes.filter(name => activeWeights[name] > 0).flatMap(name => {
       const before = validated[index - 1]!.metrics[name]!.latencyP95Ms; const after = validated[index]!.metrics[name]!.latencyP95Ms;
       return after > before ? [[name, { previousP95Ms: before, currentP95Ms: after }]] : [];

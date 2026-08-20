@@ -1,6 +1,6 @@
 import type { OperationClass } from "./config.js";
 import type { StageMetrics, OperationMetric, OperationClassMetric, ErrorClassification, ErrorExample } from "./result.js";
-import { configuredWorkflowNames, operationClassForWorkflow, type WorkloadSample, type SampleKind } from "./workflows.js";
+import { configuredWorkflowNames, operationClassForWorkflow, workflowKindForWorkflow, type WorkloadSample, type SampleKind } from "./workflows.js";
 
 const kinds: SampleKind[] = ["read", "write"];
 const classes: OperationClass[] = ["read", "write", "authSearch"];
@@ -65,6 +65,8 @@ export class StageMetricsAccumulator {
   record(sample: WorkloadSample): void {
     if (this.finalized) throw new Error("Cannot record after finalize");
     if (!sample || (sample.type !== "workflow" && sample.type !== "sdk") || typeof sample.name !== "string" || !sample.name || !workflows.has(sample.workflow) || !classes.includes(sample.operationClass) || !kinds.includes(sample.kind) || typeof sample.success !== "boolean" || !Number.isFinite(sample.elapsedMs) || sample.elapsedMs < 0 || (sample.success && sample.error) || (!sample.success && (!sample.error || typeof sample.error !== "object" || typeof sample.error.name !== "string" || !sample.error.name || typeof sample.error.message !== "string" || (sample.error.code !== undefined && typeof sample.error.code !== "string") || (sample.error.classification !== undefined && typeof sample.error.classification !== "string")))) throw new Error("Invalid workload sample");
+    if (sample.type === "workflow" && sample.name !== sample.workflow) throw new Error("Invalid workload sample: canonical workflow name mismatch");
+    if (sample.type === "workflow" && workflowKindForWorkflow(sample.workflow) !== sample.kind) throw new Error("Invalid workload sample: canonical workflow kind mismatch");
     if (sample.type === "workflow" && operationClassForWorkflow(sample.workflow) !== sample.operationClass) throw new Error("Invalid workload sample: canonical operation class mismatch");
     const k=key(sample); let b=this.buckets.get(k); if (!b) { b={sample:{...sample},attempted:0,completed:0,failed:0,latencies:[],errors:new Map()}; this.buckets.set(k,b); }
     b.attempted++; if (this.retainedLatencies < this.maxLatency) { b.latencies.push(sample.elapsedMs); this.retainedLatencies++; } else if (!this.invalidReason) this.invalidReason=`Latency sample ceiling exceeded for ${sample.name}`;
