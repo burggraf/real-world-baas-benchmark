@@ -157,7 +157,13 @@ test("lists exact aggregation incompatibilities and only compatibility override 
   const runs = await repeated(3); runs[2]!.backend.version = "different"; runs[2]!.environment.backend.version = "different";
   const aggregate = aggregateBenchmarkResults(runs, { override: true });
   assert.equal(aggregate.compatibilityMismatches[0]!.field, "backend.version");
-  const reordered = await repeated(3); const configEntries = Object.entries(reordered[1]!.config); reordered[1]!.config = Object.fromEntries(configEntries.reverse());
+  const reordered = await repeated(3); const sourceConfig = reordered[1]!.config;
+  reordered[1]!.config = {
+    slos: sourceConfig.slos, weights: sourceConfig.weights, thinkTimeMs: sourceConfig.thinkTimeMs,
+    timeoutMs: sourceConfig.timeoutMs, maxConcurrency: sourceConfig.maxConcurrency, concurrency: sourceConfig.concurrency,
+    stageSeconds: sourceConfig.stageSeconds, warmupSeconds: sourceConfig.warmupSeconds, seed: sourceConfig.seed,
+    dataset: sourceConfig.dataset, publishable: sourceConfig.publishable, name: sourceConfig.name,
+  };
   assert.doesNotThrow(() => aggregateBenchmarkResults(reordered));
   const settingsChanged = await repeated(3); settingsChanged[1]!.settings.minClassSamples++;
   assert.throws(() => aggregateBenchmarkResults(settingsChanged), /settings/);
