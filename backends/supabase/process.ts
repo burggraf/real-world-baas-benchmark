@@ -1,22 +1,174 @@
-import { spawn, spawnSync, type ChildProcess } from "node:child_process";
+import { existsSync } from "node:fs";
 import { createServer } from "node:net";
-import { resolve, join } from "node:path";
+import { dirname, isAbsolute, join, parse, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+import { spawn, spawnSync } from "node:child_process";
+import type { BackendInfo } from "../../src/backend.js";
 
 export const SUPABASE_VERSION = "2.115.0";
 export const SUPABASE_PROJECT_ID = "realworldbaasbench";
-export const SUPABASE_PORTS = Object.freeze({ api: 55321, db: 55322, studio: 55323, inbucket: 55324, smtp: 55325, pop3: 55326, analytics: 55327, pooler: 55329 });
+export const SUPABASE_PORTS = Object.freeze({ api: 55321, db: 55322, studio: 55323, inbucket: 55324, smtp: 55325, pop3: 55326, analytics: 55327, pooler: 55329, shadow: 55330 });
 export const LOCAL_BENCHMARK_PASSWORD = "Benchmark-local-only-supabase!";
-export interface SupabaseOptions { repoRoot:string; binary:string; projectId:string; workdir:string; ports:typeof SUPABASE_PORTS; }
-export interface SupabaseStatus { API_URL?:string; REST_URL?:string; ANON_KEY?:string; PUBLISHABLE_KEY?:string; SERVICE_ROLE_KEY?:string; SECRET_KEY?:string; [key:string]:unknown }
-const root = resolve(new URL("../..", import.meta.url).pathname);
-export function resolveSupabaseOptions(env:NodeJS.ProcessEnv=process.env, repoRoot=root):SupabaseOptions {
- const workdir=resolve(repoRoot,"backends/supabase");
- return {repoRoot:resolve(repoRoot), binary:resolve(repoRoot,env.SUPABASE_BIN||"supabase"), projectId:SUPABASE_PROJECT_ID, workdir, ports:SUPABASE_PORTS};
+const MAX_OUTPUT = 1_000_000;
+
+export interface SupabaseOptions {
+  repoRoot: string;
+  binary: string;
+  projectId: string;
+  workdir: string;
+  ports: typeof SUPABASE_PORTS;
 }
-export function buildSupabaseArgs(options:SupabaseOptions, args:readonly string[]):string[] { return ["--workdir",options.workdir,...args]; }
-export function redactSupabaseOutput(value:string):string { return value.replace(/(SERVICE_ROLE_KEY|SECRET_KEY|JWT_SECRET|ANON_KEY|PUBLISHABLE_KEY|password|token)\s*[:=]\s*[^\s,}]+/gi,"$1=<redacted>"); }
-export function parseSupabaseStatus(stdout:string):SupabaseStatus { const parsed=JSON.parse(stdout) as unknown; if (!parsed || typeof parsed!=="object" || Array.isArray(parsed)) throw new Error("invalid Supabase status"); return parsed as SupabaseStatus; }
-export function runSupabase(options:SupabaseOptions,args:readonly string[],timeout=120000):Promise<{stdout:string;stderr:string}> { return new Promise((resolveRun,reject)=>{ const child=spawn(options.binary,buildSupabaseArgs(options,args),{cwd:options.repoRoot,shell:false,env:{...process.env,SUPABASE_PROJECT_ID:options.projectId},stdio:["ignore","pipe","pipe"]}); let stdout="",stderr=""; child.stdout?.on("data",d=>{stdout+=d.toString(); if(stdout.length>1_000_000) child.kill();}); child.stderr?.on("data",d=>{stderr+=d.toString().slice(0,10000);}); const timer=setTimeout(()=>{child.kill();reject(new Error("supabase command timeout"));},timeout); child.once("error",e=>{clearTimeout(timer);reject(e)}); child.once("close",code=>{clearTimeout(timer); code===0?resolveRun({stdout,stderr}):reject(new Error(`supabase exited ${code}: ${redactSupabaseOutput(stderr)}`));}); }); }
-export async function portAvailable(port:number):Promise<boolean>{return new Promise(r=>{const s=createServer();s.once("error",()=>r(false));s.listen(port,"127.0.0.1",()=>s.close(()=>r(true)));});}
-export class SupabaseProcess { constructor(public readonly options=resolveSupabaseOptions()){} async doctor(){ const v=spawnSync(this.options.binary,["--version"],{shell:false,encoding:"utf8"}); if(v.status!==0) throw new Error("Supabase CLI unavailable"); for(const p of Object.values(this.options.ports)) if(!(await portAvailable(p))) throw new Error(`port unavailable: ${p}`); return {name:"supabase" as const,version:SUPABASE_VERSION,endpoint:`http://127.0.0.1:${this.options.ports.api}`}; } async start(){await runSupabase(this.options,["start"])} async status(){return parseSupabaseStatus((await runSupabase(this.options,["status","-o","json"])).stdout)} async reset(){await runSupabase(this.options,["db","reset","--local"])} async stop(){await runSupabase({...this.options},["stop","--project-id",this.options.projectId])} }
-export const supabaseProcess=new SupabaseProcess();
+export interface SupabaseStatus {
+  API_URL: string;
+  REST_URL?: string;
+  ANON_KEY?: string;
+  PUBLISHABLE_KEY?: string;
+  SERVICE_ROLE_KEY?: string;
+  SECRET_KEY?: string;
+  [key: string]: unknown;
+}
+
+function findRepoRoot(from = dirname(fileURLToPath(import.meta.url))): string {
+  let current = resolve(from);
+  while (parse(current).root !== current) {
+    if (existsSync(join(current, "package.json"))) return current;
+    current = dirname(current);
+  }
+  throw new Error("Could not locate benchmark repository root");
+}
+
+export function resolveSupabaseOptions(env: NodeJS.ProcessEnv = process.env, repoRoot = findRepoRoot()): SupabaseOptions {
+  const binary = env.SUPABASE_BIN || "supabase";
+  return {
+    repoRoot: resolve(repoRoot),
+    binary: binary.includes("/") ? (isAbsolute(binary) ? binary : resolve(repoRoot, binary)) : binary,
+    projectId: SUPABASE_PROJECT_ID,
+    workdir: resolve(repoRoot, "backends/supabase"),
+    ports: SUPABASE_PORTS,
+  };
+}
+
+export function buildSupabaseArgs(options: SupabaseOptions, args: readonly string[]): string[] {
+  return ["--workdir", options.workdir, ...args];
+}
+
+export function supabaseEnvironment(source: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  const result = { ...source };
+  for (const key of Object.keys(result)) {
+    if (key === "SUPABASE_PROJECT_ID" || key === "SUPABASE_WORKDIR" || key === "SUPABASE_NETWORK_ID" || /^SUPABASE_.*_PORT$/.test(key)) delete result[key];
+  }
+  return result;
+}
+
+export function redactSupabaseOutput(value: string): string {
+  return value
+    .replace(/\b(postgres(?:ql)?:\/\/)[^\s/@:]+:[^\s/@]+@/gi, "$1<redacted>@")
+    .replace(/(["']?)\b(SERVICE_ROLE_KEY|SECRET_KEY|JWT_SECRET|ANON_KEY|PUBLISHABLE_KEY|password|access_token|refresh_token|token)\b\1\s*[:=]\s*["']?[^\s,"'}]+["']?/gi, "$2=<redacted>");
+}
+
+export function parseSupabaseStatus(stdout: string): SupabaseStatus {
+  let parsed: unknown;
+  try { parsed = JSON.parse(stdout); } catch { throw new Error("Invalid Supabase status JSON"); }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("Invalid Supabase status JSON");
+  const status = parsed as Record<string, unknown>;
+  if (typeof status.API_URL !== "string" || !status.API_URL.startsWith("http://127.0.0.1:")) throw new Error("Supabase status is missing a local API URL");
+  return status as SupabaseStatus;
+}
+
+export function runSynchronousProbe(binary: string, args: readonly string[], label: string, timeoutMs = 10_000): string {
+  const result = spawnSync(binary, args, { encoding: "utf8", shell: false, timeout: timeoutMs, killSignal: "SIGKILL", maxBuffer: 64 * 1024 });
+  if (result.error && (result.error as NodeJS.ErrnoException).code === "ETIMEDOUT") throw new Error(`${label} probe timed out`);
+  if (result.error || result.status !== 0) throw new Error(`${label} probe failed`);
+  return result.stdout;
+}
+
+export function runSupabase(options: SupabaseOptions, args: readonly string[], timeoutMs = 300_000): Promise<{ stdout: string; stderr: string }> {
+  return new Promise((resolveRun, reject) => {
+    const child = spawn(options.binary, buildSupabaseArgs(options, args), {
+      cwd: options.repoRoot,
+      shell: false,
+      env: supabaseEnvironment(),
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    let stdout = "", stderr = "", overflow = false, settled = false;
+    const append = (current: string, chunk: unknown): string => {
+      const next = current + String(chunk);
+      if (next.length > MAX_OUTPUT) { overflow = true; child.kill("SIGKILL"); return next.slice(0, MAX_OUTPUT); }
+      return next;
+    };
+    child.stdout.on("data", chunk => { stdout = append(stdout, chunk); });
+    child.stderr.on("data", chunk => { stderr = append(stderr, chunk); });
+    const finish = (error?: Error) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      error ? reject(error) : resolveRun({ stdout, stderr });
+    };
+    const timer = setTimeout(() => { child.kill("SIGKILL"); finish(new Error("Supabase command timed out")); }, timeoutMs);
+    child.once("error", error => finish(new Error(`Supabase command failed: ${redactSupabaseOutput(error.message)}`)));
+    child.once("close", code => {
+      if (overflow) return finish(new Error("Supabase command output exceeded limit"));
+      if (code !== 0) return finish(new Error(`Supabase command exited ${code}: ${redactSupabaseOutput(stderr).slice(0, 4000)}`));
+      finish();
+    });
+  });
+}
+
+export async function portAvailable(port: number): Promise<boolean> {
+  return new Promise(resolveResult => {
+    const server = createServer();
+    server.once("error", () => resolveResult(false));
+    server.listen(port, "127.0.0.1", () => server.close(() => resolveResult(true)));
+  });
+}
+
+function ownContainerIds(projectId: string): number[] {
+  const stdout = runSynchronousProbe("docker", ["ps", "-q", "--filter", `label=com.supabase.cli.project=${projectId}`], "Docker");
+  return stdout.trim() ? stdout.trim().split(/\s+/).map(id => Number.parseInt(id.slice(0, 8), 16)) : [];
+}
+
+export class SupabaseProcess {
+  constructor(readonly options = resolveSupabaseOptions()) {}
+
+  async doctor(): Promise<BackendInfo> {
+    const version = runSynchronousProbe(this.options.binary, ["--version"], "Supabase CLI");
+    if (version.trim() !== SUPABASE_VERSION) throw new Error(`Supabase CLI ${SUPABASE_VERSION} is required`);
+    const ids = ownContainerIds(this.options.projectId);
+    if (ids.length) {
+      const status = await this.status();
+      return { name: "supabase", version: SUPABASE_VERSION, endpoint: status.API_URL, processIds: ids };
+    }
+    for (const port of Object.values(this.options.ports)) {
+      if (!(await portAvailable(port))) throw new Error(`Supabase benchmark port ${port} is in use by another process`);
+    }
+    return { name: "supabase", version: SUPABASE_VERSION, endpoint: `http://127.0.0.1:${this.options.ports.api}`, processIds: [] };
+  }
+
+  async start(): Promise<SupabaseStatus> {
+    if (!ownContainerIds(this.options.projectId).length) {
+      for (const port of Object.values(this.options.ports)) if (!(await portAvailable(port))) throw new Error(`Supabase benchmark port ${port} is unavailable`);
+      await runSupabase(this.options, ["start"]);
+    }
+    return this.status();
+  }
+
+  async status(): Promise<SupabaseStatus> {
+    const status = parseSupabaseStatus((await runSupabase(this.options, ["status", "-o", "json"], 60_000)).stdout);
+    if (new URL(status.API_URL).port !== String(this.options.ports.api)) throw new Error("Supabase status returned the wrong project endpoint");
+    return status;
+  }
+
+  async reset(): Promise<SupabaseStatus> {
+    await this.start();
+    await runSupabase(this.options, ["db", "reset", "--local"]);
+    return this.status();
+  }
+
+  async stop(): Promise<void> {
+    if (!ownContainerIds(this.options.projectId).length) return;
+    await runSupabase(this.options, ["stop", "--project-id", this.options.projectId, "--no-backup"]);
+    if (ownContainerIds(this.options.projectId).length) throw new Error("Supabase benchmark containers did not stop");
+  }
+}
+
+export const supabaseProcess = new SupabaseProcess();

@@ -8,6 +8,7 @@ backends/**/.temp/
 backends/**/pb_data/
 backends/**/data/
 backends/**/bin/
+backends/supabase/supabase/.branches/
 backends/pocketbase/pocketbase
 backends/trailbase/trail
 backends/trailbase/trailbase
