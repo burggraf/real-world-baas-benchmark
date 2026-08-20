@@ -1,10 +1,12 @@
 import { pathToFileURL } from "node:url";
-import { basename, extname, isAbsolute, relative, resolve, sep } from "node:path";
+import { lstat, readFile, realpath } from "node:fs/promises";
+import { extname, isAbsolute, relative, resolve, sep } from "node:path";
 import { loadBackend, type Backend } from "./backend.js";
 import { loadConfig } from "./config.js";
 import { runCorrectness } from "./correctness.js";
 import { runBenchmark, safeErrorMessage } from "./run.js";
 import { profileMetadata } from "./seed.js";
+import { validateBenchmarkResult, writeBenchmarkReport } from "./report.js";
 
 export type ParsedArgs = { command: string; [option: string]: string };
 const allowedOptions = {
@@ -19,6 +21,11 @@ export function parseArgs(argv: string[]): ParsedArgs {
   const [command, ...options] = argv;
   if (!command || command.startsWith("--") || !commands.has(command)) throw new Error("Unknown or missing command");
   const parsed: ParsedArgs = { command };
+  if (command === "report") {
+    if (options.length !== 1 || !options[0] || options[0].startsWith("--")) throw new Error("report requires exactly one positional JSON path");
+    parsed.input = options[0];
+    return parsed;
+  }
   const names = new Set(["command"]);
   const allowed = new Set<string>(allowedOptions[command as keyof typeof allowedOptions]);
   let unknownOption: string | undefined;
@@ -59,6 +66,43 @@ export function resolveResultPath(value: string): string {
   return candidate;
 }
 
+const pathIsInside = (root: string, candidate: string): boolean => { const inside = relative(root, candidate); return inside !== "" && inside !== ".." && !inside.startsWith(`..${sep}`) && !isAbsolute(inside); };
+export async function resolveReportInputPath(value: string, root = process.cwd()): Promise<string> {
+  const repository = resolve(root);
+  if (!value || value.includes("\0") || value.split(/[\\/]/).includes("..") || isAbsolute(value) || extname(value).toLowerCase() !== ".json") throw new Error("Invalid report input path");
+  const candidate = resolve(repository, value); if (!pathIsInside(repository, candidate)) throw new Error("Invalid report input path");
+  let current = repository;
+  try {
+    for (const part of relative(repository, candidate).split(sep)) { current = resolve(current, part); if ((await lstat(current)).isSymbolicLink()) throw new Error("symlink"); }
+    if (!(await lstat(candidate)).isFile()) throw new Error("not a file");
+    const [realRepository, realCandidate] = await Promise.all([realpath(repository), realpath(candidate)]); if (!pathIsInside(realRepository, realCandidate)) throw new Error("outside repository");
+  } catch { throw new Error("Invalid report input path: regular non-symlink file required"); }
+  return candidate;
+}
+
+const safeSegment = (value: string): string => value.replace(/[^A-Za-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "unnamed";
+export function defaultResultPath(config: string, backend: string, date = new Date()): string {
+  if (!Number.isFinite(date.getTime())) throw new Error("Invalid result timestamp");
+  const timestamp = date.toISOString().replace(/[:.]/g, "-");
+  return `results/${timestamp}-${safeSegment(config)}-${safeSegment(backend)}.json`;
+}
+
+async function refuseExistingResult(path: string): Promise<void> {
+  try { await lstat(path); throw new Error("Result path already exists"); }
+  catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
+}
+
+export interface CompareTarget { backend: string; resultPath: string }
+export interface CompareOutcome extends CompareTarget { status: "valid" | "invalid" | "failed"; error?: string }
+export async function executeCompareSequentially(targets: CompareTarget[], execute: (target: CompareTarget) => Promise<{ result: { valid: boolean }; resultPath: string }>): Promise<CompareOutcome[]> {
+  const outcomes: CompareOutcome[] = [];
+  for (const target of targets) {
+    try { const output = await execute(target); outcomes.push({ ...target, resultPath: output.resultPath, status: output.result.valid ? "valid" : "invalid" }); }
+    catch (error) { outcomes.push({ ...target, status: "failed", error: safeErrorMessage(error) }); }
+  }
+  return outcomes;
+}
+
 export interface SignalSource { once(event: "SIGINT" | "SIGTERM", listener: () => void): unknown; removeListener(event: "SIGINT" | "SIGTERM", listener: () => void): unknown; }
 export async function holdBackendUntilSignal(backend: Pick<Backend, "start" | "stop">, signals: SignalSource = process, onStarted?: () => void): Promise<number> {
   let release!: () => void;
@@ -90,7 +134,14 @@ export async function main(argv: string[]): Promise<number> {
   try {
     if (argv.length === 0) { console.error(help); return 1; }
     const args = parseArgs(argv);
-    if (args.command === "report") throw new Error("report is not supported until Task14");
+    if (args.command === "report") {
+      const inputPath = await resolveReportInputPath(args.input!); let result: unknown;
+      try { result = JSON.parse(await readFile(inputPath, "utf8")); } catch { throw new Error("Invalid result JSON"); }
+      validateBenchmarkResult(result); const written = await writeBenchmarkReport(result, inputPath);
+      console.log(`${safeErrorMessage(new Error(relative(process.cwd(), written.markdownPath)))} created`);
+      console.log(`${safeErrorMessage(new Error(relative(process.cwd(), written.csvPath)))} created`);
+      return 0;
+    }
     if (args.command === "down") throw new Error("down requires an owned lifecycle handle; no unrelated process was stopped");
     if (args.command === "doctor") {
       const names = args.backend ? [args.backend] : [...backendNames];
@@ -126,19 +177,22 @@ export async function main(argv: string[]): Promise<number> {
     if (args.command === "run") {
       const pathToConfig = configPath(required(args, "config"));
       const config = loadConfig(pathToConfig);
-      const path = resolveResultPath(args.result ?? `results/${basename(pathToConfig, ".json")}-${backendName}.json`);
+      const path = resolveResultPath(args.result ?? defaultResultPath(config.name, backendName)); await refuseExistingResult(path);
       const output = await runBenchmark({ backend: backendName, config, resultPath: path });
-      console.log(`${output.resultPath} ${output.result.valid ? "valid" : "invalid"}`);
+      console.log(`${safeErrorMessage(new Error(relative(process.cwd(), output.resultPath)))} ${output.result.valid ? "valid" : "invalid"}`);
       return output.result.valid ? 0 : 1;
     }
     if (args.command === "compare") {
       const config = loadConfig(configPath(required(args, "config")));
-      const names = (args.backends ?? args.backend ?? "pocketbase,supabase,trailbase").split(",").map(name => name.trim());
-      for (const selected of names) {
-        const output = await runBenchmark({ backend: selected, config, resultPath: resolveResultPath(`results/${config.name}-${selected}.json`) });
-        if (!output.result.valid) return 1;
+      const names = (args.backends ?? args.backend ?? "pocketbase,supabase,trailbase").split(",").map(name => name.trim()); const timestamp = new Date();
+      const targets = names.map(backend => ({ backend, resultPath: resolveResultPath(defaultResultPath(config.name, backend, timestamp)) }));
+      for (const target of targets) await refuseExistingResult(target.resultPath);
+      const outcomes = await executeCompareSequentially(targets, target => runBenchmark({ backend: target.backend, config, resultPath: target.resultPath }));
+      for (const outcome of outcomes) {
+        console.log(`${safeErrorMessage(new Error(relative(process.cwd(), outcome.resultPath)))} ${outcome.status}`);
+        if (outcome.error) console.error(`${outcome.backend} failed: ${outcome.error}`);
       }
-      return 0;
+      return outcomes.every(outcome => outcome.status === "valid") ? 0 : 1;
     }
     throw new Error("Unsupported command");
   } catch (error) { console.error(safeErrorMessage(error)); return 1; }

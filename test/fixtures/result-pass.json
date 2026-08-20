@@ -1,0 +1,321 @@
+{
+  "schemaVersion": 1,
+  "runId": "run-pass",
+  "startedAt": "2026-01-02T03:04:05.006Z",
+  "publishable": true,
+  "backend": {
+    "name": "supabase",
+    "version": "2.50.0",
+    "endpoint": "http://127.0.0.1:54321",
+    "supabaseProjectId": "bench",
+    "deviations": [
+      "local SMTP | disabled"
+    ]
+  },
+  "dataset": "small",
+  "seed": 42,
+  "environment": {
+    "runtime": "node",
+    "runtimeVersion": "v22.20.0",
+    "os": "linux",
+    "architecture": "x64",
+    "host": "bench-host",
+    "cpu": "Test CPU",
+    "memoryBytes": 17179869184,
+    "release": "6.8.0",
+    "logicalCores": 8,
+    "cpuModel": "Test CPU",
+    "totalMemoryBytes": 17179869184,
+    "hostname": "bench-host",
+    "nodeVersion": "v22.20.0",
+    "npmVersion": "10.9.3",
+    "gitCommit": "0123456789abcdef0123456789abcdef01234567",
+    "gitDirty": false,
+    "backend": {
+      "name": "supabase",
+      "version": "2.50.0",
+      "endpoint": "http://127.0.0.1:54321",
+      "supabaseProjectId": "bench",
+      "deviations": [
+        "local SMTP | disabled"
+      ]
+    },
+    "sdkVersion": "2.112.3",
+    "dockerVersion": "28.3.0",
+    "supabaseVersion": "2.50.0",
+    "unavailable": {}
+  },
+  "versions": {
+    "backend": "2.50.0",
+    "sdk": "2.112.3",
+    "runtime": "v22.20.0"
+  },
+  "config": {
+    "name": "full | quoted",
+    "publishable": true,
+    "dataset": "small",
+    "seed": 42,
+    "warmupSeconds": 5,
+    "stageSeconds": 30,
+    "concurrency": [
+      2
+    ],
+    "maxConcurrency": 2,
+    "timeoutMs": 5000,
+    "thinkTimeMs": {
+      "min": 10,
+      "max": 20
+    },
+    "weights": {
+      "dashboard": 40,
+      "taskList": 20,
+      "taskDetail": 10,
+      "createTask": 10,
+      "updateTask": 5,
+      "addComment": 5,
+      "search": 5,
+      "profileUpdate": 3,
+      "signIn": 2
+    },
+    "slos": {
+      "read": {
+        "p95Ms": 500,
+        "maxErrorRate": 0.05
+      },
+      "write": {
+        "p95Ms": 750,
+        "maxErrorRate": 0.05
+      },
+      "authSearch": {
+        "p95Ms": 1000,
+        "maxErrorRate": 0.05
+      }
+    }
+  },
+  "settings": {
+    "warmupUserCount": 2,
+    "warmupWritesUnscored": true,
+    "resourceIntervalMs": 1000,
+    "resourceMaxSamples": {
+      "stageDurationMs": 30000,
+      "graceMs": 5000,
+      "formula": "ceil((stageDurationMs + graceMs) / intervalMs) + 2",
+      "value": 37
+    },
+    "overloadThresholds": {
+      "cpuPercent": 90,
+      "p99Ms": 100,
+      "maxMs": 250,
+      "consecutiveSamples": 3
+    },
+    "minClassSamples": 20,
+    "minAchievedRatio": 0.95,
+    "saturationMaterialIncrease": 0.2,
+    "saturationMaxThroughputGain": 0.1,
+    "maxLatencySamples": 2000000,
+    "maxErrorExamples": 100
+  },
+  "correctness": {
+    "findings": [
+      {
+        "name": "tenant | isolation",
+        "passed": true,
+        "classification": "authorization",
+        "message": "cross-tenant read rejected"
+      },
+      {
+        "name": "write semantics",
+        "passed": true,
+        "classification": "application"
+      }
+    ]
+  },
+  "stages": [
+    {
+      "requestedUsers": 2,
+      "achievedUsers": 2,
+      "elapsedSeconds": 30,
+      "workflowTransactionsPerSecond": 12.5,
+      "workflowTransactionsPerSecondByName": {
+        "dashboard": 12.5
+      },
+      "sdkOperationsPerSecond": 40.25,
+      "readOperationsPerSecond": 30.5,
+      "writeOperationsPerSecond": 9.75,
+      "workflowCompletionCountByName": {
+        "dashboard": 375
+      },
+      "operationClassMetrics": {
+        "read": {
+          "attempted": 100,
+          "completed": 99,
+          "failed": 1,
+          "errorRate": 0.01,
+          "latencyP50Ms": 20,
+          "latencyP95Ms": 100,
+          "latencyP99Ms": 200,
+          "latencyMinMs": 5,
+          "latencyMaxMs": 250
+        },
+        "write": {
+          "attempted": 40,
+          "completed": 40,
+          "failed": 0,
+          "errorRate": 0,
+          "latencyP50Ms": 40,
+          "latencyP95Ms": 200,
+          "latencyP99Ms": 350,
+          "latencyMinMs": 10,
+          "latencyMaxMs": 400
+        },
+        "authSearch": {
+          "attempted": 20,
+          "completed": 20,
+          "failed": 0,
+          "errorRate": 0,
+          "latencyP50Ms": 50,
+          "latencyP95Ms": 300,
+          "latencyP99Ms": 450,
+          "latencyMinMs": 15,
+          "latencyMaxMs": 500
+        }
+      },
+      "operations": {
+        "dashboard": {
+          "operationCount": 100,
+          "errorCount": 1,
+          "latencyP50Ms": 20,
+          "latencyP95Ms": 100,
+          "latencyP99Ms": 200,
+          "latencyMinMs": 5,
+          "latencyMaxMs": 250,
+          "type": "workflow",
+          "name": "dashboard",
+          "workflow": "dashboard",
+          "operationClass": "read",
+          "kind": "read",
+          "attemptedCount": 100,
+          "completedCount": 99,
+          "failedCount": 1,
+          "errorRate": 0.01,
+          "successRate": 0.99,
+          "throughputPerSecond": 3.3,
+          "errorCounts": {
+            "timeout": 1
+          }
+        }
+      },
+      "errorExamples": [
+        {
+          "type": "workflow",
+          "name": "dashboard",
+          "workflow": "dashboard",
+          "operationClass": "read",
+          "kind": "read",
+          "classification": "timeout",
+          "nameOfError": "TimeoutError",
+          "message": "timeout | \"safe\", retry, then stop",
+          "occurrences": 1
+        }
+      ],
+      "valid": true,
+      "validityReasons": []
+    }
+  ],
+  "resources": [
+    {
+      "name": "stage-2",
+      "unit": "snapshot",
+      "samples": [
+        null,
+        null
+      ],
+      "snapshots": [
+        {
+          "timestampMs": 1000,
+          "runner": {
+            "pid": 900,
+            "cpuPercent": 20,
+            "rssBytes": 100000000
+          },
+          "backend": {
+            "totalCpuPercent": null,
+            "totalRssBytes": null,
+            "processes": [],
+            "reason": "Supabase uses container totals"
+          },
+          "containers": [
+            {
+              "containerId": "aaaaaaaaaaaa",
+              "cpuPercent": 30,
+              "memoryBytes": 200000000,
+              "blockReadBytes": 1000,
+              "blockWriteBytes": 2000
+            }
+          ],
+          "containerTotals": {
+            "cpuPercent": 30,
+            "memoryBytes": 200000000,
+            "blockReadBytes": 1000,
+            "blockWriteBytes": 2000
+          },
+          "eventLoop": {
+            "p99Ms": 4,
+            "maxMs": 8
+          }
+        },
+        {
+          "timestampMs": 2000,
+          "runner": {
+            "pid": 900,
+            "cpuPercent": 25,
+            "rssBytes": 110000000
+          },
+          "backend": {
+            "totalCpuPercent": null,
+            "totalRssBytes": null,
+            "processes": [],
+            "reason": "Supabase uses container totals"
+          },
+          "containers": [
+            {
+              "containerId": "aaaaaaaaaaaa",
+              "cpuPercent": 35,
+              "memoryBytes": 220000000,
+              "blockReadBytes": 3000,
+              "blockWriteBytes": 5000
+            },
+            {
+              "containerId": "bbbbbbbbbbbb",
+              "cpuPercent": 5,
+              "memoryBytes": 30000000,
+              "blockReadBytes": 500,
+              "blockWriteBytes": 800
+            }
+          ],
+          "containerTotals": {
+            "cpuPercent": 40,
+            "memoryBytes": 250000000,
+            "blockReadBytes": 3500,
+            "blockWriteBytes": 5800
+          },
+          "eventLoop": {
+            "p99Ms": 6,
+            "maxMs": 12
+          }
+        }
+      ]
+    }
+  ],
+  "capacity": {
+    "users": 2,
+    "saturation": false,
+    "reasons": [
+      "stage 2 meets every configured SLO",
+      "no saturation detected"
+    ]
+  },
+  "failures": [],
+  "valid": true,
+  "validityReasons": []
+}

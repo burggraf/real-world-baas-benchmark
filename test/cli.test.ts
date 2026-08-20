@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { EventEmitter } from "node:events";
-import { resolve } from "node:path";
+import { copyFile, mkdir, mkdtemp, readFile, symlink, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 import test from "node:test";
-import { holdBackendUntilSignal, parseArgs, resolveResultPath } from "../src/cli.js";
+import { defaultResultPath, executeCompareSequentially, holdBackendUntilSignal, parseArgs, resolveReportInputPath, resolveResultPath } from "../src/cli.js";
 import { safeErrorMessage } from "../src/run.js";
 
 test("parses a command and options", () => {
@@ -84,6 +86,58 @@ test("result paths stay below results and name a JSON file", () => {
   for (const path of ["results", "results/run.txt", "../run.json", "/tmp/run.json", "result.json", "results/../run.json"]) {
     assert.throws(() => resolveResultPath(path), /result path/i);
   }
+});
+
+test("report accepts exactly one positional JSON path and no option syntax", () => {
+  assert.deepEqual(parseArgs(["report", "results/run.json"]), { command: "report", input: "results/run.json" });
+  for (const argv of [["report"], ["report", "a.json", "b.json"], ["report", "--input", "a.json"]]) assert.throws(() => parseArgs(argv), /exactly one positional/i);
+});
+
+test("report input resolution rejects absolute, traversal, NUL, non-JSON, outside, and symlink paths", async () => {
+  const root = await mkdtemp(join(tmpdir(), "bench-cli-report-"));
+  await mkdir(join(root, "results")); await writeFile(join(root, "results", "run.json"), "{}\n");
+  assert.equal(await resolveReportInputPath("results/run.json", root), join(root, "results", "run.json"));
+  for (const path of [join(root, "results", "run.json"), "../run.json", "results/../run.json", "results/run.json\0tail", "results/run.txt"]) await assert.rejects(resolveReportInputPath(path, root), /report input path/i);
+  await writeFile(join(root, "outside.json"), "{}\n"); await symlink(join(root, "outside.json"), join(root, "results", "link.json"));
+  await assert.rejects(resolveReportInputPath("results/link.json", root), /symlink|report input path/i);
+  await mkdir(join(root, "real")); await writeFile(join(root, "real", "nested.json"), "{}\n"); await symlink(join(root, "real"), join(root, "linked"));
+  await assert.rejects(resolveReportInputPath("linked/nested.json", root), /symlink|report input path/i);
+});
+
+test("default result paths include UTC milliseconds and sanitized config/backend names", () => {
+  assert.equal(defaultResultPath("full config", "pocket/base", new Date("2026-01-02T03:04:05.006Z")), "results/2026-01-02T03-04-05-006Z-full-config-pocket-base.json");
+});
+
+test("compare execution is strictly sequential and continues after invalid and thrown runs", async () => {
+  const targets = ["pocketbase", "supabase", "trailbase"].map(backend => ({ backend, resultPath: `results/${backend}.json` }));
+  let active = 0; let maxActive = 0; const started: string[] = [];
+  const outcomes = await executeCompareSequentially(targets, async target => {
+    started.push(target.backend); active++; maxActive = Math.max(maxActive, active);
+    await new Promise(resolveDelay => setTimeout(resolveDelay, 5)); active--;
+    if (target.backend === "supabase") throw new Error("Authorization: Bearer compare.secret.token password=unsafe");
+    return { result: { valid: target.backend !== "pocketbase" }, resultPath: target.resultPath };
+  });
+  assert.deepEqual(started, ["pocketbase", "supabase", "trailbase"]); assert.equal(maxActive, 1);
+  assert.deepEqual(outcomes.map(outcome => outcome.status), ["invalid", "failed", "valid"]);
+  assert.deepEqual(outcomes.map(outcome => outcome.resultPath), targets.map(target => target.resultPath));
+  assert.doesNotMatch(outcomes[1]!.error ?? "", /unsafe|compare\.secret\.token/);
+});
+
+test("report CLI creates reports, rejects overwrite, and prints only safe relative paths", async () => {
+  const root = await mkdtemp(join(tmpdir(), "bench-cli-main-report-")); const input = join(root, "result.json");
+  await copyFile(new URL("../../test/fixtures/result-pass.json", import.meta.url), input);
+  const cli = resolve("dist/src/cli.js"); const first = spawnSync(process.execPath, [cli, "report", "result.json"], { cwd: root, encoding: "utf8" });
+  assert.equal(first.status, 0, first.stderr); assert.match(first.stdout, /result\.md created/); assert.match(first.stdout, /result-stages\.csv created/); assert.doesNotMatch(first.stdout + first.stderr, /password|token|Bearer|\.\.[/\\]/i);
+  assert.match(await readFile(join(root, "result.md"), "utf8"), /# VALID benchmark result/);
+  const second = spawnSync(process.execPath, [cli, "report", "result.json"], { cwd: root, encoding: "utf8" });
+  assert.notEqual(second.status, 0); assert.match(second.stderr, /already exists/i);
+});
+
+test("run refuses an existing explicit result before loading a backend", async () => {
+  const root = await mkdtemp(join(tmpdir(), "bench-cli-existing-")); await mkdir(join(root, "results")); await mkdir(join(root, "configs"));
+  await copyFile(resolve("configs/quick.json"), join(root, "configs", "quick.json")); await writeFile(join(root, "results", "existing.json"), "keep\n");
+  const run = spawnSync(process.execPath, [resolve("dist/src/cli.js"), "run", "--backend", "pocketbase", "--config", "configs/quick.json", "--result", "results/existing.json"], { cwd: root, encoding: "utf8" });
+  assert.notEqual(run.status, 0); assert.match(run.stderr, /already exists/i); assert.equal(await readFile(join(root, "results", "existing.json"), "utf8"), "keep\n");
 });
 
 test("foreground lifecycle stops once and removes signal listeners", async () => {
