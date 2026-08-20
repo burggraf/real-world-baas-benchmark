@@ -1,4 +1,4 @@
-import type { BenchmarkConfig } from "./config.js";
+import type { BenchmarkConfig, OperationClass } from "./config.js";
 import type { BackendInfo } from "./backend.js";
 import type { DatasetProfile } from "./domain.js";
 
@@ -14,11 +14,16 @@ export interface OperationMetric {
   type: "workflow" | "sdk"; name: string; workflow: string; operationClass: string; kind: "read" | "write";
   attemptedCount: number; completedCount: number; failedCount: number; errorRate: number; successRate?: number; throughputPerSecond: number; errorCounts: Record<string, number>;
 }
+export interface OperationClassMetric {
+  attempted: number; completed: number; failed: number; errorRate: number;
+  latencyP50Ms: number; latencyP95Ms: number; latencyP99Ms: number; latencyMinMs: number; latencyMaxMs: number;
+}
 export interface StageMetrics {
   requestedUsers: number; achievedUsers: number; elapsedSeconds: number;
   workflowTransactionsPerSecond: number; workflowTransactionsPerSecondByName: Record<string, number>;
   sdkOperationsPerSecond: number; readOperationsPerSecond: number; writeOperationsPerSecond: number;
   workflowCompletionCountByName?: Record<string, number>;
+  operationClassMetrics: Record<OperationClass, OperationClassMetric>;
   operations: Record<string, OperationMetric>;
   errorExamples: ErrorExample[]; valid: boolean; validityReasons: string[];
 }
