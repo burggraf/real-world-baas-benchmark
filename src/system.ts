@@ -9,9 +9,10 @@ import type { BackendInfo } from "./backend.js";
 export type Optional<T> = { value: T | null; reason?: string };
 export interface PsProcess { pid: number; cpuPercent: number; rssBytes: number }
 export interface DockerStat { containerId: string; cpuPercent: number; memoryBytes: number; blockReadBytes: number; blockWriteBytes: number }
-export interface ContainerTotals { cpuPercent: number; memoryBytes: number; blockReadBytes: number; blockWriteBytes: number }
+export interface ContainerTotals { cpuPercent: number | null; memoryBytes: number | null; blockReadBytes: number | null; blockWriteBytes: number | null }
 export interface SysctlInfo { model: string | null; logicalCores: number | null; memoryBytes: number | null }
 const validNumber = (n: number): boolean => Number.isFinite(n) && n >= 0;
+const safeSum = (values: number[], integerBytes = false): number | null => { const total = values.reduce((a, n) => a + n, 0); return validNumber(total) && (!integerBytes || Number.isSafeInteger(total)) ? total : null; };
 const positive = (n: number): boolean => Number.isSafeInteger(n) && n > 0;
 
 export function parseByteUnit(input: string): number | null {
@@ -40,11 +41,11 @@ export function parseSysctl(text: string): SysctlInfo {
 }
 export function parseCpuInfo(text: string): { model: string | null; logicalCores: number | null } {
   let model: string | null = null; let processors = 0;
-  for (const line of text.split(/\r?\n/)) { const m = line.match(/^\s*([^:]+):\s*(.*?)\s*$/); if (!m) continue; const key = m[1]!.toLowerCase(); if (key === "model name" || key === "hardware") model ??= m[2]!; if (key === "processor") processors++; }
+  for (const line of text.split(/\r?\n/)) { const m = line.match(/^\s*([^:]+?)\s*:\s*(.*?)\s*$/); if (!m) continue; const key = m[1]!.trim().toLowerCase(); if (key === "model name" || key === "hardware") model ??= m[2]!.trim(); if (key === "processor") processors++; }
   return { model, logicalCores: processors || null };
 }
 export function parseMemInfo(text: string): number | null {
-  for (const line of text.split(/\r?\n/)) { const m = line.match(/^MemTotal:\s*([0-9]+)\s*kB\s*$/i); if (m) { const n = Number(m[1]) * 1024; return Number.isSafeInteger(n) ? n : null; } }
+  for (const line of text.split(/\r?\n/)) { const m = line.match(/^\s*MemTotal\s*:\s*([0-9]+)\s*kB\s*$/i); if (m) { const n = Number(m[1]) * 1024; return Number.isSafeInteger(n) ? n : null; } }
   return null;
 }
 export function parsePs(text: string): PsProcess[] {
@@ -53,14 +54,14 @@ export function parsePs(text: string): PsProcess[] {
     const fields = line.trim().split(/\s+/); if (fields.length < 3) continue;
     const pid = Number(fields[0]); const cpu = Number(fields[1]);
     const parsed = parseByteUnit(fields.slice(2).join(" ")); const rawRss = Number(fields[2]); const rss = parsed ?? (validNumber(rawRss) ? rawRss * 1024 : NaN);
-    if (positive(pid) && validNumber(cpu) && validNumber(rss)) result.push({ pid, cpuPercent: cpu, rssBytes: rss });
+    if (positive(pid) && validNumber(cpu) && Number.isSafeInteger(rss)) result.push({ pid, cpuPercent: cpu, rssBytes: rss });
   }
   return result;
 }
 function statNumber(value: unknown): number | null { const n = Number(String(value ?? "").replace(/%$/, "").trim()); return validNumber(n) ? n : null; }
 export function parseContainerIds(text: string): { ids: string[]; invalid: boolean } {
   const ids: string[] = []; let invalid = false;
-  for (const value of text.split(/\r?\n/).map(line => line.trim()).filter(Boolean)) { if (!/^[0-9a-f]+$/i.test(value)) invalid = true; else if (!ids.includes(value.toLowerCase())) ids.push(value.toLowerCase()); }
+  for (const value of text.split(/\r?\n/).map(line => line.trim()).filter(Boolean)) { if (!/^[0-9a-f]{12,}$/i.test(value)) invalid = true; else if (!ids.includes(value.toLowerCase())) ids.push(value.toLowerCase()); }
   return { ids, invalid };
 }
 export function parseDockerStats(text: string, ownedIds?: ReadonlySet<string>): DockerStat[] {
@@ -68,7 +69,7 @@ export function parseDockerStats(text: string, ownedIds?: ReadonlySet<string>): 
   for (const line of text.split(/\r?\n/).filter(Boolean)) {
     try {
       const row = JSON.parse(line) as Record<string, unknown>; const raw = typeof row.ID === "string" ? row.ID : typeof row.Container === "string" ? row.Container : ""; const id = raw.toLowerCase();
-      if (!/^[0-9a-f]+$/i.test(id)) continue;
+      if (!/^[0-9a-f]{12,}$/i.test(id)) continue;
       const matches = owned.length ? owned.filter(full => full === id || full.startsWith(id)) : [id]; if (matches.length !== 1 || seen.has(matches[0]!)) continue;
       const cpu = statNumber(row.CPUPerc); const memory = parseByteUnit(String(row.MemUsage ?? "").split("/")[0] ?? ""); const io = String(row.BlockIO ?? "").split("/");
       const read = parseByteUnit(io[0] ?? ""); const write = parseByteUnit(io[1] ?? "");
@@ -86,6 +87,7 @@ export interface OverloadThresholds { cpuPercent?: number; p99Ms?: number; maxMs
 export function evaluateRunnerOverload(samples: ResourceSnapshot[], thresholds: OverloadThresholds = {}): string | null {
   for (const [key, value] of Object.entries(thresholds)) if (key !== "consecutiveSamples" && value !== undefined && (!validNumber(value) || value < 0)) throw new Error(`${key} must be finite and nonnegative`);
   const count = thresholds.consecutiveSamples ?? 3; if (!positive(count)) throw new Error("consecutiveSamples must be positive");
+  if (!samples.length && (thresholds.cpuPercent !== undefined || thresholds.p99Ms !== undefined || thresholds.maxMs !== undefined)) return "runner samples unavailable";
   for (let i = 0; i < samples.length; i++) { const s = samples[i]!; if (!Number.isFinite(s.timestampMs) || s.timestampMs < 0 || (i > 0 && s.timestampMs <= samples[i - 1]!.timestampMs)) return "invalid snapshot timestamp"; const metrics: Array<[string, number | null]> = [["CPU", s.runner.cpuPercent], ["event-loop p99", s.eventLoop.p99Ms], ["event-loop max", s.eventLoop.maxMs]]; for (const [key, value] of metrics) if (value !== null && !validNumber(value)) return `invalid ${key} metric`; }
   const overloaded = (offset: number, key: "cpuPercent" | "p99Ms" | "maxMs", threshold: number): boolean => samples.slice(offset, offset + count).every(s => { const value = key === "cpuPercent" ? s.runner.cpuPercent : key === "p99Ms" ? s.eventLoop.p99Ms : s.eventLoop.maxMs; return value !== null && value > threshold; });
   for (const [key, threshold] of [["cpuPercent", thresholds.cpuPercent], ["p99Ms", thresholds.p99Ms], ["maxMs", thresholds.maxMs]] as const) if (threshold !== undefined) { for (const s of samples) { const value = key === "cpuPercent" ? s.runner.cpuPercent : key === "p99Ms" ? s.eventLoop.p99Ms : s.eventLoop.maxMs; if (value === null) return `runner ${key} unavailable`; } for (let i = 0; i + count <= samples.length; i++) if (overloaded(i, key, threshold)) return `${key} sustained above threshold`; }
@@ -113,7 +115,8 @@ export async function captureEnvironment(backend: BackendInfo, sdkVersion?: stri
   const dockerText = backend.name === "supabase" ? await run("docker", ["--version"]) : null; const supabaseText = backend.name === "supabase" ? await run("supabase", ["--version"]) : null; const dockerVersion = version(dockerText ?? ""); const supabaseVersion = version(supabaseText ?? "");
   const gitCommit = commit && /^[0-9a-f]{40}$/i.test(commit) ? commit : null; const gitDirty = dirtyText === null ? null : dirtyText.length > 0; const sdkPackage = backend.name === "pocketbase" ? "pocketbase" : backend.name === "supabase" ? "@supabase/supabase-js" : "trailbase"; const supplied = sdkVersion === undefined ? null : (/^\d+(?:\.\d+){1,3}$/.test(sdkVersion) ? sdkVersion : null); const detectedSdk = supplied ?? (sdkVersion === undefined ? packageVersion(sdkPackage) : null);
   if (!gitCommit) unavailable.gitCommit = commit === null ? "git commit probe unavailable" : "git commit malformed"; if (gitDirty === null) unavailable.gitDirty = "git status unavailable"; if (!npmVersion) unavailable.npmVersion = npmText === null ? "npm probe unavailable" : "npm version malformed"; if (!dockerVersion) unavailable.dockerVersion = backend.name === "supabase" ? dockerText === null ? "docker probe unavailable" : "docker version malformed" : "not required for selected backend"; if (!supabaseVersion) unavailable.supabaseVersion = backend.name === "supabase" ? supabaseText === null ? "supabase probe unavailable" : "supabase version malformed" : "not required for selected backend"; if (!detectedSdk) unavailable.sdkVersion = sdkVersion === undefined ? "SDK metadata unavailable" : "SDK version malformed";
-  return { runtime: "node", runtimeVersion: process.version, os: process.platform, architecture: process.arch, host: os.hostname(), cpu: model, memoryBytes: memory, release: os.release(), logicalCores: cores, cpuModel: model, totalMemoryBytes: memory, hostname: os.hostname(), nodeVersion: process.version, npmVersion, gitCommit, gitDirty, backend, sdkVersion: detectedSdk, dockerVersion, supabaseVersion, unavailable };
+  const capturedBackend: BackendInfo = { ...backend, processIds: backend.processIds ? [...backend.processIds] : backend.processIds, deviations: backend.deviations ? [...backend.deviations] : backend.deviations };
+  return { runtime: "node", runtimeVersion: process.version, os: process.platform, architecture: process.arch, host: os.hostname(), cpu: model, memoryBytes: memory, release: os.release(), logicalCores: cores, cpuModel: model, totalMemoryBytes: memory, hostname: os.hostname(), nodeVersion: process.version, npmVersion, gitCommit, gitDirty, backend: capturedBackend, sdkVersion: detectedSdk, dockerVersion, supabaseVersion, unavailable };
 }
 
 export interface EventLoopMonitor { percentile(p: number): number; max: number | (() => number); reset(): void; disable(): void }
@@ -128,7 +131,7 @@ async function sampleResourcesOnce(options: ResourceSamplerOptions): Promise<Res
   const proc = pids.map(p => { const row = byPid.get(p); return row ? { pid: p, cpuPercent: row.cpuPercent, rssBytes: row.rssBytes } : { pid: p, cpuPercent: null, rssBytes: null, reason: "owned process missing or malformed" }; }); const runner = proc.find(p => p.pid === pid)!; const backendProc = proc.filter(p => p.pid !== pid); const event = options.eventLoop ?? monitor(); const p99 = event.percentile(99); const max = monitorMax(event); const eventLoop = validNumber(p99) && validNumber(max) && max > 0 ? { p99Ms: p99 / 1e6, maxMs: max / 1e6 } : { p99Ms: null, maxMs: null, reason: "not enough event-loop observations" };
   let containers: DockerStat[] | null = null; let containerReason: string | undefined;
   if (info.name === "supabase") { const project = info.supabaseProjectId; if (!project || !/^[A-Za-z0-9_.-]+$/.test(project)) containerReason = "explicit Supabase project ID required"; else { const discovered = await run("docker", ["ps", "-q", "--filter", `label=com.supabase.cli.project=${project}`], 3000).catch(() => ({ stdout: "", stderr: "" })); const parsedIds = parseContainerIds(discovered.stdout ?? ""); const ids = parsedIds.ids; if (parsedIds.invalid) containerReason = "malformed container identity from owned discovery"; else if (!ids.length) containerReason = "no owned containers discovered"; else { const stats = await run("docker", ["stats", "--no-stream", "--format", "{{json .}}", ...ids], 3000).catch(() => ({ stdout: "", stderr: "" })); containers = parseDockerStats(stats.stdout, new Set(ids)); if (containers.length !== ids.length) containerReason = "owned container metrics unavailable"; } } }
-  event.reset(); const timestampNs = now(); const timestampMs = timestampNs / 1e6; if (!Number.isFinite(timestampNs) || timestampNs < 0 || !Number.isFinite(timestampMs) || timestampMs < 0) throw new Error("monotonic timestamp must be finite and JSON-safe"); const containerTotals = containers?.length ? { cpuPercent: containers.reduce((a, p) => a + p.cpuPercent, 0), memoryBytes: containers.reduce((a, p) => a + p.memoryBytes, 0), blockReadBytes: containers.reduce((a, p) => a + p.blockReadBytes, 0), blockWriteBytes: containers.reduce((a, p) => a + p.blockWriteBytes, 0) } : null; const snapshot = { timestampMs, runner, backend: { totalCpuPercent: backendProc.length && backendProc.every(p => p.cpuPercent !== null) ? backendProc.reduce((a, p) => a + (p.cpuPercent ?? 0), 0) : null, totalRssBytes: backendProc.length && backendProc.every(p => p.rssBytes !== null) ? backendProc.reduce((a, p) => a + (p.rssBytes ?? 0), 0) : null, processes: backendProc, reason: !backendProc.length ? "no registered backend PIDs" : backendProc.some(p => p.cpuPercent === null || p.rssBytes === null) ? "owned process metric unavailable" : undefined }, containers, containerTotals, containerReason, eventLoop }; return snapshot;
+  event.reset(); const timestampNs = now(); const timestampMs = timestampNs / 1e6; if (!Number.isFinite(timestampNs) || timestampNs < 0 || !Number.isFinite(timestampMs) || timestampMs < 0) throw new Error("monotonic timestamp must be finite and JSON-safe"); const containerTotals = containers?.length ? { cpuPercent: safeSum(containers.map(p => p.cpuPercent)), memoryBytes: safeSum(containers.map(p => p.memoryBytes), true), blockReadBytes: safeSum(containers.map(p => p.blockReadBytes), true), blockWriteBytes: safeSum(containers.map(p => p.blockWriteBytes), true) } : null; const snapshot = { timestampMs, runner, backend: { totalCpuPercent: backendProc.length && backendProc.every(p => p.cpuPercent !== null) ? safeSum(backendProc.map(p => p.cpuPercent!)) : null, totalRssBytes: backendProc.length && backendProc.every(p => p.rssBytes !== null) ? safeSum(backendProc.map(p => p.rssBytes!), true) : null, processes: backendProc, reason: !backendProc.length ? "no registered backend PIDs" : backendProc.some(p => p.cpuPercent === null || p.rssBytes === null) ? "owned process metric unavailable" : undefined }, containers, containerTotals, containerReason, eventLoop }; return snapshot;
 }
 export async function sampleResources(options: ResourceSamplerOptions): Promise<ResourceSnapshot> { const event = options.eventLoop ?? monitor(); try { return await sampleResourcesOnce({ ...options, eventLoop: event }); } finally { if (!options.eventLoop) event.disable(); } }
 export interface ResourceCollection { samples: ResourceSnapshot[]; valid: boolean; validityReasons: string[] }

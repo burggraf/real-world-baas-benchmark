@@ -9,10 +9,11 @@ test("system parsers reject malformed values and parse units", () => {
   assert.equal(parseByteUnit("nope"), null);
   assert.deepEqual(parseSysctl("hw.cpufrequency: 2400000000\nhw.logicalcpu: 8\nhw.memsize: 17179869184"), { model: null, logicalCores: 8, memoryBytes: 17179869184 });
   assert.deepEqual(parsePs("123 4.5 10m\n bad x -1\n"), [{ pid: 123, cpuPercent: 4.5, rssBytes: 10485760 }]);
-  assert.deepEqual(parseDockerStats('{"ID":"abc123","CPUPerc":"2.5%","MemUsage":"1.5GiB / 4GiB","BlockIO":"2MB / 3.5 MiB"}'), [{containerId:"abc123", cpuPercent:2.5, memoryBytes:1610612736, blockReadBytes:2000000, blockWriteBytes:3670016}]);
-  assert.deepEqual(parseCpuInfo("processor: 0\nmodel name: CPU\nprocessor: 1"), {model:"CPU", logicalCores:2});
-  assert.equal(parseMemInfo("MemTotal:       16384 kB"), 16777216);
-  assert.equal(parseDockerStats('{"ID":"abc","CPUPerc":"250%","MemUsage":"1 B / 2 B","BlockIO":"1 B / 2 B"}')[0]?.cpuPercent, 250);
+  assert.deepEqual(parseDockerStats('{"ID":"abcdef123456","CPUPerc":"2.5%","MemUsage":"1.5GiB / 4GiB","BlockIO":"2MB / 3.5 MiB"}'), [{containerId:"abcdef123456", cpuPercent:2.5, memoryBytes:1610612736, blockReadBytes:2000000, blockWriteBytes:3670016}]);
+  assert.deepEqual(parseCpuInfo("processor\t: 0\n model name\t: CPU \nprocessor\t: 1"), {model:"CPU", logicalCores:2});
+  assert.equal(parseMemInfo("  MemTotal\t:       16384 kB"), 16777216);
+  assert.deepEqual(parseSysctl("  hw.logicalcpu : 8 \n hw.memsize\t: 1024 "), {model:null,logicalCores:8,memoryBytes:1024});
+  assert.equal(parseDockerStats('{"ID":"abcdef123456","CPUPerc":"250%","MemUsage":"1 B / 2 B","BlockIO":"1 B / 2 B"}')[0]?.cpuPercent, 250);
 });
 
 test("resource sampling scopes owned PIDs and cleans up without waiting", async () => {
@@ -27,9 +28,9 @@ test("resource sampling scopes owned PIDs and cleans up without waiting", async 
 });
 
 test("Supabase sampling discovers then scopes exact container IDs", async () => {
-  const calls:string[][]=[]; const runner=async(command:string,args:string[]) => { calls.push([command,...args]); if(command === "docker" && args[0] === "ps") return {stdout:"deadbeef\n",stderr:""}; if(command === "docker") return {stdout:'{"ID":"deadbeef","CPUPerc":"1%","MemUsage":"1 MiB / 2 MiB","BlockIO":"3 KB / 4 KB"}',stderr:""}; return {stdout:"20 1 10",stderr:""}; };
+  const calls:string[][]=[]; const runner=async(command:string,args:string[]) => { calls.push([command,...args]); if(command === "docker" && args[0] === "ps") return {stdout:"deadbeef123456\n",stderr:""}; if(command === "docker") return {stdout:'{"ID":"deadbeef123456","CPUPerc":"1%","MemUsage":"1 MiB / 2 MiB","BlockIO":"3 KB / 4 KB"}',stderr:""}; return {stdout:"20 1 10",stderr:""}; };
   const sample=await sampleResources({backend:{name:"supabase",version:"1",endpoint:"",processIds:[999],supabaseProjectId:"project"},runnerPid:20,commandRunner:runner,eventLoop:{percentile:()=>1e6,max:1e6,reset(){},disable(){}}, nowNs:()=>1_000_000});
-  assert.equal(sample.containers?.[0]?.containerId,"deadbeef"); assert.deepEqual(calls[2], ["docker","stats","--no-stream","--format","{{json .}}","deadbeef"]);
+  assert.equal(sample.containers?.[0]?.containerId,"deadbeef123456"); assert.deepEqual(calls[2], ["docker","stats","--no-stream","--format","{{json .}}","deadbeef123456"]);
 });
 
 test("abort before sampling is clean", async () => { const controller=new AbortController(); controller.abort(); let called=false; const result=await collectResources({backend:{name:"pocketbase",version:"1",endpoint:""},signal:controller.signal,commandRunner:async()=>{called=true;return {stdout:"",stderr:""}}}); assert.equal(called,false); assert.deepEqual(result.validityReasons,["aborted before sampling"]); });
@@ -38,6 +39,7 @@ test("environment probes are bounded, shell-free, and preserve unavailable reaso
   const calls:string[][]=[]; const runner=async(command:string,args:string[]) => { calls.push([command,...args]); if(command === "git" && args[0] === "rev-parse") return {stdout:"a".repeat(40),stderr:"secret"}; if(command === "git") return {stdout:" M src/file.ts",stderr:"secret"}; if(command === "npm") return {stdout:"bad version",stderr:"secret"}; return {stdout:"",stderr:"secret"}; };
   const env=await captureEnvironment({name:"pocketbase",version:"1",endpoint:""},"1.2.3",runner,async path => path.endsWith("cpuinfo") ? "model name: Test CPU\nprocessor: 0\nprocessor: 1" : "MemTotal: 1024 kB");
   assert.equal(env.gitDirty,true); assert.equal(env.npmVersion,null); assert.equal(env.sdkVersion,"1.2.3"); assert.match(env.unavailable.npmVersion!,/malformed/); assert.ok(calls.every(([command]) => command !== "cat")); assert.ok(!JSON.stringify(env).includes("secret"));
+  const owned=[12_345]; const deviations=["safe"]; const source={name:"pocketbase" as const,version:"1",endpoint:"",processIds:owned,deviations}; const copied=await captureEnvironment(source,"1.2.3",runner,async path => path.endsWith("cpuinfo") ? "processor: 0" : "MemTotal: 1 kB"); owned.push(99); deviations.push("changed"); assert.deepEqual(copied.backend.processIds,[12_345]); assert.deepEqual(copied.backend.deviations,["safe"]);
 });
 
 test("captured environment and resource snapshots serialize as BenchmarkResult", async () => {
@@ -47,8 +49,21 @@ test("captured environment and resource snapshots serialize as BenchmarkResult",
   const parsed=JSON.parse(JSON.stringify(result)) as BenchmarkResult; assert.equal(parsed.environment.sdkVersion,"1.2.3"); assert.equal(parsed.resources[0]!.snapshots?.[0]!.backend.reason,"no registered backend PIDs");
 });
 
+test("collector samples immediately, serializes commands, enforces ceilings, aborts cleanly, and cleans monitors", async () => {
+  const backend={name:"pocketbase" as const,version:"1",endpoint:""}; let calls=0; let active=0; let maxActive=0; let now=0; let resets=0; let disabled=0;
+  const eventLoop={percentile:()=>1e6,max:1e6,reset(){resets++;},disable(){disabled++;}}; const runner=async()=>{active++; maxActive=Math.max(maxActive,active); await Promise.resolve(); active--; calls++; return {stdout:"10 1 20",stderr:""};};
+  const bounded=await collectResources({backend,runnerPid:10,commandRunner:runner,eventLoop,maxSamples:2,sleep:async()=>{},nowNs:()=>++now}); assert.equal(calls,2); assert.equal(bounded.samples.length,2); assert.equal(bounded.valid,false); assert.deepEqual(bounded.validityReasons,["maxSamples ceiling exceeded"]); assert.equal(maxActive,1); assert.equal(resets,2); assert.equal(disabled,1);
+  calls=0; now=0; const stopped=await collectResources({backend,runnerPid:10,commandRunner:runner,eventLoop:{...eventLoop,disable(){}},maxSamples:2,sleep:async()=>{},shouldStop:()=>calls===2,nowNs:()=>++now}); assert.equal(stopped.valid,true); assert.equal(stopped.samples.length,2);
+  const controller=new AbortController(); const aborted=await collectResources({backend,runnerPid:10,commandRunner:runner,eventLoop:{...eventLoop,disable(){}},maxSamples:3,sleep:async()=>{controller.abort();throw new Error("aborted");},signal:controller.signal,nowNs:()=>++now}); assert.equal(aborted.valid,true); assert.equal(aborted.samples.length,1);
+  await assert.rejects(() => collectResources({backend,intervalMs:0,eventLoop:{...eventLoop,disable(){throw new Error("must not monitor");}}}),/intervalMs/);
+});
+
 test("runner overload requires consecutive samples", () => {
   const base = (timestampMs:number,cpu:number,p99:number) => ({timestampMs, runner:{pid:1,cpuPercent:cpu,rssBytes:1}, eventLoop:{p99Ms:p99,maxMs:p99}, backend:{totalCpuPercent:null,totalRssBytes:null,processes:[]}, containers:null, containerTotals:null});
   assert.equal(evaluateRunnerOverload([base(1,99,1),base(2,1,1)],{cpuPercent:90}), null);
   assert.ok(evaluateRunnerOverload([base(1,99,1),base(2,99,1),base(3,99,1)],{cpuPercent:90}));
+  assert.match(evaluateRunnerOverload([],{cpuPercent:90})!,/unavailable/);
+  assert.equal(evaluateRunnerOverload([base(1,90,1),base(2,90,1),base(3,90,1)],{cpuPercent:90}),null);
+  assert.match(evaluateRunnerOverload([base(1,99,1),base(1,99,1)],{cpuPercent:90})!,/timestamp/);
+  assert.match(evaluateRunnerOverload([base(1,null as unknown as number,1),base(2,null as unknown as number,1),base(3,null as unknown as number,1)],{cpuPercent:90})!,/unavailable/);
 });
