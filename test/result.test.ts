@@ -7,7 +7,7 @@ test("benchmark results survive JSON round trip", () => {
   const result: BenchmarkResult = {
     schemaVersion: 1, runId: "run-1", startedAt: "2026-01-01T00:00:00Z", publishable: false,
     backend: { name: "pocketbase", version: "0.1", endpoint: "http://localhost" }, dataset: "small", seed: 42,
-    environment: { runtime: "node", runtimeVersion: "22", os: "linux", architecture: "x64" },
+    environment: { runtime: "node", runtimeVersion: "22", os: "linux", architecture: "x64", host: "test", cpu: "CPU", memoryBytes: 1024, release: "test", logicalCores: 1, cpuModel: "CPU", totalMemoryBytes: 1024, hostname: "test", nodeVersion: "22", npmVersion: null, gitCommit: null, gitDirty: null, backend: { name: "pocketbase", version: "0.1", endpoint: "http://127.0.0.1" }, sdkVersion: null, dockerVersion: null, supabaseVersion: null, unavailable: {} },
     config: { name: "quick", publishable: false, dataset: "small", seed: 42, warmupSeconds: 1, stageSeconds: 1, concurrency: [1], maxConcurrency: 1, timeoutMs: 1000, thinkTimeMs: { min: 0, max: 0 }, weights: { dashboard: 100, taskList: 0, taskDetail: 0, createTask: 0, updateTask: 0, addComment: 0, search: 0, profileUpdate: 0, signIn: 0 }, slos: { read: { p95Ms: 1, maxErrorRate: 1 }, write: { p95Ms: 1, maxErrorRate: 1 }, authSearch: { p95Ms: 1, maxErrorRate: 1 } } },
     versions: { node: "22" }, correctness: { findings: [] }, stages: [], resources: [], capacity: { users: 1, saturation: false, reasons: [] }, failures: [], valid: true, validityReasons: [],
   };

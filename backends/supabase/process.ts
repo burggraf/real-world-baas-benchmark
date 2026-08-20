@@ -156,7 +156,7 @@ export class SupabaseProcess {
     for (const port of Object.values(this.options.ports)) {
       if (!(await portAvailable(port))) throw new Error(`Supabase benchmark port ${port} is in use by another process`);
     }
-    return { name: "supabase", version: SUPABASE_VERSION, endpoint: `http://127.0.0.1:${this.options.ports.api}`, processIds: [] };
+    return { name: "supabase", version: SUPABASE_VERSION, endpoint: `http://127.0.0.1:${this.options.ports.api}`, processIds: [], supabaseProjectId: this.options.projectId };
   }
 
   async start(): Promise<SupabaseStatus> {

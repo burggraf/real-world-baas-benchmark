@@ -1,9 +1,9 @@
 import type { BenchmarkConfig, OperationClass } from "./config.js";
 import type { BackendInfo } from "./backend.js";
 import type { DatasetProfile } from "./domain.js";
-import type { ResourceSnapshot } from "./system.js";
+import type { Environment as CapturedEnvironment, ResourceSnapshot } from "./system.js";
 
-export interface Environment { runtime: string; runtimeVersion: string; os: string; architecture: string; host?: string; cpu?: string; memoryBytes?: number; release?: string; logicalCores?: number; gitCommit?: string | null; gitDirty?: boolean | null; sdkVersion?: string | null; cpuModel?: string | null; npmVersion?: string | null; dockerVersion?: string | null; supabaseVersion?: string | null; unavailable?: Record<string, string>; }
+export type Environment = CapturedEnvironment;
 export type FindingClassification = "authentication" | "authorization" | "timeout" | "transport/sdk" | "invalid_response" | "application" | "backend_health";
 export type ErrorClassification = "expected_rejection" | "authentication" | "authorization" | "timeout" | "transport/sdk" | "invalid_response" | "backend_health" | "runner_overload" | "application_failure";
 export interface ErrorExample { type: "workflow" | "sdk"; name: string; workflow: string; operationClass: string; kind: "read" | "write"; classification: ErrorClassification; nameOfError: string; message: string; occurrences: number; }
@@ -28,7 +28,7 @@ export interface StageMetrics {
   operations: Record<string, OperationMetric>;
   errorExamples: ErrorExample[]; valid: boolean; validityReasons: string[];
 }
-export interface ResourceMetrics { name: string; unit: string; samples: number[]; reasons?: (string | null)[]; snapshots?: ResourceSnapshot[]; reason?: string; }
+export interface ResourceMetrics { name: string; unit: string; samples: (number | null)[]; reasons?: (string | null)[]; snapshots?: ResourceSnapshot[]; reason?: string; }
 export interface Capacity { users: number; saturation: boolean; reasons: string[]; }
 export interface BenchmarkResult {
   schemaVersion: 1; runId: string; startedAt: string; publishable: boolean; backend: BackendInfo; dataset: DatasetProfile["name"]; seed: number;
