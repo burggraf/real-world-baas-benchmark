@@ -4,6 +4,7 @@ import { loadBackend } from "./backend.js";
 import { loadConfig } from "./config.js";
 import { runCorrectness } from "./correctness.js";
 import { runBenchmark } from "./run.js";
+import { profileMetadata } from "./seed.js";
 
 export type ParsedArgs = { command: string; [option: string]: string };
 const commands = new Set(["doctor", "up", "reset", "correctness", "run", "compare", "down", "report"]);
@@ -26,15 +27,35 @@ const configPath = (value: string): string => { if (value.includes("\0") || valu
 export async function main(argv: string[]): Promise<number> {
   if (argv.includes("--help")) { console.log(help); return 0; }
   try {
+    if (argv.length === 0) { console.error(help); return 1; }
     const args = parseArgs(argv); if (args.command === "report") throw new Error("report is not supported until Task14");
-    if (args.command === "down" || args.command === "up") throw new Error(`${args.command} requires an owned lifecycle handle; run reset/run instead`);
-    if (args.command === "doctor") { const info = await (await loadBackend(required(args, "backend"))).doctor(); console.log(`${info.name} ${info.version}`); return 0; }
+    if (args.command === "down") throw new Error("down requires an owned lifecycle handle; no unrelated process was stopped");
+    if (args.command === "doctor") {
+      const names = args.backend ? [args.backend] : ["pocketbase", "supabase", "trailbase"];
+      for (const name of names) { const info = await (await loadBackend(name)).doctor(); console.log(`${info.name} ${info.version}`); }
+      return 0;
+    }
     const backendName = required(args, "backend");
     if (args.command === "reset" || args.command === "correctness") {
-      const backend = await loadBackend(backendName); try { await backend.start(); await backend.reset(); await backend.seed(loadConfig(configPath(required(args, "config"))) as any, 0); if (args.command === "correctness") console.log("correctness setup complete"); else console.log("reset complete"); } finally { await backend.stop(); } return 0;
+      const config = loadConfig(configPath(required(args, "config"))); const backend = await loadBackend(backendName);
+      try {
+        await backend.start(); await backend.reset(); await backend.seed({ name: config.dataset, definition: { ...profileMetadata[config.dataset] } }, config.seed);
+        if (args.command === "correctness") {
+          if (!backend.seedCorrectnessFixture) throw new Error("backend correctness fixture unavailable");
+          const check = await runCorrectness(backend, await backend.seedCorrectnessFixture());
+          if (check.aborted || check.findings.some(f => !f.passed)) throw new Error("correctness checks failed");
+          console.log("correctness passed");
+        } else console.log("reset complete");
+      } finally { await backend.stop(); }
+      return 0;
     }
-    if (args.command === "run") { const config = loadConfig(configPath(required(args, "config"))); const path = args.result ?? `results/${basename(configPath(required(args, "config")), ".json")}-${backendName}.json`; const output = await runBenchmark({ backend: backendName, config, resultPath: path }); console.log(`${output.resultPath} ${output.result.valid ? "valid" : "invalid"}`); return 0; }
-    if (args.command === "compare") { const config = loadConfig(configPath(required(args, "config"))); for (const backend of (args.backends ?? backendName).split(",")) await runBenchmark({ backend: backend.trim(), config, resultPath: `results/${config.name}-${backend.trim()}.json` }); return 0; }
+    if (args.command === "up") {
+      const backend = await loadBackend(backendName); await backend.start();
+      const stop = async () => { await backend.stop(); process.exitCode = 0; };
+      process.once("SIGINT", stop); process.once("SIGTERM", stop); console.log(`${backendName} started`); await new Promise<void>(() => undefined); return 0;
+    }
+    if (args.command === "run") { const config = loadConfig(configPath(required(args, "config"))); const path = args.result ?? `results/${basename(configPath(required(args, "config")), ".json")}-${backendName}.json`; const output = await runBenchmark({ backend: backendName, config, resultPath: path }); console.log(`${output.resultPath} ${output.result.valid ? "valid" : "invalid"}`); return output.result.valid ? 0 : 1; }
+    if (args.command === "compare") { const config = loadConfig(configPath(required(args, "config"))); const names = (args.backends ?? args.backend ?? "pocketbase,supabase,trailbase").split(","); for (const name of names) { const selected = name.trim(); if (!selected) throw new Error("invalid backend"); await runBenchmark({ backend: selected, config, resultPath: `results/${config.name}-${selected}.json` }); } return 0; }
     throw new Error("Unsupported command");
   } catch (error) { console.error(error instanceof Error ? error.message.replace(/\b(password|secret|token)\b[^\n]*/gi, "$1=[REDACTED]") : "command failed"); return 1; }
 }

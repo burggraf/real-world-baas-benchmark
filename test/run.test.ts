@@ -25,6 +25,6 @@ test("runBenchmark orders lifecycle and excludes warmup samples", async () => {
   const resources = async () => { events.push("resources"); return { samples: [], valid: true, validityReasons: [] }; };
   await runBenchmark({ backend: "pocketbase", config, resultPath, dependencies: { loadBackend: async () => backend as any, correctness: async () => { events.push("correctness"); return { findings: [{ name: "ok", passed: true, classification: "application" as const }] }; }, workload: workload as any, resources: resources as any, captureEnvironment: async info => ({ backend: info } as any), now: () => new Date("2026-01-01T00:00:00.000Z"), monotonic: (() => { let n = 0; return () => ++n; })() } });
   assert.deepEqual(events.slice(0, 8), ["doctor", "start", "doctor", "reset", "doctor", "seed", "fixture", "correctness"]);
-  assert.deepEqual(events.slice(8), ["warmup", "resources", "measured", "stop"]);
+  assert.deepEqual(events.slice(9), ["warmup", "resources", "measured", "stop"]);
   const saved = JSON.parse(await readFile(resultPath, "utf8")); assert.equal(saved.stages[0].workflowTransactionsPerSecond, 1000); assert.equal(saved.correctness.findings[0].passed, true);
 });

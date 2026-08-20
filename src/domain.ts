@@ -12,6 +12,8 @@ export interface Task { id: Id; projectId: Id; creatorId: Id; assigneeId: Id | n
 export interface Comment { id: Id; taskId: Id; authorId: Id; body: string; createdAt: Timestamp; updatedAt: Timestamp; }
 export interface Activity { id: Id; organizationId: Id; projectId: Id | null; actorId: Id; action: string; subjectType: string; subjectId: Id; createdAt: Timestamp; }
 export interface Credentials { email: string; password: string; }
+export interface BenchmarkVirtualUserSpec { credentials: Credentials; organizationId: Id; projectId: Id; taskId: Id; commentId?: Id; }
+export interface CorrectnessSetupFixture { owner: Credentials; admin: Credentials; member: Credentials; outsider: Credentials; organizationId: Id; projectId: Id; taskId?: Id; ownerMembershipId: Id; memberMembershipId: Id; adminMembershipId: Id; memberUserId?: Id; foreignMembershipId: Id; outsiderUserId?: Id; }
 export interface Page<T> { items: T[]; page: number; pageSize: number; total: number; hasNext: boolean; }
 export interface DatasetProfile { name: "small" | "medium" | "large"; definition: Record<string, number>; }
 export interface TenantProjectContext { organizationId: Id; projectId: Id; }

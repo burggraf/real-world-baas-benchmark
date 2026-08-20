@@ -1,4 +1,4 @@
-import type { Activity, Comment, Id, Membership, Organization, Project, Role, Task, User } from "./domain.js";
+import type { Activity, Comment, Id, Membership, Organization, Project, Role, Task, User, BenchmarkVirtualUserSpec } from "./domain.js";
 import { mulberry32 } from "./random.js";
 
 export type EntityName = "organization" | "user" | "membership" | "project" | "task" | "comment" | "activity";
@@ -87,3 +87,14 @@ export async function* seedDataset(profile: ProfileName, seed: number, batchSize
 }
 
 export type { RecordType as SeedRecord };
+
+export async function buildSeedVirtualUserSpecs(profile: ProfileName, count: number, seed: number, email: (id: string, canonical: string) => string, password: string): Promise<BenchmarkVirtualUserSpec[]> {
+  if (!Number.isSafeInteger(count) || count < 1 || count > profileMetadata[profile].users) throw new RangeError("requested users exceed seeded profile");
+  const users: Array<{ id: string; email: string }> = [];
+  for await (const batch of seedDataset(profile, seed, Math.max(1000, count))) {
+    if (batch.entity !== "user") continue;
+    users.push(...(batch.records.slice(0, count) as Array<{ id: string; email: string }>));
+    if (users.length >= count) break;
+  }
+  return users.map((user, i) => ({ credentials: { email: email(user.id, user.email), password }, organizationId: entityId("organization", profile, i % profileMetadata[profile].organizations), projectId: entityId("project", profile, i % profileMetadata[profile].projects), taskId: entityId("task", profile, i % profileMetadata[profile].tasks) }));
+}

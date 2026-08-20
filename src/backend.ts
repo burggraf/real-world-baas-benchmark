@@ -1,4 +1,5 @@
-import type { Credentials, DatasetProfile, Dashboard, DashboardInput, ListTasksInput, GetTaskInput, CreateTaskInput, UpdateTaskInput, AddCommentInput, UpdateCommentInput, UpdateMembershipRoleInput, SearchTasksInput, UpdateProfileInput, Page, Task, TaskDetail, Comment, User, Membership } from "./domain.js";
+import type { Credentials, DatasetProfile, Dashboard, DashboardInput, ListTasksInput, GetTaskInput, CreateTaskInput, UpdateTaskInput, AddCommentInput, UpdateCommentInput, UpdateMembershipRoleInput, SearchTasksInput, UpdateProfileInput, Page, Task, TaskDetail, Comment, User, Membership, BenchmarkVirtualUserSpec } from "./domain.js";
+import type { CorrectnessFixture } from "./correctness.js";
 
 export type BackendName = "pocketbase" | "supabase" | "trailbase";
 export interface BackendInfo { name: BackendName; version: string; endpoint: string; processIds?: number[]; processExecutable?: string; supabaseProjectId?: string; deviations?: string[]; }
@@ -9,7 +10,10 @@ export interface AppSession {
 }
 export interface Backend {
   readonly name: BackendName; doctor(): Promise<BackendInfo>; start(): Promise<void>; reset(): Promise<void>;
-  seed(profile: DatasetProfile, seed: number): Promise<void>; createSession(credentials: Credentials): Promise<AppSession>; stop(): Promise<void>;
+  seed(profile: DatasetProfile, seed: number): Promise<void>;
+  seedCorrectnessFixture?(): Promise<CorrectnessFixture>;
+  buildVirtualUserSpecs?(profile: DatasetProfile["name"], count: number, seed: number): Promise<BenchmarkVirtualUserSpec[]>;
+  createSession(credentials: Credentials): Promise<AppSession>; stop(): Promise<void>;
 }
 export const notImplemented = (): never => { throw new Error("NotImplemented: backend adapter is not implemented"); };
 

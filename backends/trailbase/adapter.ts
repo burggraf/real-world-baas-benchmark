@@ -1,14 +1,14 @@
 import { randomBytes } from "node:crypto";
 import { DeleteOperation, initClient, type Client, type FilterOrComposite, type ListOpts } from "trailbase";
 import type { Backend, AppSession } from "../../src/backend.js";
-import { buildSeedVirtualUserSpecs } from "../../src/run.js";
+
 import type {
   Activity, AddCommentInput, Comment, CreateTaskInput, Credentials, Dashboard, DashboardInput, DatasetProfile,
   GetTaskInput, ListTasksInput, Membership, Organization, Page, Project, Role, SearchTasksInput, Task, TaskDetail,
   TaskPriority, TaskStatus, UpdateCommentInput, UpdateMembershipRoleInput, UpdateProfileInput, UpdateTaskInput, User,
 } from "../../src/domain.js";
 import { BenchmarkOperationError, type CorrectnessFixture } from "../../src/correctness.js";
-import { datasetProfiles, entityId, seedDataset, type EntityName, type ProfileName, type SeedRecord } from "../../src/seed.js";
+import { datasetProfiles, entityId, seedDataset, buildSeedVirtualUserSpecs, type EntityName, type ProfileName, type SeedRecord } from "../../src/seed.js";
 import {
   LOCAL_BENCHMARK_PASSWORD, LOCAL_SETUP_EMAIL, LOCAL_SETUP_PASSWORD, resolveTrailBaseOptions,
   trailBaseProcess, TRAILBASE_VERSION,
@@ -466,7 +466,8 @@ async function put(client: Client, table: string, value: Row): Promise<void> {
 }
 
 export async function seedTrailBaseCorrectnessFixture(): Promise<TrailBaseCorrectnessFixture> {
-  const client = await cleanBenchmarkData();
+  // Fixture IDs/emails are disjoint from the seeded profile; never clear measured data here.
+  const client = await setupClient();
   const names = ["owner", "admin", "member", "outsider"] as const;
   const credentials = (name: typeof names[number]): Credentials => ({ email: `${name}${BENCHMARK_EMAIL_SUFFIX}`, password: LOCAL_BENCHMARK_PASSWORD });
   const authIds = await registerAndCapture(names.map(name => ({ publicId: FIXTURE_IDS[name], email: credentials(name).email })));

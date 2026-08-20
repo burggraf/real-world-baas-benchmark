@@ -1,14 +1,14 @@
 import { randomBytes } from "node:crypto";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import type { Backend, AppSession, BackendInfo } from "../../src/backend.js";
-import { buildSeedVirtualUserSpecs } from "../../src/run.js";
+
 import type {
   Activity, AddCommentInput, Comment, CreateTaskInput, Credentials, Dashboard, DashboardInput, DatasetProfile,
   GetTaskInput, ListTasksInput, Membership, Organization, Page, Project, SearchTasksInput, Task, TaskDetail,
   UpdateCommentInput, UpdateMembershipRoleInput, UpdateProfileInput, UpdateTaskInput, User,
 } from "../../src/domain.js";
 import { BenchmarkOperationError, type CorrectnessFixture } from "../../src/correctness.js";
-import { datasetProfiles, entityId, seedDataset, type EntityName, type ProfileName, type SeedRecord } from "../../src/seed.js";
+import { datasetProfiles, entityId, seedDataset, buildSeedVirtualUserSpecs, type EntityName, type ProfileName, type SeedRecord } from "../../src/seed.js";
 import { LOCAL_BENCHMARK_PASSWORD, SUPABASE_PROJECT_ID, supabaseProcess, type SupabaseStatus } from "./process.js";
 
 const SEED_BATCH_SIZE = 100;
@@ -382,7 +382,7 @@ export interface SupabaseCorrectnessFixture extends CorrectnessFixture { foreign
 export async function seedSupabaseCorrectnessFixture(): Promise<SupabaseCorrectnessFixture> {
   for (const id of Object.values(FIXTURE_IDS)) if (!/^[a-z0-9]{15}$/.test(id)) throw new Error("Invalid Supabase fixture ID");
   const client = await adminClient();
-  await clearBenchmarkData(client);
+  // Fixture IDs/emails are disjoint from the seeded profile; never clear measured data here.
   const names = ["owner", "admin", "member", "outsider"] as const;
   const credentials = (name: typeof names[number]): Credentials => ({ email: `${name}${BENCHMARK_EMAIL_SUFFIX}`, password: LOCAL_BENCHMARK_PASSWORD });
   const profiles: Row[] = [];

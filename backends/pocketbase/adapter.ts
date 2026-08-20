@@ -1,7 +1,7 @@
 import { randomBytes } from "node:crypto";
 import PocketBase, { BaseAuthStore, ClientResponseError, type RecordModel } from "pocketbase";
 import type { Backend, AppSession, BackendInfo } from "../../src/backend.js";
-import { buildSeedVirtualUserSpecs } from "../../src/run.js";
+
 import type {
   Activity,
   AddCommentInput,
@@ -30,7 +30,7 @@ import type {
   User,
 } from "../../src/domain.js";
 import { BenchmarkOperationError, type CorrectnessFixture } from "../../src/correctness.js";
-import { datasetProfiles, entityId, seedDataset, type EntityName, type ProfileName, type SeedRecord } from "../../src/seed.js";
+import { datasetProfiles, entityId, seedDataset, buildSeedVirtualUserSpecs, type EntityName, type ProfileName, type SeedRecord } from "../../src/seed.js";
 import {
   LOCAL_BENCHMARK_PASSWORD,
   LOCAL_SETUP_EMAIL,
