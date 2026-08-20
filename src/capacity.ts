@@ -16,6 +16,7 @@ const finiteNonnegative = (value: unknown, label: string): number => {
   if (typeof value !== "number" || !Number.isFinite(value) || value < 0) throw new Error(`${label} must be finite and nonnegative`);
   return value;
 };
+const strictlyBelow = (value: number, threshold: number): boolean => value < threshold && threshold - value > Number.EPSILON * Math.max(1, Math.abs(value), Math.abs(threshold)) * 4;
 const record = (value: unknown, label: string): Record<string, unknown> => {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error(`${label} must be an object`);
   return value as Record<string, unknown>;
@@ -145,7 +146,7 @@ export function evaluateCapacity(stages: readonly StageMetrics[], config: Benchm
     const previous = validated[index - 1]!.stage; const current = validated[index]!.stage;
     if (!evaluations[index - 1]!.passed || !evaluations[index]!.passed || current.requestedUsers < previous.requestedUsers + previous.requestedUsers * materialIncrease || previous.workflowTransactionsPerSecond <= 0) continue;
     const tpsGain = (current.workflowTransactionsPerSecond - previous.workflowTransactionsPerSecond) / previous.workflowTransactionsPerSecond;
-    if (!Number.isFinite(tpsGain) || !(current.workflowTransactionsPerSecond < previous.workflowTransactionsPerSecond + previous.workflowTransactionsPerSecond * maxThroughputGain)) continue;
+    if (!Number.isFinite(tpsGain) || !strictlyBelow(tpsGain, maxThroughputGain)) continue;
     const increasedLatencies = Object.fromEntries(classes.filter(name => activeWeights[name] > 0).flatMap(name => {
       const before = validated[index - 1]!.metrics[name]!.latencyP95Ms; const after = validated[index]!.metrics[name]!.latencyP95Ms;
       return after > before ? [[name, { previousP95Ms: before, currentP95Ms: after }]] : [];
