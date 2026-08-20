@@ -12,6 +12,7 @@ import {
   SUPABASE_PROJECT_ID,
 } from "../backends/supabase/process.js";
 import {
+  checkedSupabaseResponse,
   createSupabaseClient,
   escapeLikePattern,
   mapSupabaseActivity,
@@ -22,7 +23,9 @@ import {
   mapSupabaseProject,
   mapSupabaseTask,
   normalizeSupabaseError,
+  pageRange,
   publicSupabaseConfiguration,
+  requiredSupabaseObject,
   seedRecord,
 } from "../backends/supabase/adapter.js";
 
@@ -31,12 +34,22 @@ test("Supabase lifecycle uses PATH binary, absolute workdir, and scrubbed CLI ov
   assert.equal(options.binary, "supabase");
   assert.equal(options.workdir, "/tmp/benchmark repo/backends/supabase");
   assert.deepEqual(buildSupabaseArgs(options, ["status", "-o", "json"]), ["--workdir", options.workdir, "status", "-o", "json"]);
-  const env = supabaseEnvironment({ SUPABASE_PROJECT_ID: "wrong", SUPABASE_DB_PORT: "1", KEEP: "yes" });
+  const env = supabaseEnvironment({ SUPABASE_PROJECT_ID: "wrong", SUPABASE_DB_PORT: "1", SUPABASE_ACCESS_TOKEN: "access", SUPABASE_DB_PASSWORD: "password", SUPABASE_SERVICE_ROLE_KEY: "service", SUPABASE_DB_URL: "postgres://secret", KEEP: "yes" });
   assert.equal(env.SUPABASE_PROJECT_ID, undefined);
   assert.equal(env.SUPABASE_DB_PORT, undefined);
+  assert.equal(env.SUPABASE_ACCESS_TOKEN, undefined);
+  assert.equal(env.SUPABASE_DB_PASSWORD, undefined);
+  assert.equal(env.SUPABASE_SERVICE_ROLE_KEY, undefined);
+  assert.equal(env.SUPABASE_DB_URL, undefined);
   assert.equal(env.KEEP, "yes");
   assert.equal(SUPABASE_PROJECT_ID, "realworldbaasbench");
   assert.equal(SUPABASE_PORTS.shadow, 55330);
+});
+
+test("page ranges reject unsafe and unbounded offsets", () => {
+  assert.deepEqual(pageRange(9_999, 1_000), [9_999_000, 9_999_999]);
+  assert.throws(() => pageRange(10_000, 1_000), /pagination/);
+  assert.throws(() => pageRange(Number.MAX_SAFE_INTEGER, 1), /pagination/);
 });
 
 test("synchronous lifecycle probes have bounded, payload-safe failures", () => {
@@ -53,11 +66,9 @@ test("synchronous lifecycle probes have bounded, payload-safe failures", () => {
 test("status parser requires the benchmark local API and logs redact all known secret forms", () => {
   assert.equal(parseSupabaseStatus('{"API_URL":"http://127.0.0.1:55321"}').API_URL, "http://127.0.0.1:55321");
   assert.throws(() => parseSupabaseStatus('{"API_URL":"https://remote.example"}'));
-  const redacted = redactSupabaseOutput('SERVICE_ROLE_KEY="secret" token=abc postgres://postgres:password@127.0.0.1/db {"ANON_KEY":"json-secret"}');
-  assert.equal(redacted.includes("secret"), false);
-  assert.equal(redacted.includes("abc"), false);
-  assert.equal(redacted.includes("postgres:password"), false);
-  assert.equal(redacted.includes("json-secret"), false);
+  const redacted = redactSupabaseOutput('Secret key: s3cr3t-value Publishable key=publish-value JWT secret: jwt-value Authorization: Bearer eyJbearer-value SERVICE_ROLE_KEY="service-value" token=token-value postgres://postgres:db-value@127.0.0.1/db {"ANON_KEY":"json-value"}');
+  for (const secret of ["s3cr3t-value", "publish-value", "jwt-value", "eyJbearer-value", "service-value", "token-value", "postgres:db-value", "json-value"]) assert.equal(redacted.includes(secret), false, secret);
+  assert.doesNotMatch(redactSupabaseOutput("DB password: db-secret access token: access-secret"), /db-secret|access-secret/);
 });
 
 test("measured client configuration retains no service credential", () => {
@@ -77,6 +88,15 @@ test("domain mappings remove snake_case fields and preserve nullable values", ()
   assert.equal(mapSupabaseActivity({ id: "act", organization_id: "org", project_id: null, actor_id: "usr", action: "created", subject_type: "task", subject_id: "tsk", created_at: timestamp }).projectId, null);
   assert.equal(mapSupabaseMembership({ id: "mem", organization_id: "org", user_id: "usr", role: "member", created_at: timestamp }).organizationId, "org");
   assert.deepEqual(mapSupabasePage([mappedTask], 0, 1, 2), { items: [mappedTask], page: 0, pageSize: 1, total: 2, hasNext: true });
+  assert.throws(() => mapSupabasePage(null as never, 0, 1, 0), /record_list/);
+  assert.throws(() => mapSupabasePage(undefined as never, 0, 1, 0), /record_list/);
+});
+
+test("null and malformed SDK responses become safe invalid_response errors", () => {
+  assert.throws(() => checkedSupabaseResponse(null), (error: any) => error?.classification === "invalid_response" && error.code === "response_shape");
+  assert.throws(() => checkedSupabaseResponse(undefined), (error: any) => error?.classification === "invalid_response" && error.code === "response_shape");
+  assert.equal(checkedSupabaseResponse({ data: null, error: null }), null);
+  assert.throws(() => requiredSupabaseObject({ data: null, error: null }, "auth_response"), (error: any) => error?.classification === "invalid_response" && error.code === "auth_response");
 });
 
 test("search escapes Postgres pattern metacharacters and errors expose no payload", () => {

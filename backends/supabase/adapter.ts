@@ -82,9 +82,10 @@ export function mapSupabaseActivity(value: unknown): Activity {
   const source = row(value);
   return { id: requiredString(source, "id"), organizationId: requiredString(source, "organization_id"), projectId: nullableString(source, "project_id"), actorId: requiredString(source, "actor_id"), action: requiredString(source, "action"), subjectType: requiredString(source, "subject_type"), subjectId: requiredString(source, "subject_id"), createdAt: requiredString(source, "created_at") };
 }
-export function mapSupabasePage<T>(items: T[] | null, page: number, pageSize: number, total: number): Page<T> {
+export function mapSupabasePage<T>(items: T[], page: number, pageSize: number, total: number): Page<T> {
+  if (!Array.isArray(items)) throw new BenchmarkOperationError("invalid_response", { code: "record_list" });
   if (!Number.isInteger(total) || total < 0) throw new BenchmarkOperationError("invalid_response", { code: "page_count" });
-  return { items: items || [], page, pageSize, total, hasNext: (page + 1) * pageSize < total };
+  return { items, page, pageSize, total, hasNext: (page + 1) * pageSize < total };
 }
 
 export function normalizeSupabaseError(error: unknown, responseStatus?: number): BenchmarkOperationError {
@@ -105,19 +106,33 @@ export function normalizeSupabaseError(error: unknown, responseStatus?: number):
 async function sdk<T = unknown>(operation: () => PromiseLike<unknown>): Promise<ResponseLike<T>> {
   try { return await operation() as ResponseLike<T>; } catch (error) { throw normalizeSupabaseError(error); }
 }
-function checked<T>(response: ResponseLike<T>): T {
+export function checkedSupabaseResponse<T>(response: ResponseLike<T> | null | undefined): T {
+  if (!response || typeof response !== "object") throw new BenchmarkOperationError("invalid_response", { code: "response_shape" });
   if (response.error) throw normalizeSupabaseError(response.error, response.status);
   return response.data as T;
 }
+export function requiredSupabaseObject<T = Record<string, unknown>>(response: ResponseLike<unknown> | null | undefined, code: string): T {
+  const data = checkedSupabaseResponse(response);
+  if (!data || typeof data !== "object" || Array.isArray(data)) throw new BenchmarkOperationError("invalid_response", { code });
+  return data as T;
+}
+function requiredArray<T = unknown>(response: ResponseLike<unknown>, code: string): T[] {
+  const data = checkedSupabaseResponse(response);
+  if (!Array.isArray(data)) throw new BenchmarkOperationError("invalid_response", { code });
+  return data as T[];
+}
 function required<T>(response: ResponseLike<T>, code: string): T {
-  const data = checked(response);
+  const data = checkedSupabaseResponse(response);
   if (data === null || data === undefined) throw new BenchmarkOperationError("authorization", { code, status: 404 });
   return data;
 }
 
+export const MAX_PAGE_OFFSET = 10_000_000;
 export function pageRange(page: number, pageSize: number): [number, number] {
-  if (!Number.isInteger(page) || page < 0 || !Number.isInteger(pageSize) || pageSize <= 0 || pageSize > 1_000) throw new BenchmarkOperationError("application", { code: "pagination" });
-  return [page * pageSize, page * pageSize + pageSize - 1];
+  if (!Number.isSafeInteger(page) || page < 0 || !Number.isSafeInteger(pageSize) || pageSize <= 0 || pageSize > 1_000) throw new BenchmarkOperationError("application", { code: "pagination" });
+  const start = page * pageSize, end = start + pageSize - 1;
+  if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || end > MAX_PAGE_OFFSET) throw new BenchmarkOperationError("application", { code: "pagination" });
+  return [start, end];
 }
 export function escapeLikePattern(value: string): string { return value.replace(/[\\%_]/g, "\\$&"); }
 export function createSupabaseClient(url: string, key: string, projectId = SUPABASE_PROJECT_ID, suffix = "user"): SupabaseClient {
@@ -146,7 +161,7 @@ class SupabaseSession implements AppSession {
     const projects: Project[] = [];
     for (let page = 0; page < MAX_PROJECT_PAGES; page++) {
       const response = await sdk(() => this.client.from("projects").select(FIELDS.project).eq("organization_id", organizationId).order("created_at").order("id").range(...pageRange(page, PROJECT_PAGE_SIZE)));
-      const rows = (checked(response) || []) as unknown[];
+      const rows = requiredArray(response, "project_list") as unknown[];
       projects.push(...rows.map(mapSupabaseProject));
       if (rows.length < PROJECT_PAGE_SIZE) return projects;
     }
@@ -160,7 +175,7 @@ class SupabaseSession implements AppSession {
     else if ("assigneeId" in input && input.assigneeId) builder = builder.eq("assignee_id", input.assigneeId);
     if (query !== undefined) builder = builder.ilike("title", `%${escapeLikePattern(query)}%`);
     const response = await sdk(() => builder.order("created_at").order("id").range(...pageRange(input.page, input.pageSize)));
-    const values = (checked(response) || []) as unknown[];
+    const values = requiredArray(response, "task_list") as unknown[];
     return mapSupabasePage(values.map(mapSupabaseTask), input.page, input.pageSize, response.count ?? values.length);
   }
 
@@ -172,7 +187,7 @@ class SupabaseSession implements AppSession {
       this.listProjects(input.organizationId),
       sdk(() => this.client.from("activities").select(FIELDS.activity).eq("organization_id", input.organizationId).order("created_at", { ascending: false }).order("id", { ascending: false }).range(...pageRange(activity.page, activity.pageSize))),
     ]);
-    return { organization: mapSupabaseOrganization(required(organization, "organization_denied")), projects, recentActivity: ((checked(recent) || []) as unknown[]).map(mapSupabaseActivity) };
+    return { organization: mapSupabaseOrganization(required(organization, "organization_denied")), projects, recentActivity: requiredArray(recent, "activity_list").map(mapSupabaseActivity) };
   }
   listTasks(input: ListTasksInput): Promise<Page<Task>> { return this.taskPage(input); }
   searchTasks(input: SearchTasksInput): Promise<Page<Task>> { return this.taskPage(input, input.query); }
@@ -188,7 +203,7 @@ class SupabaseSession implements AppSession {
       sdk(() => this.client.from("profiles").select(FIELDS.profile).eq("id", task.creatorId).maybeSingle()),
       task.assigneeId ? sdk(() => this.client.from("profiles").select(FIELDS.profile).eq("id", task.assigneeId!).maybeSingle()) : Promise.resolve(null),
     ]);
-    const comments = (checked(commentsResponse) || []) as unknown[];
+    const comments = requiredArray(commentsResponse, "comment_list") as unknown[];
     return {
       task,
       creator: mapSupabaseUser(required(creator, "creator_denied")),
@@ -235,7 +250,7 @@ class SupabaseSession implements AppSession {
     return mapSupabaseMembership(required(response, "membership_update_denied"));
   }
   async getProfile(): Promise<User> {
-    const auth = checked(await sdk(() => this.client.auth.getUser())) as { user: { id: string } | null };
+    const auth = requiredSupabaseObject<{ user: { id: string } | null }>(await sdk(() => this.client.auth.getUser()), "auth_user_response");
     if (!auth.user) throw new BenchmarkOperationError("authentication", { code: "session_missing" });
     const response = await sdk(() => this.client.from("profiles").select(FIELDS.profile).eq("auth_id", auth.user!.id).maybeSingle());
     this.profileRow = row(required(response, "profile_missing"));
@@ -246,8 +261,8 @@ class SupabaseSession implements AppSession {
     this.profileRow = row(required(response, "profile_update_denied"));
     return mapSupabaseUser(this.profileRow);
   }
-  async refreshSession(): Promise<void> { checked(await sdk(() => this.client.auth.refreshSession())); }
-  async signOut(): Promise<void> { checked(await sdk(() => this.client.auth.signOut())); }
+  async refreshSession(): Promise<void> { checkedSupabaseResponse(await sdk(() => this.client.auth.refreshSession())); }
+  async signOut(): Promise<void> { checkedSupabaseResponse(await sdk(() => this.client.auth.signOut())); }
   async close(): Promise<void> { await this.signOut().catch(() => undefined); }
 }
 
@@ -298,28 +313,29 @@ export function seedRecord(entity: EntityName, item: SeedRecord, profile: Profil
 
 const tableFor: Record<EntityName, string> = { user: "profiles", organization: "organizations", membership: "memberships", project: "projects", task: "tasks", comment: "comments", activity: "activities" };
 async function insertRows(client: SupabaseClient, table: string, records: Row[]): Promise<void> {
-  for (let offset = 0; offset < records.length; offset += SEED_BATCH_SIZE) checked(await sdk(() => client.from(table).insert(records.slice(offset, offset + SEED_BATCH_SIZE))));
+  for (let offset = 0; offset < records.length; offset += SEED_BATCH_SIZE) checkedSupabaseResponse(await sdk(() => client.from(table).insert(records.slice(offset, offset + SEED_BATCH_SIZE))));
 }
 async function benchmarkAuthUserIds(client: SupabaseClient): Promise<string[]> {
   const result: string[] = [], perPage = 1_000;
   for (let page = 1; page <= MAX_PROJECT_PAGES; page++) {
     const response = await sdk(() => client.auth.admin.listUsers({ page, perPage }));
-    const users = (checked(response) as { users: Array<{ id: string; email?: string }> }).users;
-    result.push(...users.filter(user => user.email?.endsWith(BENCHMARK_EMAIL_SUFFIX)).map(user => user.id));
+    const users = requiredSupabaseObject<{ users: Array<{ id: string; email?: string }> }>(response, "auth_list_response").users;
+    if (!Array.isArray(users)) throw new BenchmarkOperationError("invalid_response", { code: "auth_list_users" });
+    result.push(...users.filter(user => user && typeof user.id === "string" && user.email?.endsWith(BENCHMARK_EMAIL_SUFFIX)).map(user => user.id));
     if (users.length < perPage) return result;
   }
   throw new BenchmarkOperationError("invalid_response", { code: "auth_page_limit" });
 }
 async function clearBenchmarkData(client: SupabaseClient): Promise<void> {
-  for (const table of ["activities", "comments", "tasks", "projects", "memberships", "organizations", "profiles"]) checked(await sdk(() => client.from(table).delete().not("id", "is", null)));
-  for (const id of await benchmarkAuthUserIds(client)) checked(await sdk(() => client.auth.admin.deleteUser(id)));
+  for (const table of ["activities", "comments", "tasks", "projects", "memberships", "organizations", "profiles"]) checkedSupabaseResponse(await sdk(() => client.from(table).delete().not("id", "is", null)));
+  for (const id of await benchmarkAuthUserIds(client)) checkedSupabaseResponse(await sdk(() => client.auth.admin.deleteUser(id)));
 }
 async function createAuthProfiles(client: SupabaseClient, records: User[], profile: ProfileName): Promise<void> {
   for (let offset = 0; offset < records.length; offset += AUTH_CONCURRENCY) {
     const entries = records.slice(offset, offset + AUTH_CONCURRENCY);
     const created = await Promise.all(entries.map(async value => {
       const response = await sdk(() => client.auth.admin.createUser({ email: benchmarkEmail(profile, value.id), password: LOCAL_BENCHMARK_PASSWORD, email_confirm: true, user_metadata: { profile_id: value.id } }));
-      const authUser = (required(response, "auth_create_failed") as { user: { id: string } | null }).user;
+      const authUser = requiredSupabaseObject<{ user: { id: string } | null }>(response, "auth_create_response").user;
       if (!authUser) throw new BenchmarkOperationError("invalid_response", { code: "auth_user_missing" });
       return seedRecord("user", value, profile, authUser.id);
     }));
@@ -329,7 +345,7 @@ async function createAuthProfiles(client: SupabaseClient, records: User[], profi
 async function verifyCounts(client: SupabaseClient, expected: Record<string, number>): Promise<void> {
   for (const [table, count] of Object.entries(expected)) {
     const response = await sdk(() => client.from(table).select("id", { head: true, count: "exact" }));
-    checked(response);
+    checkedSupabaseResponse(response);
     if (response.count !== count) throw new BenchmarkOperationError("invalid_response", { code: "seed_count_mismatch" });
   }
   if ((await benchmarkAuthUserIds(client)).length !== expected.profiles) throw new BenchmarkOperationError("invalid_response", { code: "auth_count_mismatch" });
@@ -362,7 +378,7 @@ export async function seedSupabaseCorrectnessFixture(): Promise<SupabaseCorrectn
   const profiles: Row[] = [];
   for (const name of names) {
     const response = await sdk(() => client.auth.admin.createUser({ email: credentials(name).email, password: LOCAL_BENCHMARK_PASSWORD, email_confirm: true, user_metadata: { profile_id: FIXTURE_IDS[name] } }));
-    const authUser = (required(response, "fixture_auth_create") as { user: { id: string } | null }).user;
+    const authUser = requiredSupabaseObject<{ user: { id: string } | null }>(response, "fixture_auth_response").user;
     if (!authUser) throw new BenchmarkOperationError("invalid_response", { code: "fixture_auth_missing" });
     profiles.push({ id: FIXTURE_IDS[name], auth_id: authUser.id, email: credentials(name).email, display_name: name });
   }
@@ -394,7 +410,7 @@ async function createSession(credentials: Credentials): Promise<AppSession> {
   if (!measuredConfiguration) throw new BenchmarkOperationError("backend_health", { code: "supabase_not_started" });
   const client = createSupabaseClient(measuredConfiguration.url, measuredConfiguration.publicKey, SUPABASE_PROJECT_ID, newId());
   const auth = await sdk(() => client.auth.signInWithPassword(credentials));
-  const user = (checked(auth) as { user: { id: string } | null }).user;
+  const user = requiredSupabaseObject<{ user: { id: string } | null }>(auth, "auth_signin_response").user;
   if (!user) throw new BenchmarkOperationError("authentication", { code: "invalid_credentials" });
   const profile = await sdk(() => client.from("profiles").select(FIELDS.profile).eq("auth_id", user.id).maybeSingle());
   return new SupabaseSession(client, row(required(profile, "profile_missing")));
