@@ -60,6 +60,30 @@ test("official adapter transports receive the rotatable bounded signal", async (
   assert.ok(supabaseSignal);
 });
 
+test("each official measured adapter aborts a stalled request", async () => {
+  const original = globalThis.fetch;
+  globalThis.fetch = (async (_input, init) => new Promise<Response>((_resolve, reject) => {
+    if (init?.signal?.aborted) reject(Object.assign(new Error("aborted"), { name: "AbortError" }));
+    else init?.signal?.addEventListener("abort", () => reject(Object.assign(new Error("aborted"), { name: "AbortError" })), { once: true });
+  })) as typeof fetch;
+  try {
+    const pocket = createPocketBaseMeasuredClient("http://127.0.0.1:8090", { timeoutMs: 1000 });
+    const pocketPending = pocket.client.health.check();
+    pocket.request.cancelPending();
+    await assert.rejects(pocketPending);
+
+    const supabaseRequest = createSessionRequestController({ timeoutMs: 1000 });
+    const supabasePending = createSupabaseClient("http://127.0.0.1:54321", "public-key", "project", "stalled", supabaseRequest).auth.signInWithPassword({ email: "user@example.test", password: "not-recorded" });
+    supabaseRequest.cancelPending();
+    await supabasePending;
+
+    const trailRequest = createSessionRequestController({ timeoutMs: 1000 });
+    const trailPending = createTrailBaseMeasuredClient("http://127.0.0.1:4000", trailRequest).fetch("/api/stalled");
+    trailRequest.cancelPending();
+    await assert.rejects(trailPending, { name: "AbortError" });
+  } finally { globalThis.fetch = original; }
+});
+
 test("Supabase post-auth setup failure signs out the authenticated client", async () => {
   const original = globalThis.fetch;
   const paths: string[] = [];
@@ -80,5 +104,5 @@ test("Supabase post-auth setup failure signs out the authenticated client", asyn
 
 test("request timeout validation rejects invalid values", () => {
   assert.equal(validateSessionRequestTimeout(10), 10);
-  for (const value of [0, -1, Number.NaN, Number.POSITIVE_INFINITY]) assert.throws(() => validateSessionRequestTimeout(value), /positive finite/);
+  for (const value of [0, -1, 0.5, 2_147_483_648, Number.NaN, Number.POSITIVE_INFINITY]) assert.throws(() => validateSessionRequestTimeout(value), /positive safe integer/);
 });

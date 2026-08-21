@@ -10,9 +10,11 @@ export interface SessionRequestOptions {
   timeoutMs?: number;
 }
 
+export const MAX_SESSION_REQUEST_TIMEOUT_MS = 2_147_483_647;
+
 export function validateSessionRequestTimeout(timeoutMs: number | undefined): number {
   const value = timeoutMs ?? 30_000;
-  if (!Number.isFinite(value) || value <= 0) throw new RangeError("timeoutMs must be a positive finite number");
+  if (!Number.isSafeInteger(value) || value <= 0 || value > MAX_SESSION_REQUEST_TIMEOUT_MS) throw new RangeError("timeoutMs must be a positive safe integer within the native timer limit");
   return value;
 }
 

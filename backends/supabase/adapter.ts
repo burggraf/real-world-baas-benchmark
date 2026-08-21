@@ -275,7 +275,7 @@ class SupabaseSession implements AppSession {
   async refreshSession(): Promise<void> { checkedSupabaseResponse(await sdk(() => this.client.auth.refreshSession())); }
   async signOut(): Promise<void> { checkedSupabaseResponse(await sdk(() => this.client.auth.signOut())); }
   cancelPending(): void { this.request.cancelPending(); }
-  async close(): Promise<void> { await this.signOut().catch(() => undefined); }
+  async close(): Promise<void> { await this.signOut(); }
 }
 
 export function publicSupabaseConfiguration(status: SupabaseStatus): { url: string; publicKey: string } {

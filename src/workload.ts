@@ -112,6 +112,21 @@ export async function runWorkload(backend: Backend, config: BenchmarkConfig, opt
       for (const session of batch) if (closed.has(session)) active.delete(session);
     }
   };
+  const awaitWorkersAfterDrainDeadline = async (workersDone: Promise<void>): Promise<void> => {
+    let settled = false;
+    const drainController = new AbortController();
+    await Promise.race([
+      workersDone.then(() => { settled = true; }),
+      sleep(config.timeoutMs, drainController.signal).catch(() => undefined),
+    ]);
+    drainController.abort();
+    if (!settled) {
+      summary.graceExpired = true;
+      summary.stageFailed = true;
+      abortWorkload();
+    }
+    await workersDone;
+  };
   const create = async (spec: VirtualUserSpec, workflow: JourneyName = "signOutIn", measured = false): Promise<AppSession> => {
     const started = now();
     let session: AppSession;
@@ -242,14 +257,15 @@ export async function runWorkload(backend: Backend, config: BenchmarkConfig, opt
     measuring = false;
     measuredEnded = true;
     await options.onMeasuredEnd?.();
-    await workersDone;
+    if (!settled) await awaitWorkersAfterDrainDeadline(workersDone);
+    else await workersDone;
   } catch (error) {
     summary.stageFailed = true;
     if (!isAbort(error)) summary.failedWorkflowCount++;
     abortWorkload();
     measuring = false;
     // Do not close sessions while a worker can still issue backend operations.
-    if (allWorkers) await allWorkers;
+    if (allWorkers) await awaitWorkersAfterDrainDeadline(allWorkers);
     if (measurementStarted && !measuredEnded) {
       measuredEnded = true;
       try { await options.onMeasuredEnd?.(); } catch { summary.stageFailed = true; }
