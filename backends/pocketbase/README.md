@@ -7,33 +7,24 @@ Tested versions:
 
 ## Install the local binary
 
-The adapter never downloads or updates executables. Put the verified binary at
-`.tools/pocketbase-0.39.11/pocketbase`, or set `POCKETBASE_BIN` to an absolute or
-repository-relative path.
-
-| Platform | Release asset | SHA-256 |
-| --- | --- | --- |
-| macOS ARM64 | `pocketbase_0.39.11_darwin_arm64.zip` | `9da6fbe11e82c5b1704e56f7457b24682e01c510206c29b798a458119fa2be20` |
-| Linux x64 | `pocketbase_0.39.11_linux_amd64.zip` | `08b9fcda0d5fd42cb315dc15a36dfa121c993855bd635f01d347c31b4328ec34` |
-| Linux ARM64 | `pocketbase_0.39.11_linux_arm64.zip` | `8c785618840df7ebba795fdf4eba33a5fed64ac5307ad8023b955b4ebb82048b` |
-
-Example Linux x64 installation (replace the asset and checksum with the Linux
-ARM64 row on ARM64):
+From the repository root, install the pinned binary with:
 
 ```sh
-mkdir -p .tools/pocketbase-0.39.11
-curl --fail --location --proto '=https' --tlsv1.2 \
-  -o .tools/pocketbase_0.39.11_linux_amd64.zip \
-  https://github.com/pocketbase/pocketbase/releases/download/v0.39.11/pocketbase_0.39.11_linux_amd64.zip
-printf '%s  %s\n' \
-  '08b9fcda0d5fd42cb315dc15a36dfa121c993855bd635f01d347c31b4328ec34' \
-  '.tools/pocketbase_0.39.11_linux_amd64.zip' | sha256sum --check -
-unzip .tools/pocketbase_0.39.11_linux_amd64.zip -d .tools/pocketbase-0.39.11
-chmod 755 .tools/pocketbase-0.39.11/pocketbase
-.tools/pocketbase-0.39.11/pocketbase --version
+npm run download-backends
 ```
 
-The macOS verification equivalent uses `shasum -a 256 -c -`.
+The downloader verifies the exact release archive, extracts only the root
+`pocketbase` entry, and installs without replacing a different existing file at
+`.tools/pocketbase-0.39.11/pocketbase`. `POCKETBASE_BIN` may select an absolute
+or repository-relative manual installation; doctor still requires exact version
+`0.39.11`.
+
+| Target | Release asset | Archive SHA-256 |
+| --- | --- | --- |
+| macOS ARM64 | `pocketbase_0.39.11_darwin_arm64.zip` | `9da6fbe11e82c5b1704e56f7457b24682e01c510206c29b798a458119fa2be20` |
+| macOS x64 | `pocketbase_0.39.11_darwin_amd64.zip` | `888892fe5fe64cea4a1441937671e191b32ed8f322fa09d3d7b3ca2fc1d7be29` |
+| Linux ARM64 | `pocketbase_0.39.11_linux_arm64.zip` | `8c785618840df7ebba795fdf4eba33a5fed64ac5307ad8023b955b4ebb82048b` |
+| Linux x64 | `pocketbase_0.39.11_linux_amd64.zip` | `08b9fcda0d5fd42cb315dc15a36dfa121c993855bd635f01d347c31b4328ec34` |
 
 ## Run
 

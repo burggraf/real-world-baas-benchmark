@@ -9,7 +9,20 @@ import { DatabaseSync, type SQLOutputValue } from "node:sqlite";
 import type { BackendInfo } from "../../src/backend.js";
 
 export const TRAILBASE_VERSION = "0.33.1";
-export const TRAILBASE_BINARY_SHA256 = "cf870bd8daef2a9c5ae26d34267618b29961188ef3be312722f363538ed787fb";
+export const TRAILBASE_EXECUTABLE_SHA256_BY_TARGET = Object.freeze({
+  "darwin-arm64": "cf870bd8daef2a9c5ae26d34267618b29961188ef3be312722f363538ed787fb",
+  "darwin-x64": "21cf0e8e27e9c16d92fe0b7520ebf24c22e443f7f00ef03e2eca4262be81ef8d",
+  "linux-arm64": "1ef3c8cdd44bdda20ef730f0ba0398908473eb3e4955aa4180b0dd4b5d9e6cd7",
+  "linux-x64": "e5ed11dd162e6109b960a5143449b08348c69931b1de12b1e0242daab5b9def8",
+} as const);
+export function trailBaseExecutableSha256(platform = process.platform, arch = process.arch): string {
+  const target = `${platform}-${arch}`;
+  const digest = TRAILBASE_EXECUTABLE_SHA256_BY_TARGET[target as keyof typeof TRAILBASE_EXECUTABLE_SHA256_BY_TARGET];
+  if (!digest) throw new Error(`Unsupported TrailBase target ${platform}/${arch}; supported targets are macOS or Linux on arm64 or x64`);
+  return digest;
+}
+/** Exact digest for the current platform; retained for adapter and test compatibility. */
+export const TRAILBASE_BINARY_SHA256 = trailBaseExecutableSha256();
 export const LOCAL_SETUP_EMAIL = "setup@trailbase.bench.test";
 export const LOCAL_SETUP_PASSWORD = "TrailBase-setup-only-39!";
 export const LOCAL_BENCHMARK_PASSWORD = "Benchmark-local-only-39!";
@@ -194,12 +207,13 @@ export class TrailBaseProcess {
     if (processAlive(owner.pid)) throw new Error("Refusing to replace a live TrailBase depot owner");
   }
 
-  async doctor(): Promise<BackendInfo> {
+  async doctor(platform = process.platform, arch = process.arch): Promise<BackendInfo> {
+    const expectedDigest = trailBaseExecutableSha256(platform, arch);
     await access(this.options.binary);
     await access(join(this.options.repoRoot, "backends/trailbase/config.textproto"));
     await access(this.options.migrationsDir);
     const digest = await trailBaseBinarySha256(this.options.binary);
-    if (digest !== TRAILBASE_BINARY_SHA256) throw new Error(`Expected TrailBase executable SHA-256 ${TRAILBASE_BINARY_SHA256}`);
+    if (digest !== expectedDigest) throw new Error(`Expected TrailBase executable SHA-256 ${expectedDigest}`);
     const version = spawnSync(this.options.binary, ["--version"], { encoding: "utf8", shell: false, timeout: SETUP_TIMEOUT_MS, maxBuffer: SETUP_MAX_BUFFER });
     if (version.error || version.status !== 0) throw new Error(`Expected TrailBase ${TRAILBASE_VERSION} binary`);
     assertTrailBaseVersionOutput(version.stdout);

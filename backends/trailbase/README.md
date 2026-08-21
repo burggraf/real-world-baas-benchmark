@@ -1,15 +1,26 @@
 # TrailBase adapter
 
-Compatibility is pinned to TrailBase server `v0.33.1` (`darwin-arm64`) and the
-official npm SDK `trailbase@0.14.0`. npm integrity is
+Compatibility is pinned to TrailBase server `v0.33.1` on the four targets below
+and the official npm SDK `trailbase@0.14.0`. npm integrity is
 `sha512-IyD+TuPpgWOf7NXIWpZpE2bJx85GAQEtmFgcdehDUveL8osNg4C2H3Ey/0PJF9ahAEPYneKsGi4rQzi7tlZj0Q==`
-(SHA-1 shasum `2208db5fb72030c7d87119bdf5807affe3560342`). The release binary is
-`.tools/trailbase-0.33.1/trail` (or `TRAILBASE_BIN`); its local SHA-256 is
-`cf870bd8daef2a9c5ae26d34267618b29961188ef3be312722f363538ed787fb`.
-The downloaded release archive SHA-256 is
-`72ca231b0b02c51da587c69b120107312b1dd649bf6140db4f8101d0b58a4622`.
-Lifecycle doctor checks the executable SHA-256 and parses the exact `0.33.1`
-semantic version before starting it.
+(SHA-1 shasum `2208db5fb72030c7d87119bdf5807affe3560342`). Install the release binary at
+`.tools/trailbase-0.33.1/trail` with:
+
+```sh
+npm run download-backends
+```
+
+`TRAILBASE_BIN` may select an absolute or repository-relative manual
+installation. The downloader verifies both archive and extracted executable;
+lifecycle doctor checks the exact current-target executable SHA-256 and parses
+the exact `0.33.1` semantic version before spawn.
+
+| Target | Release asset | Archive SHA-256 | Executable SHA-256 |
+| --- | --- | --- | --- |
+| macOS ARM64 | `trailbase_v0.33.1_arm64_apple_darwin.zip` | `72ca231b0b02c51da587c69b120107312b1dd649bf6140db4f8101d0b58a4622` | `cf870bd8daef2a9c5ae26d34267618b29961188ef3be312722f363538ed787fb` |
+| macOS x64 | `trailbase_v0.33.1_x86_64_apple_darwin.zip` | `2d6c3d95d0153de320a86510836306e2ab26ba97337f4f7f0bbe67df521713e4` | `21cf0e8e27e9c16d92fe0b7520ebf24c22e443f7f00ef03e2eca4262be81ef8d` |
+| Linux ARM64 | `trailbase_v0.33.1_arm64_linux.zip` | `2315984a07a5cec42e271dbb2c824815c4c6c7b5f4d35817bc589eac14b0fb5f` | `1ef3c8cdd44bdda20ef730f0ba0398908473eb3e4955aa4180b0dd4b5d9e6cd7` |
+| Linux x64 | `trailbase_v0.33.1_x86_64_linux.zip` | `82ab64c990ea59251058a69de6a876bc28d50fb508d12e3cd87792dcc108c852` | `e5ed11dd162e6109b960a5143449b08348c69931b1de12b1e0242daab5b9def8` |
 
 The local endpoint defaults to `http://127.0.0.1:8090`; `TRAILBASE_URL` may
 select another loopback HTTP port. `TRAILBASE_DATA_DIR` selects the ignored

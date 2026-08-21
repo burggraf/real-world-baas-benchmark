@@ -11,8 +11,10 @@ import {
   LOCAL_SETUP_PASSWORD,
   LOCAL_BENCHMARK_PASSWORD,
   TRAILBASE_BINARY_SHA256,
+  TRAILBASE_EXECUTABLE_SHA256_BY_TARGET,
   assertTrailBaseVersionOutput,
   trailBaseBinarySha256,
+  trailBaseExecutableSha256,
 } from "../backends/trailbase/process.js";
 import {
   backend,
@@ -48,7 +50,14 @@ test("TrailBase binary pin verifies the exact version and executable digest", as
   assert.doesNotThrow(() => assertTrailBaseVersionOutput("trail v0.33.1-0-g5c0ff313 (2026-08-19)\nsqlite: 3.53.2\n"));
   assert.throws(() => assertTrailBaseVersionOutput("trail v0.33.10-0-gbad (2026-08-19)\n"), /0\.33\.1/);
   assert.throws(() => assertTrailBaseVersionOutput("trail v0.33.1 garbage\n"), /version output/);
-  assert.equal(TRAILBASE_BINARY_SHA256, "cf870bd8daef2a9c5ae26d34267618b29961188ef3be312722f363538ed787fb");
+  assert.deepEqual(TRAILBASE_EXECUTABLE_SHA256_BY_TARGET, {
+    "darwin-arm64": "cf870bd8daef2a9c5ae26d34267618b29961188ef3be312722f363538ed787fb",
+    "darwin-x64": "21cf0e8e27e9c16d92fe0b7520ebf24c22e443f7f00ef03e2eca4262be81ef8d",
+    "linux-arm64": "1ef3c8cdd44bdda20ef730f0ba0398908473eb3e4955aa4180b0dd4b5d9e6cd7",
+    "linux-x64": "e5ed11dd162e6109b960a5143449b08348c69931b1de12b1e0242daab5b9def8",
+  });
+  assert.equal(TRAILBASE_BINARY_SHA256, trailBaseExecutableSha256(process.platform, process.arch));
+  assert.throws(() => trailBaseExecutableSha256("win32", "x64"), /unsupported.*win32.*x64/i);
   assert.equal(await trailBaseBinarySha256(resolve(".tools/trailbase-0.33.1/trail")), TRAILBASE_BINARY_SHA256);
 
   const temp = await mkdtemp(join(tmpdir(), "trailbase-pin-"));
@@ -56,6 +65,7 @@ test("TrailBase binary pin verifies the exact version and executable digest", as
     const fake = join(temp, "trail");
     await writeFile(fake, "not the pinned executable");
     const options = resolveTrailBaseOptions({ TRAILBASE_BIN: fake, TRAILBASE_DATA_DIR: join(temp, "depot"), TRAILBASE_URL: "http://127.0.0.1:65534" });
+    await assert.rejects(new TrailBaseProcess(options).doctor("win32", "x64"), /unsupported.*win32.*x64/i);
     await assert.rejects(new TrailBaseProcess(options).doctor(), /SHA-256/);
   } finally { await rm(temp, { recursive: true, force: true }); }
 });
