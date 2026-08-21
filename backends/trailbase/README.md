@@ -10,8 +10,7 @@ release binary privately with:
 npm run download-backends
 ```
 
-The downloader stages the verified executable and prints manual copy plus
-`chmod 0755` instructions when `.tools/trailbase-0.33.1/trail` is missing.
+The downloader stages the verified executable and prints manual steps (create the parent, copy the staged file, then `chmod 0755`) when `.tools/trailbase-0.33.1/trail` is missing.
 `TRAILBASE_BIN` may select an absolute or repository-relative manual
 installation. The downloader verifies both archive and extracted executable;
 lifecycle doctor checks the exact current-target executable SHA-256 and parses

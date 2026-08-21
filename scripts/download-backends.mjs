@@ -126,30 +126,6 @@ function inside(parent, child) {
   return path !== "" && path !== ".." && !path.startsWith(`..${sep}`) && !isAbsolute(path);
 }
 
-async function makeDirectory(path, mode) {
-  try { await mkdir(path, { mode }); }
-  catch (error) { if (error?.code !== "EEXIST") throw error; }
-  const stat = await lstat(path);
-  if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error("Tool destination parents must be non-symlink directories");
-}
-
-export async function ensureSafeToolsParent(repoRoot, destination) {
-  const root = resolve(repoRoot);
-  const target = resolve(destination);
-  const tools = join(root, ".tools");
-  if (!inside(tools, target)) throw new Error("Tool destination must be inside the repository-owned .tools directory");
-  const rootStat = await lstat(root);
-  if (!rootStat.isDirectory() || rootStat.isSymbolicLink()) throw new Error("Repository root must be a non-symlink directory");
-  await makeDirectory(tools, 0o755);
-  let current = tools;
-  for (const part of relative(tools, dirname(target)).split(sep).filter(Boolean)) {
-    if (part === "." || part === "..") throw new Error("Unsafe tool destination parent");
-    current = join(current, part);
-    await makeDirectory(current, 0o755);
-  }
-  return dirname(target);
-}
-
 export function parseArchiveEntries(listing, binary) {
   if (typeof listing !== "string" || !safeFilename(binary) || Buffer.byteLength(listing) > LIST_MAX_BYTES) throw new Error("Invalid or oversized archive listing");
   const entries = listing.split(/\r?\n/);
@@ -224,8 +200,6 @@ export async function inspectExisting(source, destination, candidate, options = 
   noClobberDecision(await hashFile(destination), candidate);
   return "unchanged";
 }
-
-export const installNoClobber = inspectExisting;
 
 function operationSignal(signal, timeoutMs) {
   return signal ? AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)]) : AbortSignal.timeout(timeoutMs);
@@ -357,6 +331,7 @@ export async function extractEntry(archive, entry, destination, options = {}) {
     signal.removeEventListener("abort", abort);
     await output.close();
     if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
+    if (failure || child.exitCode !== 0) await rm(destination, { force: true });
   }
 }
 
@@ -365,7 +340,7 @@ const defaultRunner = Object.freeze({ listArchive, extractEntry });
 export async function downloadBackend(backend, options = {}) {
   const root = resolve(options.repoRoot ?? dirname(dirname(fileURLToPath(import.meta.url))));
   const target = selectTarget(options.platform ?? process.platform, options.arch ?? process.arch);
-  const release = selectRelease(backend, target);
+  const release = options.release ?? selectRelease(backend, target);
   const destination = resolve(root, release.destination);
   const temporary = await mkdtemp(join(tmpdir(), "real-world-baas-backend-"));
   options.activeTemps?.add(temporary);
@@ -383,11 +358,12 @@ export async function downloadBackend(backend, options = {}) {
     const executable = await runner.extractEntry(archive, entry, extracted, { signal: options.signal, maxBytes: EXECUTABLE_MAX_BYTES });
     const actualExecutable = await hashFile(extracted, EXECUTABLE_MAX_BYTES).catch(() => null);
     if (!actualExecutable || actualExecutable.sha256 !== executable?.sha256 || actualExecutable.size !== executable?.size || (release.executableSha256 && actualExecutable.sha256 !== release.executableSha256)) throw new Error(`${backend} executable SHA-256 mismatch`);
+    await rm(archive, { force: true });
     const status = await inspectExisting(extracted, destination, actualExecutable, { repoRoot: root });
     if (status === "missing") {
       retained = true;
       options.activeTemps?.delete(temporary);
-      const instructions = Object.freeze({ source: extracted, destination, parent: dirname(destination), sha256: actualExecutable.sha256, mode: "0755", command: `mkdir -p ${dirname(destination)} && cp ${extracted} ${destination} && chmod 0755 ${destination}` });
+      const instructions = Object.freeze({ source: extracted, destination, parent: dirname(destination), sha256: actualExecutable.sha256, mode: "0755" });
       return Object.freeze({ backend, target, destination, status, executableSha256: actualExecutable.sha256, instructions, retainedStaging: temporary });
     }
     options.activeTemps?.delete(temporary);

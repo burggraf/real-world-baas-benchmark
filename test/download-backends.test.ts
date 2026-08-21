@@ -6,7 +6,7 @@ import { spawnSync } from "node:child_process";
 import test from "node:test";
 import { pathToFileURL } from "node:url";
 // Resolve the plain-Node downloader from both source tests and compiled dist tests.
-const { downloadArchive, downloadBackend, ensureSafeToolsParent, extractEntry, installNoClobber, listArchive, noClobberDecision, parseArchiveEntries, parseChecksumManifest, selectRelease, selectTarget, sha256, validateDownloadUrl, verifySha256 } = await import(pathToFileURL(resolve("scripts/download-backends.mjs")).href);
+const { downloadArchive, downloadBackend, extractEntry, listArchive, noClobberDecision, parseArchiveEntries, parseChecksumManifest, selectRelease, selectTarget, sha256, validateDownloadUrl, verifySha256 } = await import(pathToFileURL(resolve("scripts/download-backends.mjs")).href);
 
 const pocketAsset = "pocketbase_0.39.11_linux_amd64.zip";
 const pocketDigest = "08b9fcda0d5fd42cb315dc15a36dfa121c993855bd635f01d347c31b4328ec34";
@@ -192,63 +192,46 @@ test("download cleanup removes a temp directory when its initial chmod fails", a
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 
-test("installation pins every parent directory handle and rejects a swapped symlink", async () => {
-  const root = await temporaryRepository("backend-parent-race-");
-  const outside = await mkdtemp(join(tmpdir(), "backend-parent-race-outside-"));
+test("missing destination retains only a private verified executable", async () => {
+  const root = await temporaryRepository("backend-missing-");
+  const archiveBytes = Buffer.from("archive fixture");
+  const executableBytes = Buffer.from("verified executable");
+  const release = { backend: "fixture", version: "1", target: "linux-x64", asset: "fixture.zip", archiveSha256: sha256(archiveBytes), executableSha256: sha256(executableBytes), binary: "fixture", destination: ".tools/fixture-1/fixture", url: "https://github.com/example/example/releases/download/v1/fixture.zip" };
   try {
-    const destination = join(root, ".tools/pocketbase-0.39.11/pocketbase");
-    await ensureSafeToolsParent(root, destination);
-    await rm(join(root, ".tools/pocketbase-0.39.11"), { recursive: true, force: true });
-    await mkdir(join(root, ".tools/pocketbase-0.39.11"));
-    await symlink(outside, join(root, ".tools/pocketbase-0.39.11/link"));
-    const source = join(root, ".tools/source");
-    const bytes = Buffer.from("verified executable");
-    await writeFile(source, bytes);
-    assert.equal(await installNoClobber(source, destination, { sha256: sha256(bytes), size: bytes.length }, { repoRoot: root }), "missing");
-    assert.deepEqual(await readdir(outside), []);
-  } finally { await rm(root, { recursive: true, force: true }); await rm(outside, { recursive: true, force: true }); }
-});
-
-test("safe tool parents reject symlinks outside the repository", async () => {
-  const root = await temporaryRepository("backend-parent-");
-  const outside = await mkdtemp(join(tmpdir(), "backend-outside-"));
-  try {
-    await symlink(outside, join(root, ".tools"));
-    const destination = join(root, ".tools/pocketbase-0.39.11/pocketbase");
-    await assert.rejects(ensureSafeToolsParent(root, destination), /non-symlink/i);
-    assert.deepEqual(await readdir(outside), []);
-  } finally {
-    await rm(root, { recursive: true, force: true });
-    await rm(outside, { recursive: true, force: true });
-  }
-});
-
-test("no-clobber install is atomic, executable, and refuses different bytes", async () => {
-  const candidate = { sha256: sha256(Buffer.from("verified executable")), size: 19 };
-  assert.equal(noClobberDecision(null, candidate), "install");
-  assert.equal(noClobberDecision({ ...candidate }, candidate), "unchanged");
-  assert.throws(() => noClobberDecision({ sha256: "0".repeat(64), size: candidate.size }, candidate), /refusing to replace/i);
-
-  const root = await temporaryRepository("backend-install-");
-  try {
-    const destination = join(root, ".tools/pocketbase-0.39.11/pocketbase");
-    await ensureSafeToolsParent(root, destination);
-    const first = join(root, ".tools/first");
-    const bytes = Buffer.from("verified executable");
-    await writeFile(first, bytes, { mode: 0o600 });
-    assert.equal(await installNoClobber(first, destination, { sha256: sha256(bytes), size: bytes.length }), "missing");
-    assert.rejects(lstat(destination), { code: "ENOENT" });
-
-    const same = join(root, ".tools/same");
-    await writeFile(same, bytes, { mode: 0o600 });
-    assert.equal(await installNoClobber(same, destination, { sha256: sha256(bytes), size: bytes.length }), "missing");
-    await writeFile(destination, bytes, { mode: 0o600 });
-
-    const different = join(root, ".tools/different");
-    await writeFile(different, "different", { mode: 0o600 });
-    await assert.rejects(installNoClobber(different, destination, { sha256: sha256(Buffer.from("different")), size: 9 }), /refusing to replace/i);
-    assert.deepEqual(await readFile(destination), bytes);
+    const result = await downloadBackend("fixture", { repoRoot: root, release, download: async (_release: unknown, archive: string) => { await writeFile(archive, archiveBytes); return { sha256: sha256(archiveBytes), size: archiveBytes.length }; }, runner: { listArchive: async () => "fixture\n", extractEntry: async (_a: string, _e: string, destination: string) => { await writeFile(destination, executableBytes, { mode: 0o600 }); return { sha256: sha256(executableBytes), size: executableBytes.length }; } } });
+    assert.equal(result.status, "missing");
+    assert.deepEqual(result.instructions, { source: join(result.retainedStaging!, "extracted"), destination: join(root, ".tools/fixture-1/fixture"), parent: join(root, ".tools/fixture-1"), sha256: sha256(executableBytes), mode: "0755" });
+    assert.equal((await lstat(result.retainedStaging!)).mode & 0o777, 0o700);
+    assert.deepEqual(await readdir(result.retainedStaging!), ["extracted"]);
+    assert.equal((await lstat(result.instructions.source)).mode & 0o777, 0o600);
+    await assert.rejects(lstat(join(root, ".tools")), { code: "ENOENT" });
+    await rm(result.retainedStaging!, { recursive: true, force: true });
   } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test("existing identical, mismatch, symlink, and nonregular destinations are read-only and clean staging", async () => {
+  const root = await temporaryRepository("backend-destinations-");
+  const archiveBytes = Buffer.from("archive fixture"); const executableBytes = Buffer.from("verified executable");
+  const release = { backend: "fixture", version: "1", target: "linux-x64", asset: "fixture.zip", archiveSha256: sha256(archiveBytes), executableSha256: sha256(executableBytes), binary: "fixture", destination: ".tools/fixture-1/fixture", url: "https://github.com/example/example/releases/download/v1/fixture.zip" };
+  const run = async (prepare?: (destination: string) => Promise<void>) => { const destination = join(root, release.destination); await prepare?.(destination); return downloadBackend("fixture", { repoRoot: root, release, download: async (_r: unknown, archive: string) => { await writeFile(archive, archiveBytes); return { sha256: sha256(archiveBytes), size: archiveBytes.length }; }, runner: { listArchive: async () => "fixture\n", extractEntry: async (_a: string, _e: string, d: string) => { await writeFile(d, executableBytes); return { sha256: sha256(executableBytes), size: executableBytes.length }; } } }); };
+  try {
+    await mkdir(join(root, ".tools/fixture-1"), { recursive: true });
+    await writeFile(join(root, release.destination), executableBytes);
+    assert.equal((await run()).status, "unchanged");
+    assert.deepEqual(await readdir(join(root, ".tools")), ["fixture-1"]);
+    await rm(join(root, release.destination));
+    await assert.rejects(run(async d => { await writeFile(d, "different"); }), /refusing to replace/i);
+    await assert.rejects(run(async d => { await rm(d); await symlink(join(root, "outside"), d); }), /non-regular|symlink/i);
+    await assert.rejects(run(async d => { await rm(d); await mkdir(d); }), /non-regular/i);
+    assert.deepEqual(await readdir(join(root, ".tools/fixture-1")), ["fixture"]);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test("invalid unzip extraction removes its partial destination", async t => {
+  if (spawnSync("unzip", ["-v"], { stdio: "ignore" }).error) { t.skip("unzip is required for archive extraction"); return; }
+  const root = await temporaryRepository("backend-invalid-zip-"); const archive = join(root, "invalid.zip"); const destination = join(root, "partial");
+  try { await writeFile(archive, "not a zip"); await assert.rejects(extractEntry(archive, "fixture", destination), /archive extraction failed|unzip/i); await assert.rejects(lstat(destination), { code: "ENOENT" }); }
+  finally { await rm(root, { recursive: true, force: true }); }
 });
 
 test("archive mismatch is rejected without leaking a response body and temps are cleaned", async () => {
@@ -270,29 +253,16 @@ test("archive mismatch is rejected without leaking a response body and temps are
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 
-test("TrailBase extracted digest mismatch is rejected by independent byte hashing", async () => {
+test("TrailBase extracted digest mismatch is rejected after archive verification", async () => {
   const root = await temporaryRepository("backend-extracted-mismatch-");
+  const archiveBytes = Buffer.from("archive fixture"); const wrong = Buffer.from("wrong executable");
+  const release = { backend: "trailbase", version: "1", target: "darwin-arm64", asset: "trail.zip", archiveSha256: sha256(archiveBytes), executableSha256: sha256(Buffer.from("expected executable")), binary: "trail", destination: ".tools/trailbase-1/trail", url: "https://github.com/example/example/releases/download/v1/trail.zip" };
   try {
-    assert.throws(() => verifySha256(Buffer.from("wrong executable"), "cf870bd8daef2a9c5ae26d34267618b29961188ef3be312722f363538ed787fb", "trail executable"), /trail executable SHA-256 mismatch/);
     await assert.rejects(downloadBackend("trailbase", {
-      repoRoot: root,
-      platform: "darwin",
-      arch: "arm64",
-      download: async (release: { archiveSha256: string }, archive: string) => {
-        const bytes = Buffer.from("archive fixture");
-        await writeFile(archive, bytes, { mode: 0o600 });
-        return { sha256: release.archiveSha256, size: bytes.length };
-      },
-      runner: {
-        listArchive: async () => "trail\nREADME.md\n",
-        extractEntry: async (_archive: string, _entry: string, destination: string) => {
-          const bytes = Buffer.from("wrong executable");
-          await writeFile(destination, bytes, { mode: 0o600 });
-          return { sha256: sha256(bytes), size: bytes.length };
-        },
-      },
-    }), /archive SHA-256 mismatch/);
+      repoRoot: root, release,
+      download: async (_release: unknown, archive: string) => { await writeFile(archive, archiveBytes); return { sha256: sha256(archiveBytes), size: archiveBytes.length }; },
+      runner: { listArchive: async () => "trail\nREADME.md\n", extractEntry: async (_a: string, _e: string, destination: string) => { await writeFile(destination, wrong); return { sha256: sha256(wrong), size: wrong.length }; } },
+    }), /executable SHA-256 mismatch/);
     assert.deepEqual(await downloadTemps(root), []);
-    await assert.rejects(lstat(join(root, ".tools/trailbase-0.33.1/trail")), { code: "ENOENT" });
   } finally { await rm(root, { recursive: true, force: true }); }
 });

@@ -41,7 +41,7 @@ docker info               # must succeed before Supabase doctor
 npm run bench -- doctor
 ```
 
-The downloader accepts no version or URL arguments. It fetches only PocketBase `0.39.11` and TrailBase `0.33.1` from pinned HTTPS GitHub release URLs, verifies the archive and exact root executable, and stages verified files privately. Existing identical files are reported unchanged; missing files print manual copy and `chmod 0755` instructions (the downloader never installs into `.tools`):
+The downloader accepts no version or URL arguments. It fetches only PocketBase `0.39.11` and TrailBase `0.33.1` from pinned HTTPS GitHub release URLs, verifies the archive and exact root executable, and stages verified files privately. Existing identical files are reported unchanged; missing files print manual steps for creating the parent directory, copying the staged file, and applying mode 0755 (the downloader never installs into `.tools`):
 
 - `.tools/pocketbase-0.39.11/pocketbase`
 - `.tools/trailbase-0.33.1/trail`
