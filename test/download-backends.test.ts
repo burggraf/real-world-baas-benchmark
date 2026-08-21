@@ -176,9 +176,11 @@ test("download fetch rejects oversized and failed response streams without body 
       fetchImpl: async () => ({ status: 200, ok: true, url: release.url, headers: { get: () => String(128 * 1024 * 1024 + 1) }, body: new ReadableStream() }),
     }), /byte ceiling/i);
     const failedBody = new ReadableStream({ start(controller) { controller.enqueue(Buffer.from("partial")); controller.error(new Error("secret stream body")); } });
-    await assert.rejects(downloadArchive(release, join(root, "failed.zip"), {
+    const failedPath = join(root, "failed.zip");
+    await assert.rejects(downloadArchive(release, failedPath, {
       fetchImpl: async () => ({ status: 200, ok: true, url: release.url, headers: { get: () => null }, body: failedBody }),
     }), error => error instanceof Error && /download failed or timed out/i.test(error.message) && !error.message.includes("secret stream body"));
+    await assert.rejects(lstat(failedPath), { code: "ENOENT" });
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 

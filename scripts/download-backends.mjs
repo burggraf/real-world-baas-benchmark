@@ -271,6 +271,7 @@ export async function downloadArchive(release, destination, options = {}) {
   const output = await open(destination, "wx", 0o600);
   const hash = createHash("sha256");
   let size = 0;
+  let complete = false;
   try {
     try {
       for await (const value of response.body) {
@@ -281,11 +282,15 @@ export async function downloadArchive(release, destination, options = {}) {
         hash.update(chunk);
         await output.write(chunk);
       }
+      complete = true;
     } catch (error) {
       if (error instanceof Error && error.message === "Backend archive exceeds the byte ceiling") throw error;
       throw new Error("Backend download failed or timed out");
     }
-  } finally { await output.close(); }
+  } finally {
+    await output.close();
+    if (!complete) await rm(destination, { force: true });
+  }
   return { sha256: hash.digest("hex"), size };
 }
 
@@ -382,7 +387,7 @@ export async function downloadBackend(backend, options = {}) {
     if (status === "missing") {
       retained = true;
       options.activeTemps?.delete(temporary);
-      const instructions = Object.freeze({ source: extracted, destination, sha256: actualExecutable.sha256, mode: "0755" });
+      const instructions = Object.freeze({ source: extracted, destination, parent: dirname(destination), sha256: actualExecutable.sha256, mode: "0755", command: `mkdir -p ${dirname(destination)} && cp ${extracted} ${destination} && chmod 0755 ${destination}` });
       return Object.freeze({ backend, target, destination, status, executableSha256: actualExecutable.sha256, instructions, retainedStaging: temporary });
     }
     options.activeTemps?.delete(temporary);
@@ -400,6 +405,8 @@ export async function main(argv = process.argv.slice(2)) {
   if (argv.length !== 0) { console.error("Usage: node scripts/download-backends.mjs [--help]"); return 1; }
   const controller = new AbortController();
   const activeTemps = new Set();
+  const retainedTemps = new Set();
+  let completed = false;
   let interrupted = false;
   const interrupt = () => { interrupted = true; controller.abort(); };
   process.once("SIGINT", interrupt);
@@ -411,8 +418,10 @@ export async function main(argv = process.argv.slice(2)) {
     selectRelease("trailbase", target);
     for (const backend of ["pocketbase", "trailbase"]) {
       const result = await downloadBackend(backend, { signal: controller.signal, activeTemps });
-      console.log(result.status === "missing" ? `${result.backend} missing: copy ${result.instructions.source} to ${result.instructions.destination} and chmod ${result.instructions.mode} ${result.instructions.destination} (sha256 ${result.instructions.sha256})` : `${result.backend} ${result.status}: ${relative(process.cwd(), result.destination)}`);
+      if (result.retainedStaging) retainedTemps.add(result.retainedStaging);
+      console.log(result.status === "missing" ? `${result.backend} missing: ${JSON.stringify(result.instructions)}` : `${result.backend} ${result.status}: ${relative(process.cwd(), result.destination)}`);
     }
+    completed = true;
     return 0;
   } catch (error) {
     console.error(interrupted ? "Backend download interrupted" : error instanceof Error ? error.message : "Backend download failed");
@@ -420,7 +429,7 @@ export async function main(argv = process.argv.slice(2)) {
   } finally {
     process.removeListener("SIGINT", interrupt);
     process.removeListener("SIGTERM", interrupt);
-    await Promise.all([...activeTemps].map(path => rm(path, { recursive: true, force: true })));
+    await Promise.all([...activeTemps, ...(completed ? [] : retainedTemps)].map(path => rm(path, { recursive: true, force: true })));
   }
 }
 
