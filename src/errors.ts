@@ -11,6 +11,7 @@ export interface SafeErrorDetails {
 
 const classifications = new Set<FindingClassification>(["authentication", "authorization", "timeout", "transport/sdk", "invalid_response", "application", "backend_health"]);
 const safeCode = /^[A-Za-z0-9_-]{1,40}$/;
+const sessionStateCodes = new Set(["signed_out", "invalid_session", "session_missing"]);
 
 export function safeErrorDetails(error: unknown): SafeErrorDetails {
   const rawMessage = error instanceof Error ? error.message : error === null ? "null" : typeof error === "object" ? "object" : String(error);
@@ -31,5 +32,7 @@ export function isScoredMeasuredError(error: unknown): boolean {
 }
 
 export function isIntegrityError(error: unknown, workflow?: string): boolean {
-  return workflow === "signOutIn" || !isScoredMeasuredError(error);
+  if (workflow === "signOutIn") return true;
+  if (error instanceof BenchmarkOperationError && error.code && sessionStateCodes.has(error.code)) return true;
+  return !isScoredMeasuredError(error);
 }
