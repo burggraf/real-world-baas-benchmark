@@ -32,7 +32,7 @@ export function isScoredMeasuredError(error: unknown): boolean {
 }
 
 export function isSessionLossError(error: unknown, workflow?: string): boolean {
-  return workflow === "signOutIn" || (error instanceof BenchmarkOperationError && error.code !== undefined && sessionStateCodes.has(error.code));
+  return workflow === "signOutIn" || (error instanceof BenchmarkOperationError && (error.status === 401 || (error.code !== undefined && sessionStateCodes.has(error.code))));
 }
 
 export function isIntegrityError(error: unknown): boolean {

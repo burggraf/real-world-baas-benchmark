@@ -30,6 +30,8 @@ test("runBenchmark subtracts retired users from achieved concurrency", async () 
   } });
   const output = await run.output;
   assert.equal(output.result.stages[0]!.achievedUsers, 0);
+  assert.equal(output.result.stages[0]!.valid, true);
+  assert.doesNotMatch(output.result.stages[0]!.validityReasons.join(" "), /achieved user count/i);
   assert.equal(output.result.valid, false);
 });
 

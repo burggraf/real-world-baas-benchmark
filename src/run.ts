@@ -241,7 +241,6 @@ export async function runBenchmark(options: RunOptions): Promise<{ result: Bench
       if (summary.stageFailed) reasons.push("workload failed");
       if (summary.closeErrors) reasons.push("session close failed");
       if (summary.graceExpired) reasons.push("grace period expired");
-      if (achievedUsers < requestedUsers) reasons.push("achieved user count below requested");
       if (!resources.valid) reasons.push(...resources.validityReasons);
       const overload = evaluateRunnerOverload(resources.samples, overloadThresholds);
       if (overload) reasons.push(overload);

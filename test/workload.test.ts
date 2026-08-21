@@ -55,10 +55,10 @@ test("ordinary measured adapter errors are scored and users continue", async () 
 });
 
 test("session-state authentication failures retire only their users", async () => {
-  for (const code of ["signed_out", "invalid_session", "session_missing"]) {
+  for (const code of ["signed_out", "invalid_session", "session_missing", "http_401"]) {
     const backend = createFakeBackend();
     const baseCreate = backend.createSession;
-    backend.createSession = async credentials => { const session = await baseCreate(credentials); session.dashboard = async () => { throw new BenchmarkOperationError("authentication", { code }); }; return session; };
+    backend.createSession = async credentials => { const session = await baseCreate(credentials); session.dashboard = async () => { throw new BenchmarkOperationError("authentication", { code: code === "http_401" ? "generic_auth_error" : code, status: code === "http_401" ? 401 : undefined }); }; return session; };
     const weights = { ...config.weights, dashboard: 100, taskList: 0, taskDetail: 0, createTask: 0, updateTask: 0, addComment: 0, search: 0, profileUpdate: 0, signIn: 0 };
     let clock = 0;
     const summary = await runWorkload(backend, { ...config, weights }, { users: [user(backend)], durationMs: 100, graceMs: 0, now: () => ++clock, sleep: async milliseconds => { if (milliseconds === 100) await new Promise<void>(() => {}); } });
