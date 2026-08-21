@@ -374,6 +374,10 @@ export async function downloadBackend(backend, options = {}) {
   }
 }
 
+export async function cleanupTemporaryDirectories(paths) {
+  await Promise.all([...paths].map(path => rm(path, { recursive: true, force: true })));
+}
+
 const help = `Usage: node scripts/download-backends.mjs\n\nDownloads and verifies pinned PocketBase 0.39.11 and TrailBase 0.33.1 archives.\nVerified executables are staged privately; existing identical files are retained. Missing files require manual copy and chmod 0755.`;
 
 export async function main(argv = process.argv.slice(2)) {
@@ -405,7 +409,7 @@ export async function main(argv = process.argv.slice(2)) {
   } finally {
     process.removeListener("SIGINT", interrupt);
     process.removeListener("SIGTERM", interrupt);
-    await Promise.all([...activeTemps, ...(completed ? [] : retainedTemps)].map(path => rm(path, { recursive: true, force: true })));
+    await cleanupTemporaryDirectories(new Set([...activeTemps, ...(completed ? [] : retainedTemps)]));
   }
 }
 

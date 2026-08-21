@@ -6,7 +6,7 @@ import { spawnSync } from "node:child_process";
 import test from "node:test";
 import { pathToFileURL } from "node:url";
 // Resolve the plain-Node downloader from both source tests and compiled dist tests.
-const { downloadArchive, downloadBackend, extractEntry, listArchive, noClobberDecision, parseArchiveEntries, parseChecksumManifest, selectRelease, selectTarget, sha256, validateDownloadUrl, verifySha256 } = await import(pathToFileURL(resolve("scripts/download-backends.mjs")).href);
+const { cleanupTemporaryDirectories, downloadArchive, downloadBackend, extractEntry, listArchive, noClobberDecision, parseArchiveEntries, parseChecksumManifest, selectRelease, selectTarget, sha256, validateDownloadUrl, verifySha256 } = await import(pathToFileURL(resolve("scripts/download-backends.mjs")).href);
 
 const pocketAsset = "pocketbase_0.39.11_linux_amd64.zip";
 const pocketDigest = "08b9fcda0d5fd42cb315dc15a36dfa121c993855bd635f01d347c31b4328ec34";
@@ -225,6 +225,14 @@ test("existing identical, mismatch, symlink, and nonregular destinations are rea
     await assert.rejects(run(async d => { await rm(d); await mkdir(d); }), /non-regular/i);
     assert.deepEqual(await readdir(join(root, ".tools/fixture-1")), ["fixture"]);
   } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+
+test("retained staging is removed when a later backend fails", async () => {
+  const first = await mkdtemp(join(tmpdir(), "backend-retained-first-"));
+  const second = await mkdtemp(join(tmpdir(), "backend-active-second-"));
+  try { const retained = new Set([first]); const active = new Set([second]); await cleanupTemporaryDirectories(new Set([...active, ...retained])); await assert.rejects(lstat(first), { code: "ENOENT" }); await assert.rejects(lstat(second), { code: "ENOENT" }); }
+  finally { await rm(first, { recursive: true, force: true }); await rm(second, { recursive: true, force: true }); }
 });
 
 test("invalid unzip extraction removes its partial destination", async t => {
