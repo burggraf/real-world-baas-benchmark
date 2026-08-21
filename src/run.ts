@@ -1,4 +1,5 @@
 import { link, lstat, mkdir, rename as fsRename, unlink, writeFile } from "node:fs/promises";
+import os from "node:os";
 import { basename, dirname } from "node:path";
 import type { Backend, BackendInfo } from "./backend.js";
 import { evaluateCapacity } from "./capacity.js";
@@ -84,6 +85,19 @@ const sanitizeCorrectness = (value: Correctness): Correctness => {
   return { findings, ...(value.aborted === undefined ? {} : { aborted: value.aborted }), ...(abortReason === undefined ? {} : { abortReason }) };
 };
 const conclusive = (evaluation: ReturnType<typeof evaluateCapacity>["stages"][number]): boolean => !evaluation.invalid && !evaluation.reasons.some(reason => /fewer than|missing from/.test(reason));
+const unavailableEnvironment = (backend: BackendInfo): BenchmarkResult["environment"] => ({
+  runtime: "node", runtimeVersion: process.version, os: process.platform, architecture: process.arch,
+  host: os.hostname(), cpu: null, memoryBytes: null, release: os.release(), logicalCores: null,
+  cpuModel: null, totalMemoryBytes: null, hostname: os.hostname(), nodeVersion: process.version,
+  npmVersion: null, gitCommit: null, gitDirty: null, backend: { ...backend }, sdkVersion: null,
+  dockerVersion: null, supabaseVersion: null,
+  unavailable: {
+    cpu: "environment not captured", memoryBytes: "environment not captured", cpuModel: "environment not captured",
+    logicalCores: "environment not captured", totalMemoryBytes: "environment not captured", npmVersion: "environment not captured",
+    gitCommit: "environment not captured", gitDirty: "environment not captured", sdkVersion: "environment not captured",
+    dockerVersion: "environment not captured", supabaseVersion: "environment not captured",
+  },
+});
 
 export async function runBenchmark(options: RunOptions): Promise<{ result: BenchmarkResult; resultPath: string }> {
   if (!options || typeof options.backend !== "string" || !options.backend || !options.config || !options.resultPath || basename(options.resultPath).includes("..") || options.resultPath.includes("\0") || options.resultPath.split(/[\\/]/).includes("..")) throw new Error("invalid benchmark options");
@@ -106,16 +120,17 @@ export async function runBenchmark(options: RunOptions): Promise<{ result: Bench
   const resourceMaxSamples = Math.ceil((stageDurationMs + options.config.timeoutMs) / RESOURCE_INTERVAL_MS) + 2;
   const minClassSamples = options.config.publishable ? 20 : 1;
   const warmupUserCount = options.config.warmupSeconds > 0 ? Math.max(...options.config.concurrency) : 0;
+  const initialBackend: BackendInfo = { name: options.backend as BackendInfo["name"], version: "unknown", endpoint: "unknown" };
   const result: BenchmarkResult = {
     schemaVersion: 1,
     runId: isoId(started, options.backend, options.config.name),
     startedAt: started.toISOString(),
     publishable: options.config.publishable,
-    backend: { name: options.backend as BackendInfo["name"], version: "unknown", endpoint: "unknown" },
+    backend: initialBackend,
     dataset: options.config.dataset,
     seed: options.config.seed,
-    environment: {} as BenchmarkResult["environment"],
-    versions: {},
+    environment: unavailableEnvironment(initialBackend),
+    versions: { backend: "unknown", sdk: "unknown", runtime: process.version },
     config: options.config,
     settings: {
       warmupUserCount,
@@ -144,10 +159,9 @@ export async function runBenchmark(options: RunOptions): Promise<{ result: Bench
     await backend.start();
     result.backend = await backend.doctor();
     result.environment = await (d.captureEnvironment ?? (info => captureEnvironment(info)))(result.backend);
+    result.versions = { backend: result.backend.version, sdk: result.environment.sdkVersion ?? "unknown", runtime: result.environment.runtimeVersion };
     await backend.reset();
-    // Process-backed resets restart the owned server; this is the stable post-lifecycle-start identity.
-    baseline = await backend.doctor();
-    result.backend = baseline;
+    result.backend = await backend.doctor();
     await backend.seed({ name: options.config.dataset, definition: { ...expectedCounts } }, options.config.seed);
     const fixture = backend.seedCorrectnessFixture ? await backend.seedCorrectnessFixture() : undefined;
     if (!fixture) throw new Error("backend correctness fixture setup unavailable");
@@ -156,8 +170,9 @@ export async function runBenchmark(options: RunOptions): Promise<{ result: Bench
     if (result.correctness.aborted || result.correctness.findings.some(finding => !finding.passed)) throw new Error("correctness checks failed");
     const users = backend.buildVirtualUserSpecs ? await backend.buildVirtualUserSpecs(options.config.dataset, options.config.maxConcurrency, options.config.seed) : [];
     const ready = await backend.doctor();
-    const readyIdentityFailure = identityChange(baseline, ready);
-    if (readyIdentityFailure) throw new Error(readyIdentityFailure);
+    // Setup-only backend restarts are complete; this is the measured identity baseline.
+    baseline = ready;
+    result.backend = ready;
     result.environment = await (d.captureEnvironment ?? (info => captureEnvironment(info)))(ready);
     result.versions = { backend: ready.version, sdk: result.environment.sdkVersion ?? "unknown", runtime: result.environment.runtimeVersion };
     if (options.config.warmupSeconds > 0) {

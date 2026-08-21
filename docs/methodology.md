@@ -80,7 +80,7 @@ A `run` performs this order inside one owning process:
 11. Evaluate SLO capacity and, where necessary, add bounded adaptive stages/refinement up to `maxConcurrency`.
 12. Stop only the owned lifecycle and atomically write the raw result. A bounded `.partial.json` is retained on failure.
 
-The quick profile has a 5-second warm-up and 15-second stages at 1/5/10 users. The full medium profile has a 120-second warm-up and 300-second configured stages at 1/5/10/25/50 users, with `maxConcurrency` 1,000. Configured stage time excludes reset, seed, correctness, startup, cleanup, grace periods, and adaptive stages.
+The quick profile has a 5-second warm-up and 15-second stages at 1/5/10 users. The full medium profile has a 120-second warm-up and 300-second configured stages at 5/10/25/50 users, with `maxConcurrency` 1,000. Five users is the publishable measurement floor because the deterministic 300-second one-user stream cannot meet the unchanged 20-sample requirement for the 7% auth/search class. Configured stage time excludes reset, seed, correctness, startup, cleanup, grace periods, and adaptive stages.
 
 `up` is a foreground diagnostic: it owns the lifecycle until Ctrl-C (`SIGINT`) or `SIGTERM`, then stops only that handle. Cross-process `down` is intentionally unsupported because a new process cannot prove ownership. Never substitute a broad `pkill`, global Supabase stop, or Docker prune.
 
@@ -113,7 +113,7 @@ A capacity stage must:
 - have at least 20 attempted workflow samples in each active class for publishable configs (quick requires at least one);
 - satisfy p95 `<=` its ceiling and error rate strictly below 1%.
 
-Capacity is the highest **contiguous** SLO-passing stage from the beginning, bounded before the first qualifying saturation point. A failed first stage therefore yields capacity zero even if a later stage appears to pass.
+Capacity is the highest **contiguous** SLO-passing stage from the beginning, bounded before the first qualifying saturation point. Publishable capacity is established only within the measured range beginning at five users. A failed first full stage therefore yields capacity zero even if a later stage appears to pass; zero means no qualifying capacity was established at or above five users, not that the backend supports zero users. One-user quick evidence remains separate and nonpublishable.
 
 Saturation requires two adjacent passing stages where requested users increase by at least 20%, workflow TPS rises by strictly less than 10%, and at least one active class has a rising p95. A backend merely staying alive is not capacity evidence. Failure to reach saturation does not invent a saturation point; the result reports that it was not observed within measured bounds.
 
@@ -121,13 +121,13 @@ Saturation requires two adjacent passing stages where requested users increase b
 
 A stage is invalid if any required integrity condition fails, including backend identity/restart changes, backend doctor failure, workload failure, session-close failure, grace expiry, failure to start all requested users, missing/malformed resource metrics, a resource sample ceiling breach, or runner overload. SLO failures constrain selected capacity but remain useful curve evidence when the stage itself is otherwise valid.
 
-Runner overload is flagged when any of these is sustained for three consecutive one-second samples:
+Runner overload is flagged when any of these is sustained for three consecutive resource snapshots:
 
 - runner CPU above 90%;
 - runner event-loop p99 above 100 ms;
 - runner event-loop maximum above 250 ms.
 
-Resource sampling is once per second with a bounded ceiling of `ceil((stageDurationMs + timeoutMs) / 1000) + 2`. PocketBase/TrailBase require runner and exact owned-process CPU/RSS plus event-loop metrics. Supabase requires runner/event-loop metrics and totals from the exact project-labeled container set, including CPU, memory, and block I/O. Unavailable required metrics invalidate rather than silently becoming zero.
+Resource collection uses a nominal one-second delay between bounded serialized probes, with a ceiling of `ceil((stageDurationMs + timeoutMs) / 1000) + 2`. Probe execution time is additional, so realized Supabase cadence is slower when Docker statistics take longer than the nominal delay; every retained snapshot carries its monotonic timestamp. PocketBase/TrailBase require runner and exact owned-process CPU/RSS plus event-loop metrics. Supabase requires runner/event-loop metrics and totals from the exact project-labeled container set, including CPU, memory, and block I/O. Unavailable required metrics invalidate rather than silently becoming zero.
 
 Latency retention is capped at 2,000,000 samples per stage; crossing the ceiling invalidates the stage. Error examples are redacted, deduplicated, and bounded at 100. All numeric result values must be finite and counts/rates/percentiles must be internally consistent. A publishable run also needs a nonzero selected capacity, all correctness checks, clean stage integrity, complete environment identity, `publishable: true`, and an identical clean Git commit for aggregation.
 
@@ -143,7 +143,7 @@ set 2: PocketBase -> TrailBase -> Supabase
 set 3: TrailBase -> Supabase -> PocketBase
 ```
 
-The `compare` command is useful for a sequential smoke pass, but it does not impose thermal cooldowns or rotate later sets. Publishable collection should invoke individual `run` commands in the chosen order, wait the same cooldown after each backend, and record start/end times and rejected attempts. A current full run is approximately 35–60+ minutes per backend; nine rotated runs are multi-hour.
+The `compare` command is useful for a sequential smoke pass, but it does not impose thermal cooldowns or rotate later sets. Publishable collection should invoke individual `run` commands in the chosen order, wait the same cooldown after each backend, and record start/end times and rejected attempts. A current full run is approximately 30–55+ minutes per backend; nine rotated runs are multi-hour.
 
 Use AC power and disable sleep. Start from a stable cool/idle state, leave comparable thermal headroom, close browsers, IDE indexing, backups, virus scans, package updates, VMs, and other avoidable work, and do not change fan/power mode mid-set. Record unavoidable background services. Do not use a single laptop run to generalize to servers or other cooling/power states.
 

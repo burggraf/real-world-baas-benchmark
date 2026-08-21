@@ -331,6 +331,28 @@ test("each virtual user keeps its random stream when concurrency changes", async
   assert.deepEqual(two.slice(0, common), one.slice(0, common));
 });
 
+test("five full-profile seed streams meet the publishable operation-class sample floor in virtual time", async () => {
+  const full = loadConfig("configs/full.json");
+  const counts = { read: 0, write: 0, authSearch: 0 };
+  let workflows = 0;
+  for (let index = 0; index < 5; index++) {
+    const backend = createFakeBackend();
+    const streamConfig = { ...full, seed: (full.seed + Math.imul(index, 0x9e3779b9)) >>> 0 };
+    let clock = 0;
+    await runWorkload(backend, streamConfig, {
+      users: [user(backend)], durationMs: 300_000, graceMs: 5_000, now: () => clock,
+      sleep: async (milliseconds, signal) => {
+        if (milliseconds === 300_000) return new Promise<void>(resolve => signal?.addEventListener("abort", () => resolve(), { once: true }));
+        clock += milliseconds;
+      },
+      onSample: sample => { if (sample.type === "workflow" && sample.success) { workflows++; counts[sample.operationClass]++; } },
+    });
+  }
+  assert.equal(workflows, 491);
+  assert.deepEqual(counts, { read: 304, write: 161, authSearch: 26 });
+  assert.ok(Object.values(counts).every(count => count >= 20));
+});
+
 test("invalid selection weights and page-size ceiling are rejected", () => {
   assert.throws(() => selectWorkflow({ ...config.weights, dashboard: 19 }, () => 0.1), /100/);
   assert.throws(() => selectWorkflow({ ...config.weights, dashboard: -1 }, () => 0.1), /weight/);

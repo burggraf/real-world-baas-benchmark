@@ -255,12 +255,12 @@ Node runs asynchronous closed-model virtual users. Each virtual user owns an aut
 Default full stages:
 
 - two-minute warm-up
-- 1, 5, 10, 25, and 50 virtual users
+- 5, 10, 25, and 50 virtual users
 - then double until failure or configured maximum
 - five minutes of steady measurement per level
 - refinement between the last passing and first failing levels
 
-A quick development profile uses shorter stages and the small dataset. It is never labeled publishable.
+Five users is the publishable measurement floor: the fixed 300-second deterministic one-user stream cannot meet the unchanged 20-sample minimum for the 7% auth/search class. Publishable capacity is therefore established only within the measured range beginning at five; capacity zero means no qualifying capacity was established at or above five, not zero supported users. A quick development profile retains separate one-user evidence with shorter stages and the small dataset. It is never labeled publishable.
 
 Multiple Node worker processes are deferred until measurement shows the runner is limiting achieved load. A remote runner can later target the same backend URL without changing scenarios.
 

@@ -6,6 +6,7 @@ import { join } from "node:path";
 import test from "node:test";
 import { parseConfig } from "../src/config.js";
 import { runBenchmark, safeErrorMessage } from "../src/run.js";
+import { validateBenchmarkResult } from "../src/report.js";
 import type { BackendInfo } from "../src/backend.js";
 import type { ResourceSnapshot } from "../src/system.js";
 
@@ -26,7 +27,7 @@ test("runBenchmark orders lifecycle and excludes warmup samples", async () => {
   let calls = 0;
   const workload = async (_backend: any, _config: any, opts: any) => { events.push(calls++ === 0 ? "warmup" : "measured"); opts.onSample?.({ type: "workflow", name: "dashboard", workflow: "dashboard", operationClass: "read", kind: "read", elapsedMs: 1, success: true }); return { requestedUsers: 1, startedUsers: 1, completedWorkflowCount: 1, failedWorkflowCount: 0, graceExpired: false, stageFailed: false, closeErrors: 0 }; };
   const resources = async () => { events.push("resources"); return { samples: [], valid: true, validityReasons: [] }; };
-  await runBenchmark({ backend: "pocketbase", config, resultPath, dependencies: { loadBackend: async () => backend as any, correctness: async () => { events.push("correctness"); return { findings: [{ name: "ok", passed: true, classification: "application" as const }] }; }, workload: workload as any, resources: resources as any, captureEnvironment: async info => ({ backend: info } as any), now: () => new Date("2026-01-01T00:00:00.000Z"), monotonic: (() => { let n = 0; return () => ++n; })() } });
+  await runBenchmark({ backend: "pocketbase", config, resultPath, dependencies: { loadBackend: async () => backend as any, correctness: async () => { events.push("correctness"); return { findings: [{ name: "ok", passed: true, classification: "application" as const }] }; }, workload: workload as any, resources: resources as any, captureEnvironment: async info => environment(info), now: () => new Date("2026-01-01T00:00:00.000Z"), monotonic: (() => { let n = 0; return () => ++n; })() } });
   assert.deepEqual(events, ["doctor", "start", "doctor", "reset", "doctor", "seed", "fixture", "correctness", "doctor", "warmup", "doctor", "resources", "measured", "doctor", "stop"]);
   const saved = JSON.parse(await readFile(resultPath, "utf8")); assert.equal(saved.stages[0].workflowTransactionsPerSecond, 1000); assert.equal(saved.correctness.findings[0].passed, true);
 });
@@ -36,8 +37,9 @@ const fixture = { owner: { email: "o", password: "p" }, admin: { email: "a", pas
 const info = (processIds = [101]): BackendInfo => ({ name: "pocketbase", version: "fake", endpoint: "http://127.0.0.1:1", processIds, processExecutable: "/owned/pocketbase" });
 const snapshot = (cpuPercent = 1, timestampMs = 1): ResourceSnapshot => ({ timestampMs, runner: { pid: 1, cpuPercent, rssBytes: 100 }, backend: { totalCpuPercent: 1, totalRssBytes: 100, processes: [{ pid: 101, cpuPercent: 1, rssBytes: 100 }] }, containers: null, containerTotals: null, containerReason: "not required", eventLoop: { p99Ms: 1, maxMs: 2 } });
 const summary = (users: number) => ({ requestedUsers: users, startedUsers: users, completedWorkflowCount: 1, failedWorkflowCount: 0, graceExpired: false, stageFailed: false, closeErrors: 0 });
+const environment = (backend: BackendInfo) => ({ runtime: "node", runtimeVersion: "v1", os: "test", architecture: "test", host: "test", cpu: null, memoryBytes: null, release: "test", logicalCores: null, cpuModel: null, totalMemoryBytes: null, hostname: "test", nodeVersion: "v1", npmVersion: null, gitCommit: null, gitDirty: null, backend, sdkVersion: "1.0.0", dockerVersion: null, supabaseVersion: null, unavailable: { cpu: "test unavailable", memoryBytes: "test unavailable", npmVersion: "test unavailable", gitCommit: "test unavailable", gitDirty: "test unavailable", dockerVersion: "not required", supabaseVersion: "not required" } });
 
-async function fakeRun(options: { config?: ReturnType<typeof measuredConfig>; confirmLarge?: boolean; doctor?: () => Promise<BackendInfo>; phaseFailure?: "start" | "reset" | "seed" | "correctness"; stopFailure?: boolean; unsafeCorrectness?: boolean; workload?: (opts: any) => Promise<any>; resources?: (opts: any) => Promise<any>; overloadThresholds?: { cpuPercent?: number; p99Ms?: number; maxMs?: number; consecutiveSamples?: number }; write?: (path: string, text: string, options: { flag: "wx" }) => Promise<void>; rename?: (from: string, to: string) => Promise<void>; onStop?: (resultPath: string) => void } = {}) {
+async function fakeRun(options: { config?: ReturnType<typeof measuredConfig>; confirmLarge?: boolean; doctor?: () => Promise<BackendInfo>; phaseFailure?: "start" | "reset" | "seed" | "correctness"; onSeed?: () => void; onFixture?: () => void; stopFailure?: boolean; unsafeCorrectness?: boolean; workload?: (opts: any) => Promise<any>; resources?: (opts: any) => Promise<any>; overloadThresholds?: { cpuPercent?: number; p99Ms?: number; maxMs?: number; consecutiveSamples?: number }; write?: (path: string, text: string, options: { flag: "wx" }) => Promise<void>; rename?: (from: string, to: string) => Promise<void>; onStop?: (resultPath: string) => void } = {}) {
   const dir = await mkdtemp(join(tmpdir(), "bench-run-hardening-")); const resultPath = join(dir, "result.json"); const events: string[] = []; let workloadCalls = 0; let stopCalls = 0;
   const fail = (phase: string) => { if (options.phaseFailure === phase) throw new Error("Authorization: Bearer abc.def.ghi password=hunter2 api_key=sekret"); };
   const backend = {
@@ -45,16 +47,16 @@ async function fakeRun(options: { config?: ReturnType<typeof measuredConfig>; co
     doctor: options.doctor ?? (async () => info()),
     start: async () => { events.push("start"); fail("start"); },
     reset: async () => { events.push("reset"); fail("reset"); },
-    seed: async () => { events.push("seed"); fail("seed"); },
+    seed: async () => { events.push("seed"); fail("seed"); options.onSeed?.(); },
     stop: async () => { options.onStop?.(resultPath); events.push("stop"); stopCalls++; if (options.stopFailure) throw new Error("stop failed"); },
     createSession: async () => { throw new Error("unused"); },
-    seedCorrectnessFixture: async () => fixture,
+    seedCorrectnessFixture: async () => { options.onFixture?.(); return fixture; },
     buildVirtualUserSpecs: async (_profile: string, count: number) => Array.from({ length: count }, (_, i) => ({ credentials: { email: `u${i}`, password: "p" }, organizationId: "o", projectId: "p", taskId: "t" })),
   };
   const workload = async (_backend: unknown, _config: unknown, opts: any) => { workloadCalls++; if (options.workload) return options.workload(opts); opts.onSample?.({ type: "workflow", name: "dashboard", workflow: "dashboard", operationClass: "read", kind: "read", elapsedMs: 1, success: true }); return summary(opts.users.length); };
   const correctness = async () => { events.push("correctness"); fail("correctness"); return { findings: [{ name: options.unsafeCorrectness ? "password=name-secret" : "ok", passed: !options.unsafeCorrectness, classification: "application" as const, message: options.unsafeCorrectness ? "Authorization: Bearer finding-secret" : undefined, evidence: options.unsafeCorrectness ? "api_key=evidence-secret" : undefined }] }; };
   const resources = options.resources ?? (async () => ({ samples: [snapshot()], valid: true, validityReasons: [] }));
-  const output = runBenchmark({ backend: "pocketbase", config: options.config ?? measuredConfig(), resultPath, confirmLarge: options.confirmLarge, dependencies: { loadBackend: async () => backend as any, captureEnvironment: async backendInfo => ({ backend: backendInfo, runtimeVersion: "v1", sdkVersion: "1.0.0" } as any), correctness, workload: workload as any, resources: resources as any, write: options.write, rename: options.rename, overloadThresholds: options.overloadThresholds, now: () => new Date("2026-01-01T00:00:00.000Z"), monotonic: (() => { let value = 0; return () => (value += 1000); })() } });
+  const output = runBenchmark({ backend: "pocketbase", config: options.config ?? measuredConfig(), resultPath, confirmLarge: options.confirmLarge, dependencies: { loadBackend: async () => backend as any, captureEnvironment: async backendInfo => environment(backendInfo), correctness, workload: workload as any, resources: resources as any, write: options.write, rename: options.rename, overloadThresholds: options.overloadThresholds, now: () => new Date("2026-01-01T00:00:00.000Z"), monotonic: (() => { let value = 0; return () => (value += 1000); })() } });
   return { output, resultPath, dir, events, get workloadCalls() { return workloadCalls; }, get stopCalls() { return stopCalls; } };
 }
 
@@ -77,11 +79,12 @@ test("large runs refuse before backend load or filesystem writes unless explicit
   assert.equal((await medium.output).result.dataset, "medium");
 });
 
-test("phase failures prevent workload, stop once, and save redacted partial JSON", async () => {
+test("phase failures prevent workload and publish schema-valid redacted final JSON", async () => {
   for (const phase of ["start", "reset", "seed", "correctness"] as const) {
     const run = await fakeRun({ phaseFailure: phase });
     await assert.rejects(run.output); assert.equal(run.workloadCalls, 0); assert.equal(run.stopCalls, 1);
     const text = await readFile(run.resultPath, "utf8"); assert.doesNotMatch(text, /hunter2|sekret|abc\.def\.ghi/); assert.match(text, /REDACTED|correctness checks failed/);
+    const result = JSON.parse(text); validateBenchmarkResult(result); assert.equal(result.valid, false); assert.equal(typeof result.versions.backend, "string"); assert.equal(Object.keys(result.environment.unavailable).length > 0, true);
   }
 });
 
@@ -148,6 +151,13 @@ test("settings are effective, recorded, and final disk result matches return val
   assert.deepEqual(saved, output.result); assert.equal(output.result.valid, true); assert.equal(output.result.capacity.users, 1);
   assert.deepEqual(output.result.settings.overloadThresholds, { cpuPercent: 80, p99Ms: 100, maxMs: 250, consecutiveSamples: 3 });
   assert.equal(output.result.settings.maxLatencySamples, 2_000_000); assert.equal(output.result.settings.maxErrorExamples, 100); assert.equal(resourceOptions.intervalMs, output.result.settings.resourceIntervalMs); assert.equal(resourceOptions.maxSamples, output.result.settings.resourceMaxSamples.value);
+});
+
+test("setup PID changes establish the final pre-warmup measured identity", async () => {
+  let pid = 101;
+  const run = await fakeRun({ doctor: async () => info([pid]), onSeed: () => { pid = 202; }, onFixture: () => { pid = 303; } });
+  const output = await run.output;
+  assert.equal(output.result.valid, true); assert.deepEqual(output.result.backend.processIds, [303]); assert.equal(output.result.stages[0]!.valid, true);
 });
 
 test("PID changes and post-stage doctor failures invalidate rather than silently score", async () => {

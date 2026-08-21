@@ -52,10 +52,17 @@ test("registered executable identity is exact for backend PIDs", async () => {
   const same=await sampleResources({backend:{name:"trailbase",version:"1",endpoint:"",processIds:[10],processExecutable:"trail"},runnerPid:10,commandRunner:run,eventLoop,nowNs:()=>1e6}); assert.equal(same.backend.totalCpuPercent,null);
 });
 
-test("owned event-loop monitors warm once and clean up", async () => {
-  let warmed=0,resets=0,disabled=0,max=0; const factory=()=>({percentile:()=>max,max:()=>max,reset(){resets++;},disable(){disabled++;}});
-  const sample=await sampleResources({backend:{name:"pocketbase",version:"1",endpoint:""},runnerPid:10,commandRunner:async()=>({stdout:"10 1 1 node",stderr:""}),monitorFactory:factory,warmupSleep:async()=>{warmed++;max=4e6;},nowNs:()=>1e6}); assert.equal(sample.eventLoop.maxMs,4); assert.equal(warmed,1); assert.equal(resets,1); assert.equal(disabled,1);
-  await assert.rejects(()=>sampleResources({backend:{name:"pocketbase",version:"1",endpoint:""},runnerPid:10,commandRunner:async()=>({stdout:"10 1 1 node",stderr:""}),monitorFactory:factory,warmupSleep:async()=>{},nowNs:()=>NaN})); assert.equal(disabled,2);
+test("owned event-loop monitors wait boundedly for readiness and clean up", async () => {
+  let windows=0,resets=0,disabled=0;
+  const readyAfterTwo=()=>({percentile:()=>windows >= 2 ? 4e6 : 0,max:()=>windows >= 2 ? 4e6 : 0,reset(){resets++;},disable(){disabled++;}});
+  const sample=await sampleResources({backend:{name:"pocketbase",version:"1",endpoint:""},runnerPid:10,commandRunner:async()=>({stdout:"10 1 1 node",stderr:""}),monitorFactory:readyAfterTwo,warmupSleep:async()=>{windows++;},nowNs:()=>1e6});
+  assert.equal(sample.eventLoop.maxMs,4); assert.equal(windows,2); assert.equal(disabled,1);
+
+  windows=0; let persistentCalls=0;
+  const unavailable=await collectResources({backend:{name:"pocketbase",version:"1",endpoint:""},runnerPid:10,commandRunner:async()=>{persistentCalls++;return {stdout:"10 1 1 node",stderr:""};},monitorFactory:()=>({percentile:()=>0,max:()=>0,reset(){resets++;},disable(){disabled++;}}),warmupSleep:async()=>{windows++;},shouldStop:()=>persistentCalls === 1,nowNs:()=>2e6});
+  assert.equal(windows,3); assert.equal(unavailable.samples[0]!.eventLoop.p99Ms,null); assert.equal(unavailable.valid,false); assert.deepEqual(unavailable.validityReasons,["resource metric unavailable"]); assert.equal(disabled,2);
+
+  await assert.rejects(()=>sampleResources({backend:{name:"pocketbase",version:"1",endpoint:""},runnerPid:10,commandRunner:async()=>({stdout:"10 1 1 node",stderr:""}),monitorFactory:readyAfterTwo,warmupSleep:async()=>{},nowNs:()=>NaN})); assert.equal(disabled,3); assert.equal(resets >= 3,true);
 });
 
 test("aggregate overflow is null with explicit evidence", async () => {
@@ -83,6 +90,15 @@ test("environment probes are bounded, shell-free, and preserve unavailable reaso
   const env=await captureEnvironment({name:"pocketbase",version:"1",endpoint:""},"1.2.3",runner,async path => path.endsWith("cpuinfo") ? "model name: Test CPU\nprocessor: 0\nprocessor: 1" : "MemTotal: 1024 kB");
   assert.equal(env.gitDirty,true); assert.equal(env.npmVersion,null); assert.equal(env.sdkVersion,"1.2.3"); assert.match(env.unavailable.npmVersion!,/malformed/); assert.ok(calls.every(([command]) => command !== "cat")); assert.ok(!JSON.stringify(env).includes("secret"));
   const owned=[12_345]; const deviations=["safe"]; const source={name:"pocketbase" as const,version:"1",endpoint:"",processIds:owned,deviations}; const copied=await captureEnvironment(source,"1.2.3",runner,async path => path.endsWith("cpuinfo") ? "processor: 0" : "MemTotal: 1 kB"); owned.push(99); deviations.push("changed"); assert.deepEqual(copied.backend.processIds,[12_345]); assert.deepEqual(copied.backend.deviations,["safe"]);
+});
+
+test("environment detects installed SDK versions through package entry resolution", async () => {
+  const runner=async(command:string,args:string[]) => ({stdout:command === "git" && args[0] === "rev-parse" ? "b".repeat(40) : command === "git" ? "" : command === "npm" ? "11.19.0" : command === "docker" ? "Docker version 29.4.0" : command === "supabase" ? "2.115.0" : "",stderr:""});
+  const reader=async(path:string)=>path.endsWith("cpuinfo") ? "model name: CPU\nprocessor: 0" : "MemTotal: 1024 kB";
+  for(const [name,expected] of [["pocketbase","0.28.0"],["trailbase","0.14.0"],["supabase","2.112.3"]] as const) {
+    const environment=await captureEnvironment({name,version:"1",endpoint:""},undefined,runner,reader);
+    assert.equal(environment.sdkVersion,expected,name);
+  }
 });
 
 test("captured environment and resource snapshots serialize as BenchmarkResult", async () => {

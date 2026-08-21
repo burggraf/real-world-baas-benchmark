@@ -5,7 +5,7 @@
   "seed": 42,
   "warmupSeconds": 120,
   "stageSeconds": 300,
-  "concurrency": [1, 5, 10, 25, 50],
+  "concurrency": [5, 10, 25, 50],
   "maxConcurrency": 1000,
   "timeoutMs": 5000,
   "thinkTimeMs": { "min": 1000, "max": 5000 },

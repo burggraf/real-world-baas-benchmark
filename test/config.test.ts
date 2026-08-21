@@ -16,7 +16,7 @@ test("loads every required value from the approved quick, full, and large config
   });
   assert.deepEqual(full, {
     name: "full", publishable: true, dataset: "medium", seed: 42, warmupSeconds: 120, stageSeconds: 300,
-    concurrency: [1, 5, 10, 25, 50], maxConcurrency: 1000, timeoutMs: 5000, thinkTimeMs: { min: 1000, max: 5000 }, weights, slos,
+    concurrency: [5, 10, 25, 50], maxConcurrency: 1000, timeoutMs: 5000, thinkTimeMs: { min: 1000, max: 5000 }, weights, slos,
   });
   assert.deepEqual(large, {
     name: "large", publishable: false, dataset: "large", seed: 42, warmupSeconds: 120, stageSeconds: 300,

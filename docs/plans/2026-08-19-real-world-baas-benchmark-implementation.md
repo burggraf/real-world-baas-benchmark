@@ -221,8 +221,10 @@ Validate parsed JSON with small local assertion helpers. This is a trust boundar
 - medium dataset
 - 120-second warm-up
 - 300-second stages
-- concurrency `[1, 5, 10, 25, 50]`
+- concurrency `[5, 10, 25, 50]`
 - a configurable maximum, initially 1,000
+
+The five-user publishable floor preserves the 20-sample minimum for every active class without changing fixed stage duration or workload weights. Capacity is established only within the measured range; zero means no qualifying stage at or above five users. One-user quick evidence remains separate and nonpublishable.
 
 Both use approved weights and SLOs from the design.
 

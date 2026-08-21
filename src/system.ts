@@ -3,8 +3,9 @@ import process from "node:process";
 import { execFile } from "node:child_process";
 import { monitorEventLoopDelay } from "node:perf_hooks";
 import { createRequire } from "node:module";
+import { closeSync, constants as fsConstants, fstatSync, openSync, readSync } from "node:fs";
 import { readFile } from "node:fs/promises";
-import { basename } from "node:path";
+import { basename, dirname, join } from "node:path";
 import type { BackendInfo } from "./backend.js";
 
 export type Optional<T> = { value: T | null; reason?: string };
@@ -102,7 +103,30 @@ const defaultRunner: CommandRunner = (command, args, timeoutMs) => new Promise((
   execFile(command, args, { timeout: timeoutMs, maxBuffer: 64 * 1024 }, (error, stdout, stderr) => error ? reject(new Error("command failed")) : resolve({ stdout: String(stdout), stderr: String(stderr) }));
 });
 function version(text: string): string | null { const m = text.match(/\b\d+(?:\.\d+){1,3}\b/); return m?.[0] ?? null; }
-function packageVersion(name: string): string | null { try { const metadata = createRequire(import.meta.url)(`${name}/package.json`) as { version?: unknown }; return typeof metadata.version === "string" && /^\d+(?:\.\d+){1,3}$/.test(metadata.version) ? metadata.version : null; } catch { return null; } }
+const moduleRequire = createRequire(import.meta.url);
+function packageMetadata(path: string): { name?: unknown; version?: unknown } | null {
+  let fd: number | undefined;
+  try {
+    fd = openSync(path, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW);
+    if (!fstatSync(fd).isFile()) return null;
+    const bytes = Buffer.alloc(64 * 1024 + 1); let offset = 0;
+    while (offset < bytes.length) { const count = readSync(fd, bytes, offset, bytes.length - offset, null); if (count === 0) break; offset += count; }
+    if (offset === bytes.length) return null;
+    return JSON.parse(bytes.subarray(0, offset).toString("utf8")) as { name?: unknown; version?: unknown };
+  } catch { return null; }
+  finally { if (fd !== undefined) closeSync(fd); }
+}
+function packageVersion(name: string): string | null {
+  try {
+    let directory = dirname(moduleRequire.resolve(name));
+    for (let depth = 0; depth < 8; depth++) {
+      const metadata = packageMetadata(join(directory, "package.json"));
+      if (metadata?.name === name) return typeof metadata.version === "string" && /^\d+(?:\.\d+){1,3}$/.test(metadata.version) ? metadata.version : null;
+      const parent = dirname(directory); if (parent === directory) break; directory = parent;
+    }
+  } catch { /* unavailable package entry */ }
+  return null;
+}
 export interface Environment { runtime: string; runtimeVersion: string; os: string; architecture: string; host: string; cpu: string | null; memoryBytes: number | null; release: string; logicalCores: number | null; cpuModel: string | null; totalMemoryBytes: number | null; hostname: string; nodeVersion: string; npmVersion: string | null; gitCommit: string | null; gitDirty: boolean | null; backend: BackendInfo; sdkVersion: string | null; dockerVersion: string | null; supabaseVersion: string | null; unavailable: Record<string, string> }
 export type EnvironmentFileReader = (path: string) => Promise<string>;
 export async function captureEnvironment(backend: BackendInfo, sdkVersion?: string, runner: CommandRunner = defaultRunner, fileReader: EnvironmentFileReader = path => readFile(path, "utf8")): Promise<Environment> {
@@ -123,8 +147,17 @@ export async function captureEnvironment(backend: BackendInfo, sdkVersion?: stri
 
 export interface EventLoopMonitor { percentile(p: number): number; max: number | (() => number); reset(): void; disable(): void }
 export interface ResourceSamplerOptions { backend: BackendInfo; maxSamples?: number; runnerPid?: number; commandRunner?: CommandRunner; nowNs?: () => number; sleep?: (ms: number, signal?: AbortSignal) => Promise<void>; eventLoop?: EventLoopMonitor; monitorFactory?: () => EventLoopMonitor; warmupSleep?: (ms: number) => Promise<void>; intervalMs?: number; eventLoopWindowMs?: number; signal?: AbortSignal; shouldStop?: () => boolean }
+const EVENT_LOOP_WARMUP_ATTEMPTS = 3;
 const monitor = (): EventLoopMonitor => { const h = monitorEventLoopDelay({ resolution: 10 }); h.enable(); return { percentile: p => h.percentile(p), get max() { return h.max; }, reset: () => h.reset(), disable: () => h.disable() }; };
 const monitorMax = (event: EventLoopMonitor): number => typeof event.max === "function" ? event.max() : event.max;
+async function warmEventLoopMonitor(event: EventLoopMonitor, sleep: (ms: number) => Promise<void>, windowMs: number): Promise<void> {
+  event.reset();
+  for (let attempt = 0; attempt < EVENT_LOOP_WARMUP_ATTEMPTS; attempt++) {
+    await sleep(windowMs);
+    const p99 = event.percentile(99); const max = monitorMax(event);
+    if (validNumber(p99) && validNumber(max) && max > 0) return;
+  }
+}
 const defaultSleep = (ms: number, signal?: AbortSignal) => new Promise<void>((resolve, reject) => { if (signal?.aborted) return reject(new Error("aborted")); let done = false; const finish = (error?: Error) => { if (done) return; done = true; clearTimeout(timer); signal?.removeEventListener("abort", onAbort); error ? reject(error) : resolve(); }; const onAbort = () => finish(new Error("aborted")); const timer = setTimeout(() => finish(), ms); signal?.addEventListener("abort", onAbort, { once: true }); });
 function ownedPids(info: BackendInfo, runnerPid: number): number[] { const pids = [runnerPid, ...(info.processIds ?? [])]; if (pids.some(pid => !positive(pid))) throw new Error("processIds must be positive safe integers"); return [...new Set(pids)]; }
 async function sampleResourcesOnce(options: ResourceSamplerOptions): Promise<ResourceSnapshot> {
@@ -139,10 +172,10 @@ async function sampleResourcesOnce(options: ResourceSamplerOptions): Promise<Res
   const backendCpu = backendProc.length && backendProc.every(p => p.cpuPercent !== null) ? safeSum(backendProc.map(p => p.cpuPercent!)) : null; const backendRss = backendProc.length && backendProc.every(p => p.rssBytes !== null) ? safeSum(backendProc.map(p => p.rssBytes!), true) : null; const backendReason = !backendProc.length ? "no registered backend PIDs" : backendProc.some(p => p.cpuPercent === null || p.rssBytes === null) ? "owned process metric unavailable" : backendCpu === null || backendRss === null ? "backend aggregate overflow" : undefined;
   return { timestampMs, runner, backend: { totalCpuPercent: backendCpu, totalRssBytes: backendRss, processes: backendProc, reason: backendReason }, containers, containerTotals, containerReason, eventLoop };
 }
-export async function sampleResources(options: ResourceSamplerOptions): Promise<ResourceSnapshot> { const owned = !options.eventLoop; const event = options.eventLoop ?? (options.monitorFactory ?? monitor)(); try { if (owned) await (options.warmupSleep ?? (ms => new Promise<void>(resolve => setTimeout(resolve, ms))))(options.eventLoopWindowMs ?? 10); return await sampleResourcesOnce({ ...options, eventLoop: event }); } finally { if (owned) event.disable(); } }
+export async function sampleResources(options: ResourceSamplerOptions): Promise<ResourceSnapshot> { const owned = !options.eventLoop; const event = options.eventLoop ?? (options.monitorFactory ?? monitor)(); try { if (owned) await warmEventLoopMonitor(event, options.warmupSleep ?? (ms => new Promise<void>(resolve => setTimeout(resolve, ms))), options.eventLoopWindowMs ?? 10); return await sampleResourcesOnce({ ...options, eventLoop: event }); } finally { if (owned) event.disable(); } }
 export interface ResourceCollection { samples: ResourceSnapshot[]; valid: boolean; validityReasons: string[] }
 export async function collectResources(options: ResourceSamplerOptions): Promise<ResourceCollection> {
   const max = options.maxSamples ?? 100; if (!positive(max)) throw new Error("maxSamples must be a positive safe integer"); const interval = options.intervalMs ?? 1000; if (!Number.isFinite(interval) || interval <= 0) throw new Error("intervalMs must be finite and positive"); const samples: ResourceSnapshot[] = []; const sleep = options.sleep ?? defaultSleep;
   if (options.signal?.aborted) return { samples, valid: false, validityReasons: ["aborted before sampling"] }; const owned = !options.eventLoop; const event = options.eventLoop ?? (options.monitorFactory ?? monitor)();
-  try { if (!options.eventLoop) await (options.warmupSleep ?? (ms => new Promise<void>(resolve => setTimeout(resolve, ms))))(options.eventLoopWindowMs ?? 10); if (options.signal?.aborted) return { samples, valid: false, validityReasons: ["aborted before sampling"] }; for (;;) { if (options.signal?.aborted || options.shouldStop?.()) break; if (samples.length >= max) return { samples, valid: false, validityReasons: ["maxSamples ceiling exceeded"] }; samples.push(await sampleResourcesOnce({ ...options, eventLoop: event })); if (options.signal?.aborted || options.shouldStop?.()) break; await sleep(interval, options.signal); } const metricFailure = samples.some(s => s.runner.cpuPercent === null || s.runner.rssBytes === null || (options.backend.name !== "supabase" && (s.backend.totalCpuPercent === null || s.backend.totalRssBytes === null)) || s.eventLoop.p99Ms === null || s.eventLoop.maxMs === null || (options.backend.name === "supabase" && (s.containers === null || s.containerTotals === null))); return { samples, valid: samples.length > 0 && !metricFailure, validityReasons: metricFailure ? ["resource metric unavailable"] : samples.length ? [] : ["aborted before sampling"] }; } catch (error) { if (options.signal?.aborted || (error instanceof Error && error.message === "aborted" )) { const metricFailure = samples.some(s => s.runner.cpuPercent === null || s.runner.rssBytes === null || (options.backend.name !== "supabase" && (s.backend.totalCpuPercent === null || s.backend.totalRssBytes === null)) || s.eventLoop.p99Ms === null || s.eventLoop.maxMs === null || (options.backend.name === "supabase" && (s.containers === null || s.containerTotals === null))); return { samples, valid: samples.length > 0 && !metricFailure, validityReasons: metricFailure ? ["resource metric unavailable"] : samples.length ? [] : ["aborted before sampling"] }; } return { samples, valid: false, validityReasons: ["resource sample failed"] }; } finally { if (owned) event.disable(); }
+  try { if (!options.eventLoop) await warmEventLoopMonitor(event, options.warmupSleep ?? (ms => new Promise<void>(resolve => setTimeout(resolve, ms))), options.eventLoopWindowMs ?? 10); if (options.signal?.aborted) return { samples, valid: false, validityReasons: ["aborted before sampling"] }; for (;;) { if (options.signal?.aborted || options.shouldStop?.()) break; if (samples.length >= max) return { samples, valid: false, validityReasons: ["maxSamples ceiling exceeded"] }; samples.push(await sampleResourcesOnce({ ...options, eventLoop: event })); if (options.signal?.aborted || options.shouldStop?.()) break; await sleep(interval, options.signal); } const metricFailure = samples.some(s => s.runner.cpuPercent === null || s.runner.rssBytes === null || (options.backend.name !== "supabase" && (s.backend.totalCpuPercent === null || s.backend.totalRssBytes === null)) || s.eventLoop.p99Ms === null || s.eventLoop.maxMs === null || (options.backend.name === "supabase" && (s.containers === null || s.containerTotals === null))); return { samples, valid: samples.length > 0 && !metricFailure, validityReasons: metricFailure ? ["resource metric unavailable"] : samples.length ? [] : ["aborted before sampling"] }; } catch (error) { if (options.signal?.aborted || (error instanceof Error && error.message === "aborted" )) { const metricFailure = samples.some(s => s.runner.cpuPercent === null || s.runner.rssBytes === null || (options.backend.name !== "supabase" && (s.backend.totalCpuPercent === null || s.backend.totalRssBytes === null)) || s.eventLoop.p99Ms === null || s.eventLoop.maxMs === null || (options.backend.name === "supabase" && (s.containers === null || s.containerTotals === null))); return { samples, valid: samples.length > 0 && !metricFailure, validityReasons: metricFailure ? ["resource metric unavailable"] : samples.length ? [] : ["aborted before sampling"] }; } return { samples, valid: false, validityReasons: ["resource sample failed"] }; } finally { if (owned) event.disable(); }
 }

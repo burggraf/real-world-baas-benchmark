@@ -35,4 +35,4 @@ A quick profile is explicitly nonpublishable, has short stages, and is not evide
 
 The Ubuntu x64 prerequisites, exact downloader support, commands, and kernel/CPU/memory/version recording checklist are in [methodology.md](methodology.md). No Ubuntu outcome is fabricated here.
 
-A first publishable comparison will require three compatible full medium runs per backend with rotated order, fixed cooldown, retained raw checksums, and all validity gates satisfied. At roughly 35–60+ minutes per backend, nine rotated runs are a multi-hour collection. That future work will create `docs/results/first-comparison.md`; this task intentionally does not create the `docs/results/` directory.
+A first publishable comparison will require three compatible full medium runs per backend with rotated order, fixed cooldown, retained raw checksums, and all validity gates satisfied. At roughly 30–55+ minutes per backend, nine rotated runs are a multi-hour collection. That future work will create `docs/results/first-comparison.md`; this task intentionally does not create the `docs/results/` directory.
