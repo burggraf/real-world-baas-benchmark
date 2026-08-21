@@ -4,15 +4,14 @@ import { createHash } from "node:crypto";
 import { constants as fsConstants } from "node:fs";
 import {
   chmod,
-  link,
   lstat,
   mkdir,
   mkdtemp,
   open,
-  realpath,
   rm,
 } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 
 const ARCHIVE_MAX_BYTES = 128 * 1024 * 1024;
@@ -136,24 +135,19 @@ async function makeDirectory(path, mode) {
 
 export async function ensureSafeToolsParent(repoRoot, destination) {
   const root = resolve(repoRoot);
-  const tools = join(root, ".tools");
   const target = resolve(destination);
+  const tools = join(root, ".tools");
   if (!inside(tools, target)) throw new Error("Tool destination must be inside the repository-owned .tools directory");
   const rootStat = await lstat(root);
   if (!rootStat.isDirectory() || rootStat.isSymbolicLink()) throw new Error("Repository root must be a non-symlink directory");
   await makeDirectory(tools, 0o755);
   let current = tools;
-  const parent = dirname(target);
-  for (const part of relative(tools, parent).split(sep).filter(Boolean)) {
+  for (const part of relative(tools, dirname(target)).split(sep).filter(Boolean)) {
     if (part === "." || part === "..") throw new Error("Unsafe tool destination parent");
     current = join(current, part);
     await makeDirectory(current, 0o755);
   }
-  const [realRoot, realTools, realParent] = await Promise.all([realpath(root), realpath(tools), realpath(parent)]);
-  if (!inside(realRoot, realTools) || relative(realRoot, realTools) !== ".tools" || (realParent !== realTools && !inside(realTools, realParent))) {
-    throw new Error("Tool destination parents must remain inside the repository-owned .tools directory");
-  }
-  return parent;
+  return dirname(target);
 }
 
 export function parseArchiveEntries(listing, binary) {
@@ -199,63 +193,17 @@ export function noClobberDecision(existing, candidate) {
   return "unchanged";
 }
 
-const directoryFdPath = fd => process.platform === "linux" ? `/proc/self/fd/${fd}` : `/dev/fd/${fd}`;
-const openDirectoryChain = async (repoRoot, directory) => {
-  const root = resolve(repoRoot);
-  const target = resolve(directory);
-  if (!inside(root, target)) throw new Error("Tool destination must remain inside the repository");
-  const flags = fsConstants.O_RDONLY | fsConstants.O_DIRECTORY | fsConstants.O_NOFOLLOW;
-  if (process.platform === "darwin") {
-    // Open before resolving names: validating a path and opening it afterward permits a parent swap.
-    const handle = await open(target, flags);
-    try {
-      const [canonicalRoot, canonical, named] = await Promise.all([realpath(root), realpath(target), lstat(target)]);
-      const opened = await handle.stat();
-      if (relative(canonicalRoot, canonical) !== relative(root, target) || named.isSymbolicLink() || !named.isDirectory() || opened.dev !== named.dev || opened.ino !== named.ino) {
-        throw new Error("Tool destination parents must remain non-symlink directories");
-      }
-      return { handle, path: target, close: async () => handle.close() };
-    } catch (error) {
-      await handle.close().catch(() => undefined);
-      throw error;
-    }
-  }
-  const handles = [];
-  try {
-    let handle = await open(root, flags);
-    handles.push(handle);
-    for (const part of relative(root, target).split(sep).filter(Boolean)) {
-      handle = await open(join(directoryFdPath(handle.fd), part), flags);
-      handles.push(handle);
-    }
-    return { handle: handles.at(-1), path: directoryFdPath(handles.at(-1).fd), close: async () => { for (const item of handles.reverse()) await item.close(); } };
-  } catch (error) {
-    for (const item of handles.reverse()) await item.close().catch(() => undefined);
-    throw error;
-  }
-};
-
-export async function installNoClobber(source, destination, candidate, options = {}) {
-  noClobberDecision(null, candidate);
+export async function inspectExisting(source, destination, candidate) {
   const actualCandidate = await hashFile(source);
   if (actualCandidate.sha256 !== candidate.sha256 || actualCandidate.size !== candidate.size) throw new Error("Candidate executable changed before installation");
-  const repoRoot = options.repoRoot ?? resolve(dirname(destination), "../..");
-  const parent = await openDirectoryChain(repoRoot, dirname(destination));
-  const safeDestination = join(parent.path, basename(destination));
-  try {
-    try {
-      await link(source, safeDestination);
-      await chmod(safeDestination, 0o755);
-      return "installed";
-    } catch (error) {
-      if (error?.code !== "EEXIST") throw error;
-    }
-    const existing = await hashFile(safeDestination);
-    noClobberDecision(existing, candidate);
-    await chmod(safeDestination, 0o755);
-    return "unchanged";
-  } finally { await parent.close(); }
+  let existing;
+  try { existing = await lstat(destination); } catch (error) { if (error?.code === "ENOENT") return "missing"; throw error; }
+  if (existing.isSymbolicLink() || !existing.isFile()) throw new Error("Refusing to use a non-regular backend executable destination");
+  noClobberDecision(await hashFile(destination), candidate);
+  return "unchanged";
 }
+
+export const installNoClobber = inspectExisting;
 
 function operationSignal(signal, timeoutMs) {
   return signal ? AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)]) : AbortSignal.timeout(timeoutMs);
@@ -392,8 +340,7 @@ export async function downloadBackend(backend, options = {}) {
   const target = selectTarget(options.platform ?? process.platform, options.arch ?? process.arch);
   const release = selectRelease(backend, target);
   const destination = resolve(root, release.destination);
-  await ensureSafeToolsParent(root, destination);
-  const temporary = await mkdtemp(join(root, ".tools/.download-"));
+  const temporary = await mkdtemp(join(tmpdir(), "real-world-baas-backend-"));
   options.activeTemps?.add(temporary);
   try {
     await (options.chmod ?? chmod)(temporary, 0o700);
@@ -408,15 +355,20 @@ export async function downloadBackend(backend, options = {}) {
     const executable = await runner.extractEntry(archive, entry, extracted, { signal: options.signal, maxBytes: EXECUTABLE_MAX_BYTES });
     const actualExecutable = await hashFile(extracted, EXECUTABLE_MAX_BYTES).catch(() => null);
     if (!actualExecutable || actualExecutable.sha256 !== executable?.sha256 || actualExecutable.size !== executable?.size || (release.executableSha256 && actualExecutable.sha256 !== release.executableSha256)) throw new Error(`${backend} executable SHA-256 mismatch`);
-    const status = await installNoClobber(extracted, destination, actualExecutable, { repoRoot: root });
-    return Object.freeze({ backend, target, destination, status, executableSha256: actualExecutable.sha256 });
-  } finally {
+    const status = await inspectExisting(extracted, destination, actualExecutable);
+    if (status === "missing") {
+      const instructions = Object.freeze({ source: extracted, destination, sha256: actualExecutable.sha256, mode: "0755" });
+      return Object.freeze({ backend, target, destination, status, executableSha256: actualExecutable.sha256, instructions, retainedStaging: temporary });
+    }
     options.activeTemps?.delete(temporary);
     await rm(temporary, { recursive: true, force: true });
+    return Object.freeze({ backend, target, destination, status, executableSha256: actualExecutable.sha256 });
+  } finally {
+    if (options.activeTemps?.has(temporary)) { options.activeTemps.delete(temporary); await rm(temporary, { recursive: true, force: true }); }
   }
 }
 
-const help = `Usage: node scripts/download-backends.mjs\n\nDownloads pinned PocketBase 0.39.11 and TrailBase 0.33.1 archives for this macOS/Linux arm64/x64 host.\nExisting byte-identical executables are retained; different files are never replaced.`;
+const help = `Usage: node scripts/download-backends.mjs\n\nDownloads and verifies pinned PocketBase 0.39.11 and TrailBase 0.33.1 archives.\nVerified executables are staged privately; existing identical files are retained. Missing files require manual copy and chmod 0755.`;
 
 export async function main(argv = process.argv.slice(2)) {
   if (argv.length === 1 && argv[0] === "--help") { console.log(help); return 0; }
@@ -434,7 +386,7 @@ export async function main(argv = process.argv.slice(2)) {
     selectRelease("trailbase", target);
     for (const backend of ["pocketbase", "trailbase"]) {
       const result = await downloadBackend(backend, { signal: controller.signal, activeTemps });
-      console.log(`${result.backend} ${result.status}: ${relative(process.cwd(), result.destination)}`);
+      console.log(result.status === "missing" ? `${result.backend} missing: copy ${result.instructions.source} to ${result.instructions.destination} and chmod ${result.instructions.mode} ${result.instructions.destination} (sha256 ${result.instructions.sha256})` : `${result.backend} ${result.status}: ${relative(process.cwd(), result.destination)}`);
     }
     return 0;
   } catch (error) {

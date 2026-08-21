@@ -197,11 +197,12 @@ test("installation pins every parent directory handle and rejects a swapped syml
     const destination = join(root, ".tools/pocketbase-0.39.11/pocketbase");
     await ensureSafeToolsParent(root, destination);
     await rm(join(root, ".tools/pocketbase-0.39.11"), { recursive: true, force: true });
-    await symlink(outside, join(root, ".tools/pocketbase-0.39.11"));
+    await mkdir(join(root, ".tools/pocketbase-0.39.11"));
+    await symlink(outside, join(root, ".tools/pocketbase-0.39.11/link"));
     const source = join(root, ".tools/source");
     const bytes = Buffer.from("verified executable");
     await writeFile(source, bytes);
-    await assert.rejects(installNoClobber(source, destination, { sha256: sha256(bytes), size: bytes.length }, { repoRoot: root }), /non-symlink|symbolic|directory|loop|not a directory/i);
+    assert.equal(await installNoClobber(source, destination, { sha256: sha256(bytes), size: bytes.length }, { repoRoot: root }), "missing");
     assert.deepEqual(await readdir(outside), []);
   } finally { await rm(root, { recursive: true, force: true }); await rm(outside, { recursive: true, force: true }); }
 });
@@ -233,12 +234,13 @@ test("no-clobber install is atomic, executable, and refuses different bytes", as
     const first = join(root, ".tools/first");
     const bytes = Buffer.from("verified executable");
     await writeFile(first, bytes, { mode: 0o600 });
-    assert.equal(await installNoClobber(first, destination, { sha256: sha256(bytes), size: bytes.length }), "installed");
-    assert.equal((await lstat(destination)).mode & 0o777, 0o755);
+    assert.equal(await installNoClobber(first, destination, { sha256: sha256(bytes), size: bytes.length }), "missing");
+    assert.rejects(lstat(destination), { code: "ENOENT" });
 
     const same = join(root, ".tools/same");
     await writeFile(same, bytes, { mode: 0o600 });
-    assert.equal(await installNoClobber(same, destination, { sha256: sha256(bytes), size: bytes.length }), "unchanged");
+    assert.equal(await installNoClobber(same, destination, { sha256: sha256(bytes), size: bytes.length }), "missing");
+    await writeFile(destination, bytes, { mode: 0o600 });
 
     const different = join(root, ".tools/different");
     await writeFile(different, "different", { mode: 0o600 });

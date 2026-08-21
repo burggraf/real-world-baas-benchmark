@@ -3,13 +3,15 @@
 Compatibility is pinned to TrailBase server `v0.33.1` on the four targets below
 and the official npm SDK `trailbase@0.14.0`. npm integrity is
 `sha512-IyD+TuPpgWOf7NXIWpZpE2bJx85GAQEtmFgcdehDUveL8osNg4C2H3Ey/0PJF9ahAEPYneKsGi4rQzi7tlZj0Q==`
-(SHA-1 shasum `2208db5fb72030c7d87119bdf5807affe3560342`). Install the release binary at
-`.tools/trailbase-0.33.1/trail` with:
+(SHA-1 shasum `2208db5fb72030c7d87119bdf5807affe3560342`). Fetch and verify the
+release binary privately with:
 
 ```sh
 npm run download-backends
 ```
 
+The downloader stages the verified executable and prints manual copy plus
+`chmod 0755` instructions when `.tools/trailbase-0.33.1/trail` is missing.
 `TRAILBASE_BIN` may select an absolute or repository-relative manual
 installation. The downloader verifies both archive and extracted executable;
 lifecycle doctor checks the exact current-target executable SHA-256 and parses

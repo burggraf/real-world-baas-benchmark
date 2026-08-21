@@ -15,7 +15,7 @@ The answer is qualified by the raw result's Git commit, dirty state, host name, 
 - PocketBase server: `0.39.11`; SDK: `pocketbase@0.28.0`.
 - TrailBase server: `0.33.1`; SDK: `trailbase@0.14.0`.
 - npm dependencies: the committed `package-lock.json` installed with `npm ci`.
-- PocketBase and TrailBase: pinned release archives installed with `node scripts/download-backends.mjs`; both doctors check the exact current-target executable digest before version probing.
+- PocketBase and TrailBase: pinned release archives fetched and verified with `node scripts/download-backends.mjs`; missing binaries are manually copied from its private staging instructions, and both doctors check the exact current-target executable digest before version probing.
 
 Do not mix results after changing a backend binary, CLI, SDK, lockfile, schema, config, workload, seed, host, or benchmark settings.
 
@@ -151,7 +151,7 @@ Use AC power and disable sleep. Start from a stable cool/idle state, leave compa
 
 PocketBase and TrailBase use lifecycle ownership markers and exact binary/data paths; reset refuses filesystem roots, repository/home ancestors, foreign owners, live external users, and unowned nonempty depots. Supabase scopes operations to project `realworldbaasbench`, discovers containers by exact project label, and stops/removes only that project's containers with `--no-backup`. This means Supabase owned volumes can disappear at stop, so disk size must be sampled before cleanup if it is required.
 
-The runner always attempts owned stop in `finally`. If cleanup fails, the result is invalid and records the failure. Inspect before manual cleanup; never use `docker system prune`, global process matching, or deletion outside the selected ignored `.data` path. Download installation similarly refuses symlink parents and never replaces different executables.
+The runner always attempts owned stop in `finally`. If cleanup fails, the result is invalid and records the failure. Inspect before manual cleanup; never use `docker system prune`, global process matching, or deletion outside the selected ignored `.data` path. Downloader staging never writes a missing repository binary; manual installation is followed by doctor verification, and different executables are refused.
 
 ## Results, reports, and aggregation
 

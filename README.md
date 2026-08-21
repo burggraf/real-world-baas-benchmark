@@ -41,12 +41,12 @@ docker info               # must succeed before Supabase doctor
 npm run bench -- doctor
 ```
 
-The downloader accepts no version or URL arguments. It fetches only PocketBase `0.39.11` and TrailBase `0.33.1` from their pinned HTTPS GitHub release URLs, verifies the archive, extracts only the exact root executable, and installs without replacing an existing different file:
+The downloader accepts no version or URL arguments. It fetches only PocketBase `0.39.11` and TrailBase `0.33.1` from pinned HTTPS GitHub release URLs, verifies the archive and exact root executable, and stages verified files privately. Existing identical files are reported unchanged; missing files print manual copy and `chmod 0755` instructions (the downloader never installs into `.tools`):
 
 - `.tools/pocketbase-0.39.11/pocketbase`
 - `.tools/trailbase-0.33.1/trail`
 
-It supports macOS and Linux on ARM64 and x64. Run `node scripts/download-backends.mjs --help` for its small command surface. `.tools/`, `.data/`, and `results/*` are intentionally gitignored; raw local results are not committed.
+It supports macOS and Linux on ARM64 and x64. Run `node scripts/download-backends.mjs --help` for its small command surface. Follow the printed instructions, then run `doctor`; `.tools/`, `.data/`, and `results/*` are intentionally gitignored; raw local results are not committed.
 
 ## Local ports and paths
 

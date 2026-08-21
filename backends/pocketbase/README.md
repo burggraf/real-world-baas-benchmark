@@ -14,8 +14,9 @@ npm run download-backends
 ```
 
 The downloader verifies the exact release archive, extracts only the root
-`pocketbase` entry, and installs without replacing a different existing file at
-`.tools/pocketbase-0.39.11/pocketbase`. `POCKETBASE_BIN` may select an absolute
+`pocketbase` entry, and stages it privately. Existing identical files are
+reported unchanged; missing files require following the printed manual copy and
+`chmod 0755` instructions. `POCKETBASE_BIN` may select an absolute
 or repository-relative manual installation; doctor still requires exact version
 `0.39.11`.
 
