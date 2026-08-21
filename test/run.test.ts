@@ -39,7 +39,7 @@ const snapshot = (cpuPercent = 1, timestampMs = 1): ResourceSnapshot => ({ times
 const summary = (users: number) => ({ requestedUsers: users, startedUsers: users, completedWorkflowCount: 1, failedWorkflowCount: 0, graceExpired: false, stageFailed: false, closeErrors: 0 });
 const environment = (backend: BackendInfo) => ({ runtime: "node", runtimeVersion: "v1", os: "test", architecture: "test", host: "test", cpu: null, memoryBytes: null, release: "test", logicalCores: null, cpuModel: null, totalMemoryBytes: null, hostname: "test", nodeVersion: "v1", npmVersion: null, gitCommit: null, gitDirty: null, backend, sdkVersion: "1.0.0", dockerVersion: null, supabaseVersion: null, unavailable: { cpu: "test unavailable", memoryBytes: "test unavailable", npmVersion: "test unavailable", gitCommit: "test unavailable", gitDirty: "test unavailable", dockerVersion: "not required", supabaseVersion: "not required" } });
 
-async function fakeRun(options: { config?: ReturnType<typeof measuredConfig>; confirmLarge?: boolean; doctor?: () => Promise<BackendInfo>; phaseFailure?: "start" | "reset" | "seed" | "correctness"; onSeed?: () => void; onFixture?: () => void; stopFailure?: boolean; unsafeCorrectness?: boolean; workload?: (opts: any) => Promise<any>; resources?: (opts: any) => Promise<any>; overloadThresholds?: { cpuPercent?: number; p99Ms?: number; maxMs?: number; consecutiveSamples?: number }; write?: (path: string, text: string, options: { flag: "wx" }) => Promise<void>; rename?: (from: string, to: string) => Promise<void>; onStop?: (resultPath: string) => void } = {}) {
+async function fakeRun(options: { config?: ReturnType<typeof measuredConfig>; confirmLarge?: boolean; doctor?: () => Promise<BackendInfo>; phaseFailure?: "start" | "reset" | "seed" | "correctness"; captureFailure?: boolean; onSeed?: () => void; onFixture?: () => void; stopFailure?: boolean; unsafeCorrectness?: boolean; workload?: (opts: any) => Promise<any>; resources?: (opts: any) => Promise<any>; overloadThresholds?: { cpuPercent?: number; p99Ms?: number; maxMs?: number; consecutiveSamples?: number }; write?: (path: string, text: string, options: { flag: "wx" }) => Promise<void>; rename?: (from: string, to: string) => Promise<void>; onStop?: (resultPath: string) => void } = {}) {
   const dir = await mkdtemp(join(tmpdir(), "bench-run-hardening-")); const resultPath = join(dir, "result.json"); const events: string[] = []; let workloadCalls = 0; let stopCalls = 0;
   const fail = (phase: string) => { if (options.phaseFailure === phase) throw new Error("Authorization: Bearer abc.def.ghi password=hunter2 api_key=sekret"); };
   const backend = {
@@ -56,7 +56,8 @@ async function fakeRun(options: { config?: ReturnType<typeof measuredConfig>; co
   const workload = async (_backend: unknown, _config: unknown, opts: any) => { workloadCalls++; if (options.workload) return options.workload(opts); opts.onSample?.({ type: "workflow", name: "dashboard", workflow: "dashboard", operationClass: "read", kind: "read", elapsedMs: 1, success: true }); return summary(opts.users.length); };
   const correctness = async () => { events.push("correctness"); fail("correctness"); return { findings: [{ name: options.unsafeCorrectness ? "password=name-secret" : "ok", passed: !options.unsafeCorrectness, classification: "application" as const, message: options.unsafeCorrectness ? "Authorization: Bearer finding-secret" : undefined, evidence: options.unsafeCorrectness ? "api_key=evidence-secret" : undefined }] }; };
   const resources = options.resources ?? (async () => ({ samples: [snapshot()], valid: true, validityReasons: [] }));
-  const output = runBenchmark({ backend: "pocketbase", config: options.config ?? measuredConfig(), resultPath, confirmLarge: options.confirmLarge, dependencies: { loadBackend: async () => backend as any, captureEnvironment: async backendInfo => environment(backendInfo), correctness, workload: workload as any, resources: resources as any, write: options.write, rename: options.rename, overloadThresholds: options.overloadThresholds, now: () => new Date("2026-01-01T00:00:00.000Z"), monotonic: (() => { let value = 0; return () => (value += 1000); })() } });
+  let captures = 0;
+  const output = runBenchmark({ backend: "pocketbase", config: options.config ?? measuredConfig(), resultPath, confirmLarge: options.confirmLarge, dependencies: { loadBackend: async () => backend as any, captureEnvironment: async backendInfo => { captures++; if (options.captureFailure && captures === 1) throw new Error("environment probe failed"); return environment(backendInfo); }, correctness, workload: workload as any, resources: resources as any, write: options.write, rename: options.rename, overloadThresholds: options.overloadThresholds, now: () => new Date("2026-01-01T00:00:00.000Z"), monotonic: (() => { let value = 0; return () => (value += 1000); })() } });
   return { output, resultPath, dir, events, get workloadCalls() { return workloadCalls; }, get stopCalls() { return stopCalls; } };
 }
 
@@ -86,6 +87,19 @@ test("phase failures prevent workload and publish schema-valid redacted final JS
     const text = await readFile(run.resultPath, "utf8"); assert.doesNotMatch(text, /hunter2|sekret|abc\.def\.ghi/); assert.match(text, /REDACTED|correctness checks failed/);
     const result = JSON.parse(text); validateBenchmarkResult(result); assert.equal(result.valid, false); assert.equal(typeof result.versions.backend, "string"); assert.equal(Object.keys(result.environment.unavailable).length > 0, true);
   }
+});
+
+test("environment capture failures publish schema-valid unavailable metadata", async () => {
+  const run = await fakeRun({ captureFailure: true });
+  await assert.rejects(run.output, /environment probe failed/);
+  const result = JSON.parse(await readFile(run.resultPath, "utf8"));
+  validateBenchmarkResult(result);
+  assert.equal(result.valid, false);
+  assert.equal(result.backend.version, "fake");
+  assert.equal(result.environment.backend.version, "fake");
+  assert.equal(result.versions.backend, "fake");
+  assert.equal(result.versions.sdk, "unknown");
+  assert.match(String(result.environment.unavailable.cpu), /environment not captured/);
 });
 
 test("failed correctness findings save bounded credential-safe partial JSON", async () => {

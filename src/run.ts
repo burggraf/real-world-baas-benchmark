@@ -157,11 +157,16 @@ export async function runBenchmark(options: RunOptions): Promise<{ result: Bench
   try {
     await backend.doctor();
     await backend.start();
-    result.backend = await backend.doctor();
+    const synchronizeIdentity = (identity: BackendInfo): void => {
+      result.backend = identity;
+      result.environment = unavailableEnvironment(identity);
+      result.versions = { backend: identity.version, sdk: "unknown", runtime: process.version };
+    };
+    synchronizeIdentity(await backend.doctor());
     result.environment = await (d.captureEnvironment ?? (info => captureEnvironment(info)))(result.backend);
     result.versions = { backend: result.backend.version, sdk: result.environment.sdkVersion ?? "unknown", runtime: result.environment.runtimeVersion };
     await backend.reset();
-    result.backend = await backend.doctor();
+    synchronizeIdentity(await backend.doctor());
     await backend.seed({ name: options.config.dataset, definition: { ...expectedCounts } }, options.config.seed);
     const fixture = backend.seedCorrectnessFixture ? await backend.seedCorrectnessFixture() : undefined;
     if (!fixture) throw new Error("backend correctness fixture setup unavailable");
@@ -172,7 +177,7 @@ export async function runBenchmark(options: RunOptions): Promise<{ result: Bench
     const ready = await backend.doctor();
     // Setup-only backend restarts are complete; this is the measured identity baseline.
     baseline = ready;
-    result.backend = ready;
+    synchronizeIdentity(ready);
     result.environment = await (d.captureEnvironment ?? (info => captureEnvironment(info)))(ready);
     result.versions = { backend: ready.version, sdk: result.environment.sdkVersion ?? "unknown", runtime: result.environment.runtimeVersion };
     if (options.config.warmupSeconds > 0) {
