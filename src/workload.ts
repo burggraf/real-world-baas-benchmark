@@ -21,7 +21,9 @@ export interface WorkloadOptions extends WorkloadClock {
   graceMs?: number;
   signal?: AbortSignal;
   onSample?: (sample: WorkloadSample) => void;
+  /** Opens the measured boundary; onMeasuredEnd is called only if this resolves. */
   onMeasuredStart?: () => void | Promise<void>;
+  /** Closes a successfully opened measured boundary, before final session cleanup. */
   onMeasuredEnd?: () => void | Promise<void>;
   stopOnError?: boolean;
 }
@@ -217,32 +219,38 @@ export async function runWorkload(backend: Backend, config: BenchmarkConfig, opt
   }
 
   let measuredEnded = false;
+  let measurementStarted = false;
+  let allWorkers: Promise<void> | undefined;
   try {
     await options.onMeasuredStart?.();
+    measurementStarted = true;
     measuring = true;
     const deadline = now() + durationMs;
     const workers = users.map(({ spec, random }, index) => runUser(spec, random, [...active][index]!, deadline).catch(error => { summary.stageFailed = true; if (!isAbort(error)) summary.failedWorkflowCount++; }));
-    const allWorkers = Promise.all(workers);
+    allWorkers = Promise.all(workers).then(() => undefined);
+    const workersDone = allWorkers;
     const stopperController = new AbortController();
     const stopper = (async () => { await Promise.resolve(); await sleep(durationMs, stopperController.signal); controller.abort(); })().catch(() => {});
-    await Promise.race([allWorkers, stopper]);
+    await Promise.race([workersDone, stopper]);
     stopperController.abort();
     if (!controller.signal.aborted) controller.abort();
     let settled = false;
     const graceController = new AbortController();
-    await Promise.race([allWorkers.then(() => { settled = true; }), sleep(graceMs, graceController.signal).catch(() => {})]);
+    await Promise.race([workersDone.then(() => { settled = true; }), sleep(graceMs, graceController.signal).catch(() => {})]);
     graceController.abort();
     if (!settled) { summary.graceExpired = true; summary.stageFailed = true; }
     measuring = false;
     measuredEnded = true;
     await options.onMeasuredEnd?.();
-    await allWorkers;
+    await workersDone;
   } catch (error) {
     summary.stageFailed = true;
     if (!isAbort(error)) summary.failedWorkflowCount++;
     controller.abort();
     measuring = false;
-    if (!measuredEnded) {
+    // Do not close sessions while a worker can still issue backend operations.
+    if (allWorkers) await allWorkers;
+    if (measurementStarted && !measuredEnded) {
       measuredEnded = true;
       try { await options.onMeasuredEnd?.(); } catch { summary.stageFailed = true; }
     }

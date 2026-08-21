@@ -133,6 +133,45 @@ test("boundary authentication is unmeasured while sign-out/in authentication is 
   assert.equal(backend.closedSessions, backend.sessions);
 });
 
+test("a measurement-end failure waits for blocked workers before cleanup", async () => {
+  const backend = createFakeBackend();
+  const baseCreate = backend.createSession;
+  let release!: () => void;
+  let blocked = false;
+  const pending = new Promise<void>(resolve => { release = resolve; });
+  backend.createSession = async credentials => {
+    const session = await baseCreate(credentials);
+    const dashboard = session.dashboard;
+    session.dashboard = async input => { blocked = true; await pending; return dashboard(input); };
+    return session;
+  };
+  const weights = { ...config.weights, dashboard: 100, taskList: 0, taskDetail: 0, createTask: 0, updateTask: 0, addComment: 0, search: 0, profileUpdate: 0, signIn: 0 };
+  let ended = 0;
+  let settled = false;
+  const stage = runWorkload(backend, { ...config, weights }, { users: [user(backend)], durationMs: 20, graceMs: 0, now: () => 0, sleep: async () => {}, onMeasuredEnd: () => { ended++; throw new Error("end failed"); } });
+  for (let i = 0; i < 100 && !blocked; i++) await Promise.resolve();
+  await Promise.resolve();
+  void stage.then(() => { settled = true; });
+  for (let i = 0; i < 100 && !ended; i++) await Promise.resolve();
+  assert.equal(blocked, true);
+  assert.equal(settled, false);
+  assert.equal(ended, 1);
+  assert.equal(backend.closedSessions, 0);
+  release();
+  const summary = await stage;
+  assert.equal(summary.stageFailed, true);
+  assert.equal(backend.closedSessions, 1);
+});
+
+test("a failed measurement-start callback does not invoke measurement-end", async () => {
+  const backend = createFakeBackend();
+  let ended = 0;
+  const summary = await runWorkload(backend, config, { users: [user(backend)], durationMs: 0, graceMs: 0, onMeasuredStart: () => { throw new Error("start failed"); }, onMeasuredEnd: () => { ended++; } });
+  assert.equal(summary.stageFailed, true);
+  assert.equal(ended, 0);
+  assert.equal(backend.closedSessions, 1);
+});
+
 test("sign-out/in closes the old session before replacing it", async () => {
   const backend = createFakeBackend();
   const weights = { ...config.weights, dashboard: 0, taskList: 0, taskDetail: 0, createTask: 0, updateTask: 0, addComment: 0, search: 0, profileUpdate: 0, signIn: 100 };
