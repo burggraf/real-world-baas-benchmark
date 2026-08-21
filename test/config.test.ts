@@ -77,7 +77,8 @@ test("accepts uint32 seed boundaries and rejects invalid seeds", () => {
 test("rejects invalid durations, concurrency, and think-time", () => {
   for (const change of [
     (v: any) => v.warmupSeconds = 0, (v: any) => v.stageSeconds = -1,
-    (v: any) => v.timeoutMs = Infinity, (v: any) => v.seed = NaN,
+    (v: any) => v.timeoutMs = Infinity, (v: any) => v.timeoutMs = 0.5,
+    (v: any) => v.timeoutMs = 2_147_483_648, (v: any) => v.seed = NaN,
     (v: any) => v.concurrency = [], (v: any) => v.concurrency = [1, 1],
     (v: any) => v.concurrency = [2, 1], (v: any) => v.concurrency = [1, 1.5],
     (v: any) => v.concurrency = [1, Infinity], (v: any) => v.maxConcurrency = 1,

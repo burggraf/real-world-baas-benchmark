@@ -25,6 +25,7 @@ const BENCHMARK_PROFILE_IDS = "^(usr[sml][0-9a-z]{11}|fx(own|adm|mem|out)0000000
 const BENCHMARK_ORGANIZATION_IDS = "^(org[sml][0-9a-z]{11}|fxorg000000000[12])$";
 const AUTH_ID = /^[A-Za-z0-9+/_-]{22}==$/;
 const PUBLIC_ID = /^[a-z0-9]{15}$/;
+const measuredTransportErrors = new WeakMap<Client, unknown>();
 const FIXTURE_IDS = {
   owner: "fxown0000000001",
   admin: "fxadm0000000001",
@@ -355,14 +356,14 @@ class TrailBaseSession implements AppSession {
 
   async signOut(): Promise<void> {
     if (this.closed || !this.client.user()) return;
-    await sdk(() => this.client.logout());
+    await sdk(() => checkedLogout(this.client));
   }
 
   cancelPending(): void { this.request.cancelPending(); }
 
   async close(): Promise<void> {
     if (this.closed) return;
-    if (this.client.user()) await sdk(() => this.client.logout());
+    if (this.client.user()) await sdk(() => checkedLogout(this.client));
     this.closed = true;
   }
 }
@@ -582,7 +583,20 @@ export async function seedTrailBase(profile: DatasetProfile, seed: number): Prom
 }
 
 export function createTrailBaseMeasuredClient(endpoint: string, request: SessionRequestController): Client {
-  return initClient(endpoint, { transport: { fetch: (path, init) => request.fetch(new URL(path, endpoint), init) } });
+  let client: Client;
+  client = initClient(endpoint, { transport: { fetch: async (path, init) => {
+    try { return await request.fetch(new URL(path, endpoint), init); }
+    catch (error) { measuredTransportErrors.set(client, error); throw error; }
+  } } });
+  return client;
+}
+
+async function checkedLogout(client: Client): Promise<void> {
+  measuredTransportErrors.delete(client);
+  await client.logout();
+  const error = measuredTransportErrors.get(client);
+  measuredTransportErrors.delete(client);
+  if (error) throw error;
 }
 
 export const createTrailBaseSession = async (credentials: Credentials, options: SessionRequestOptions = {}): Promise<AppSession> => {
@@ -593,12 +607,12 @@ export const createTrailBaseSession = async (credentials: Credentials, options: 
     const authId = client.user()?.id;
     if (!authId || !AUTH_ID.test(authId)) {
       request.detachParent();
-      await client.logout().catch(() => undefined);
+      await checkedLogout(client).catch(() => undefined);
       throw new BenchmarkOperationError("authentication", { code: "auth_user" });
     }
     let profile: Row;
     try { profile = await oneRow(client, "profiles", [{ column: "authId", op: "equal", value: authId }], "profile_missing"); }
-    catch (error) { request.detachParent(); await client.logout().catch(() => undefined); throw error; }
+    catch (error) { request.detachParent(); await checkedLogout(client).catch(() => undefined); throw error; }
     request.detachParent();
     return new TrailBaseSession(client, profile, request);
   };

@@ -433,6 +433,7 @@ export async function createSupabaseSession(credentials: Credentials, options: S
     request.detachParent();
     return new SupabaseSession(client, row(required(profile, "profile_missing")), request);
   } catch (error) {
+    request.detachParent();
     if (authenticated) await client.auth.signOut().catch(() => undefined);
     throw error;
   }

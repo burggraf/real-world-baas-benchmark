@@ -4,6 +4,7 @@ import { parseConfig } from "./config.js";
 import type { OperationClass } from "./config.js";
 import type { BenchmarkResult, OperationClassMetric, StageMetrics } from "./result.js";
 import { configuredWorkflowNames, operationClassForWorkflow } from "./workflows.js";
+import { MAX_SESSION_REQUEST_TIMEOUT_MS } from "./session-request.js";
 
 export interface BenchmarkReport { markdown: string; csv: string }
 export interface WrittenBenchmarkReport { markdownPath: string; csvPath: string }
@@ -122,7 +123,7 @@ export function validateBenchmarkResult(value: unknown): asserts value is Benchm
   const versions = object(raw.versions, "versions"); for (const [key, version] of Object.entries(versions)) string(version, `versions.${key}`); for (const key of ["backend", "sdk", "runtime"] as const) string(versions[key], `versions.${key}`);
   const settings = object(raw.settings, "settings"); integer(settings.warmupUserCount, "settings.warmupUserCount"); if (settings.warmupWritesUnscored !== true) throw new Error("Invalid settings.warmupWritesUnscored");
   integer(settings.resourceIntervalMs, "settings.resourceIntervalMs", 1); const minClassSamples = integer(settings.minClassSamples, "settings.minClassSamples", 1); integer(settings.maxLatencySamples, "settings.maxLatencySamples", 1); integer(settings.maxErrorExamples, "settings.maxErrorExamples", 1);
-  if (settings.measuredRequestTimeoutMs !== undefined) finite(settings.measuredRequestTimeoutMs, "settings.measuredRequestTimeoutMs", Number.MIN_VALUE);
+  if (settings.measuredRequestTimeoutMs !== undefined && integer(settings.measuredRequestTimeoutMs, "settings.measuredRequestTimeoutMs", 1) > MAX_SESSION_REQUEST_TIMEOUT_MS) throw new Error("Invalid settings.measuredRequestTimeoutMs");
   const minAchievedRatio = finite(settings.minAchievedRatio, "settings.minAchievedRatio", Number.MIN_VALUE); const materialIncrease = finite(settings.saturationMaterialIncrease, "settings.saturationMaterialIncrease", Number.MIN_VALUE); const maxThroughputGain = finite(settings.saturationMaxThroughputGain, "settings.saturationMaxThroughputGain"); if (minAchievedRatio > 1 || materialIncrease > 1 || maxThroughputGain > 1) throw new Error("Invalid settings ratio range");
   const maxSamples = object(settings.resourceMaxSamples, "settings.resourceMaxSamples"); integer(maxSamples.stageDurationMs, "settings.resourceMaxSamples.stageDurationMs", 1); integer(maxSamples.graceMs, "settings.resourceMaxSamples.graceMs", 1); integer(maxSamples.value, "settings.resourceMaxSamples.value", 1); string(maxSamples.formula, "settings.resourceMaxSamples.formula");
   const overload = object(settings.overloadThresholds, "settings.overloadThresholds"); for (const key of ["cpuPercent", "p99Ms", "maxMs"] as const) finite(overload[key], `settings.overloadThresholds.${key}`); integer(overload.consecutiveSamples, "settings.overloadThresholds.consecutiveSamples", 1);

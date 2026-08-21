@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import { MAX_SESSION_REQUEST_TIMEOUT_MS } from "./session-request.js";
 
 export type WorkflowName = "dashboard" | "taskList" | "taskDetail" | "createTask" | "updateTask" | "addComment" | "search" | "profileUpdate" | "signIn";
 export type OperationClass = "read" | "write" | "authSearch";
@@ -92,10 +93,12 @@ export function parseConfig(value: unknown): BenchmarkConfig {
   };
   const seed = finite(raw.seed, "seed");
   if (!Number.isInteger(seed) || seed < 0 || seed > 0xffff_ffff) throw new Error("Seed must be an unsigned 32-bit integer");
+  const timeoutMs = positive(raw.timeoutMs, "timeoutMs");
+  if (!Number.isSafeInteger(timeoutMs) || timeoutMs > MAX_SESSION_REQUEST_TIMEOUT_MS) throw new Error("Invalid timeoutMs");
   return {
     name: string(raw.name, "name"), publishable: boolean(raw.publishable, "publishable"), dataset, seed,
     warmupSeconds: positive(raw.warmupSeconds, "warmupSeconds"), stageSeconds: positive(raw.stageSeconds, "stageSeconds"), concurrency,
-    maxConcurrency, timeoutMs: positive(raw.timeoutMs, "timeoutMs"), thinkTimeMs: { min, max }, weights, slos,
+    maxConcurrency, timeoutMs, thinkTimeMs: { min, max }, weights, slos,
   };
 }
 

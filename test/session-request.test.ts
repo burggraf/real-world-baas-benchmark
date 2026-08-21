@@ -129,6 +129,29 @@ test("TrailBase post-auth setup failure logs out after parent cancellation", asy
   assert.equal(logoutSignal?.aborted, false);
 });
 
+test("TrailBase measured close reports SDK-swallowed transport failures", async () => {
+  const originalFetch = globalThis.fetch;
+  const originalDebug = console.debug;
+  const subject = "B".repeat(22) + "==";
+  const payload = Buffer.from(JSON.stringify({ sub: subject, exp: Math.floor(Date.now() / 1000) + 3600 })).toString("base64url");
+  const authToken = `e30.${payload}.signature`;
+  let requestCount = 0;
+  console.debug = () => {};
+  globalThis.fetch = (async () => {
+    requestCount++;
+    if (requestCount === 1) return new Response(JSON.stringify({ auth_token: authToken, refresh_token: "refresh", csrf_token: null }), { status: 200, headers: { "content-type": "application/json" } });
+    if (requestCount === 2) return new Response(JSON.stringify({ records: [{ id: 1, publicId: "usrsmall0000001", authId: subject }], total_count: 1 }), { status: 200, headers: { "content-type": "application/json" } });
+    throw Object.assign(new Error("logout timed out"), { name: "TimeoutError" });
+  }) as typeof fetch;
+  try {
+    const session = await createTrailBaseSession({ email: "user@example.test", password: "not-recorded" }, { timeoutMs: 1000 });
+    await assert.rejects(session.close(), error => (error as { classification?: string }).classification === "timeout");
+  } finally {
+    globalThis.fetch = originalFetch;
+    console.debug = originalDebug;
+  }
+});
+
 test("request timeout validation rejects invalid values", () => {
   assert.equal(validateSessionRequestTimeout(10), 10);
   for (const value of [0, -1, 0.5, 2_147_483_648, Number.NaN, Number.POSITIVE_INFINITY]) assert.throws(() => validateSessionRequestTimeout(value), /positive safe integer/);
