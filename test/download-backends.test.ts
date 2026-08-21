@@ -234,19 +234,56 @@ test("existing identical, mismatch, symlink, and nonregular destinations are rea
 });
 
 
-test("main removes retained staging when a later backend download fails", async () => {
-  const first = await mkdtemp(join(tmpdir(), "backend-retained-first-"));
+test("main removes real retained staging when a later backend download fails", async () => {
+  const root = await temporaryRepository("backend-main-staging-");
+  const archiveBytes = Buffer.from("archive fixture");
+  const executableBytes = Buffer.from("verified executable");
+  const release = {
+    backend: "fixture",
+    version: "1",
+    target: "linux-x64",
+    asset: "fixture.zip",
+    archiveSha256: sha256(archiveBytes),
+    executableSha256: sha256(executableBytes),
+    binary: "fixture",
+    destination: ".tools/fixture-1/fixture",
+    url: "https://github.com/example/example/releases/download/v1/fixture.zip",
+  };
+  let calls = 0;
+  let retainedStaging: string | undefined;
   try {
-    let calls = 0;
-    const code = await main([], { downloadBackend: async (backend: string) => {
+    const code = await main([], { downloadBackend: async (_backend: string, context: { signal: AbortSignal; activeTemps: Set<string> }) => {
       calls++;
-      if (calls === 1) return { backend, target: "linux-x64", destination: "/tmp/missing", status: "missing", executableSha256: "0".repeat(64), retainedStaging: first, instructions: {} };
-      throw new Error("later backend failed");
+      if (calls > 1) throw new Error("later backend failed");
+      const result = await downloadBackend("fixture", {
+        ...context,
+        repoRoot: root,
+        release,
+        download: async (_selected: unknown, archive: string) => {
+          await writeFile(archive, archiveBytes, { mode: 0o600 });
+          return { sha256: sha256(archiveBytes), size: archiveBytes.length };
+        },
+        runner: {
+          listArchive: async () => "fixture\n",
+          extractEntry: async (_archive: string, _entry: string, destination: string) => {
+            await writeFile(destination, executableBytes, { mode: 0o600 });
+            return { sha256: sha256(executableBytes), size: executableBytes.length };
+          },
+        },
+      });
+      retainedStaging = result.retainedStaging;
+      return result;
     }});
     assert.equal(code, 1);
     assert.equal(calls, 2);
-    await assert.rejects(lstat(first), { code: "ENOENT" });
-  } finally { await rm(first, { recursive: true, force: true }); }
+    assert.ok(retainedStaging);
+    await assert.rejects(lstat(retainedStaging), { code: "ENOENT" });
+    await assert.rejects(lstat(join(root, ".tools")), { code: "ENOENT" });
+    await assert.rejects(lstat(join(root, release.destination)), { code: "ENOENT" });
+  } finally {
+    await rm(root, { recursive: true, force: true });
+    if (retainedStaging) await rm(retainedStaging, { recursive: true, force: true });
+  }
 });
 
 test("invalid unzip extraction removes its partial destination", async t => {
