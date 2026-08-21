@@ -206,10 +206,19 @@ const openDirectoryChain = async (repoRoot, directory) => {
   if (!inside(root, target)) throw new Error("Tool destination must remain inside the repository");
   const flags = fsConstants.O_RDONLY | fsConstants.O_DIRECTORY | fsConstants.O_NOFOLLOW;
   if (process.platform === "darwin") {
-    const [canonicalRoot, canonical] = await Promise.all([realpath(root), realpath(target)]);
-    if (relative(canonicalRoot, canonical) !== relative(root, target)) throw new Error("Tool destination parents must remain non-symlink directories");
+    // Open before resolving names: validating a path and opening it afterward permits a parent swap.
     const handle = await open(target, flags);
-    return { handle, path: target, close: async () => handle.close() };
+    try {
+      const [canonicalRoot, canonical, named] = await Promise.all([realpath(root), realpath(target), lstat(target)]);
+      const opened = await handle.stat();
+      if (relative(canonicalRoot, canonical) !== relative(root, target) || named.isSymbolicLink() || !named.isDirectory() || opened.dev !== named.dev || opened.ino !== named.ino) {
+        throw new Error("Tool destination parents must remain non-symlink directories");
+      }
+      return { handle, path: target, close: async () => handle.close() };
+    } catch (error) {
+      await handle.close().catch(() => undefined);
+      throw error;
+    }
   }
   const handles = [];
   try {
