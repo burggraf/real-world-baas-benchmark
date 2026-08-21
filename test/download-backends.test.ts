@@ -6,7 +6,7 @@ import { spawnSync } from "node:child_process";
 import test from "node:test";
 import { pathToFileURL } from "node:url";
 // Resolve the plain-Node downloader from both source tests and compiled dist tests.
-const { downloadArchive, downloadBackend, ensureSafeToolsParent, extractEntry, installNoClobber, listArchive, noClobberDecision, parseArchiveEntries, parseChecksumManifest, selectRelease, selectTarget, sha256, verifySha256 } = await import(pathToFileURL(resolve("scripts/download-backends.mjs")).href);
+const { downloadArchive, downloadBackend, ensureSafeToolsParent, extractEntry, installNoClobber, listArchive, noClobberDecision, parseArchiveEntries, parseChecksumManifest, selectRelease, selectTarget, sha256, validateDownloadUrl, verifySha256 } = await import(pathToFileURL(resolve("scripts/download-backends.mjs")).href);
 
 const pocketAsset = "pocketbase_0.39.11_linux_amd64.zip";
 const pocketDigest = "08b9fcda0d5fd42cb315dc15a36dfa121c993855bd635f01d347c31b4328ec34";
@@ -113,7 +113,30 @@ test("archive listing rejects traversal and ambiguous root binaries", () => {
   assert.throws(() => parseArchiveEntries("docs/trail\n", "trail"), /exactly one/i);
 });
 
-test("download fetch follows only bounded HTTPS GitHub asset redirects", async () => {
+test("GitHub release URL policy keeps the pinned URL exact and allows only signed asset hosts", () => {
+  const release = selectRelease("pocketbase", "linux-x64");
+  const accepted = [
+    release.url,
+    `https://release-assets.githubusercontent.com/github-production-release-asset-2e65be/owner/repo/${release.asset}?X-Amz-Signature=abc&X-Amz-Expires=60`,
+    `https://objects.githubusercontent.com/github-production-release-asset/${release.asset}?download=1`,
+  ];
+  for (const url of accepted) assert.equal(validateDownloadUrl(url, release), url);
+  const rejected = [
+    `${release.url}?download=1`,
+    `https://github.com/other-owner/repo/releases/download/v0.39.11/${release.asset}`,
+    `//evil.example/${release.asset}`,
+    `https://github.com.evil.example/${release.asset}`,
+    `https://release-assets.githubusercontent.com/`,
+    `https://release-assets.githubusercontent.com/${release.asset}#fragment`,
+    `http://release-assets.githubusercontent.com/${release.asset}`,
+    `https://localhost/${release.asset}`,
+    `https://127.0.0.1/${release.asset}`,
+    `https://user:pass@release-assets.githubusercontent.com/${release.asset}`,
+  ];
+  for (const url of rejected) assert.throws(() => validateDownloadUrl(url, release), /unapproved URL/i);
+});
+
+test("download fetch follows opaque signed GitHub release redirects manually", async () => {
   const root = await temporaryRepository("backend-redirect-");
   const release = selectRelease("pocketbase", "linux-x64");
   const destination = join(root, "archive.zip");
@@ -122,7 +145,7 @@ test("download fetch follows only bounded HTTPS GitHub asset redirects", async (
     await assert.rejects(downloadArchive(release, destination, {
       fetchImpl: async (url: string) => {
         calls.push(url);
-        return new Response(null, { status: 302, headers: { location: `http://evil.example/${release.asset}` } });
+        return new Response(null, { status: 302, headers: { location: "https://evil.example/redirect" } });
       },
     }), /unapproved URL/i);
     assert.deepEqual(calls, [release.url]);
@@ -130,15 +153,18 @@ test("download fetch follows only bounded HTTPS GitHub asset redirects", async (
 
     calls.length = 0;
     const bytes = Buffer.from("fixture archive");
+    const opaque = `https://release-assets.githubusercontent.com/github-production-release-asset-2e65be/owner/repo/${release.asset}?X-Amz-Signature=signed&X-Amz-Expires=60`;
     const result = await downloadArchive(release, destination, {
       fetchImpl: async (url: string) => {
         calls.push(url);
-        if (calls.length === 1) return new Response(null, { status: 302, headers: { location: `https://release-assets.githubusercontent.com/path/${release.asset}` } });
-        return new Response(bytes, { status: 200 });
+        if (calls.length === 1) return new Response(null, { status: 302, headers: { location: opaque } });
+        const response = new Response(bytes, { status: 200, headers: { "content-length": String(bytes.length) } });
+        Object.defineProperty(response, "url", { value: opaque });
+        return response;
       },
     });
     assert.equal(result.sha256, sha256(bytes));
-    assert.deepEqual(calls, [release.url, `https://release-assets.githubusercontent.com/path/${release.asset}`]);
+    assert.deepEqual(calls, [release.url, opaque]);
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 

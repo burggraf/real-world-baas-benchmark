@@ -23,7 +23,6 @@ const COMMAND_TIMEOUT_MS = 60_000;
 const DOWNLOAD_TIMEOUT_MS = 120_000;
 const SHA256 = /^[0-9a-f]{64}$/;
 const TARGETS = new Set(["darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64"]);
-const GITHUB_DOWNLOAD_HOSTS = new Set(["github.com", "objects.githubusercontent.com", "release-assets.githubusercontent.com"]);
 const MAX_REDIRECTS = 5;
 
 const releases = Object.freeze({
@@ -253,10 +252,16 @@ function operationSignal(signal, timeoutMs) {
   return signal ? AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)]) : AbortSignal.timeout(timeoutMs);
 }
 
-function validateDownloadUrl(url, release) {
-  const parsed = new URL(url);
-  if (parsed.protocol !== "https:" || !GITHUB_DOWNLOAD_HOSTS.has(parsed.hostname) || basename(parsed.pathname) !== release.asset) throw new Error("Backend download redirected to an unapproved URL");
-  return parsed.href;
+export function validateDownloadUrl(url, release) {
+  let parsed;
+  try { parsed = new URL(url); } catch { throw new Error("Backend download redirected to an unapproved URL"); }
+  if (parsed.protocol !== "https:" || parsed.username || parsed.password || parsed.hash) throw new Error("Backend download redirected to an unapproved URL");
+  if (parsed.hostname === "github.com") {
+    if (parsed.href !== release.url) throw new Error("Backend download redirected to an unapproved URL");
+    return parsed.href;
+  }
+  if ((parsed.hostname === "release-assets.githubusercontent.com" || parsed.hostname === "objects.githubusercontent.com") && parsed.pathname.length > 1) return parsed.href;
+  throw new Error("Backend download redirected to an unapproved URL");
 }
 
 export async function downloadArchive(release, destination, options = {}) {
