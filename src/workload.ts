@@ -145,6 +145,7 @@ export async function runWorkload(backend: Backend, config: BenchmarkConfig, opt
       emit(options.onSample, { type: "sdk", name: "createSession", workflow, kind: "read", operationClass: "authSearch", elapsedMs: Math.max(0, now() - started), success: false, error: asError(error) }, measuring && measured);
       throw error;
     }
+    active.add(session);
     if (cleanupStarted) {
       await closeSession(session, false, false);
       throw abortError();
