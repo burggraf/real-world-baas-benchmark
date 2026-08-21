@@ -66,23 +66,28 @@ export async function runWorkload(backend: Backend, config: BenchmarkConfig, opt
   const graceMs = options.graceMs ?? Math.max(0, config.timeoutMs);
   if (!Number.isFinite(durationMs) || durationMs < 0 || !Number.isFinite(graceMs) || graceMs < 0) throw new RangeError("invalid workload duration or grace");
   const controller = new AbortController();
-  const stopFromParent = () => controller.abort();
-  if (options.signal?.aborted) controller.abort();
-  else options.signal?.addEventListener("abort", stopFromParent, { once: true });
   const summary: WorkloadSummary = { requestedUsers: options.users.length, startedUsers: 0, completedWorkflowCount: 0, failedWorkflowCount: 0, graceExpired: false, stageFailed: false, closeErrors: 0, preparationFailed: false, preparationFailureCount: 0 };
   const active = new Set<AppSession>();
+  const abortWorkload = (): void => {
+    if (controller.signal.aborted) return;
+    controller.abort();
+    for (const session of active) session.cancelPending();
+  };
+  const stopFromParent = () => abortWorkload();
+  if (options.signal?.aborted) abortWorkload();
+  else options.signal?.addEventListener("abort", stopFromParent, { once: true });
   const closed = new WeakSet<AppSession>();
   let cleanupStarted = false;
   let measuring = false;
 
-  const call = async <T>(workflow: JourneyName, operation: string, operationClass: WorkloadSample["operationClass"], kind: WorkloadSample["kind"], action: () => Promise<T>): Promise<T> => {
+  const call = async <T>(workflow: JourneyName, operation: string, operationClass: WorkloadSample["operationClass"], kind: WorkloadSample["kind"], action: () => Promise<T>, emitEnabled = measuring): Promise<T> => {
     const started = now();
     try {
       const result = await action();
-      emit(options.onSample, { type: "sdk", name: operation, workflow, kind, operationClass, elapsedMs: Math.max(0, now() - started), success: true }, measuring);
+      emit(options.onSample, { type: "sdk", name: operation, workflow, kind, operationClass, elapsedMs: Math.max(0, now() - started), success: true }, emitEnabled);
       return result;
     } catch (error) {
-      emit(options.onSample, { type: "sdk", name: operation, workflow, kind, operationClass, elapsedMs: Math.max(0, now() - started), success: false, error: asError(error) }, measuring);
+      emit(options.onSample, { type: "sdk", name: operation, workflow, kind, operationClass, elapsedMs: Math.max(0, now() - started), success: false, error: asError(error) }, emitEnabled);
       throw error;
     }
   };
@@ -90,33 +95,28 @@ export async function runWorkload(backend: Backend, config: BenchmarkConfig, opt
   const closeSession = async (session: AppSession, throwError = false, measured = false): Promise<void> => {
     if (closed.has(session)) return;
     try {
-      const wasMeasuring = measuring;
-      if (!measured) measuring = false;
-      await call("signOutIn", "close", "authSearch", "read", () => session.close());
-      measuring = wasMeasuring;
+      await call("signOutIn", "close", "authSearch", "read", () => session.close(), measured);
       closed.add(session);
     } catch (error) {
-      measuring = false;
       summary.closeErrors++;
       summary.stageFailed = true;
       if (throwError) throw error;
     }
   };
   const closeAll = async (): Promise<void> => {
-    for (const session of [...active]) {
-      await closeSession(session);
-      if (closed.has(session)) active.delete(session);
-    }
-    for (const session of [...active]) {
-      await closeSession(session);
-      if (closed.has(session)) active.delete(session);
+    for (let attempt = 0; attempt < 2 && active.size; attempt++) {
+      const batch = [...active];
+      for (let offset = 0; offset < batch.length; offset += SESSION_PREPARATION_CONCURRENCY) {
+        await Promise.allSettled(batch.slice(offset, offset + SESSION_PREPARATION_CONCURRENCY).map(session => closeSession(session)));
+      }
+      for (const session of batch) if (closed.has(session)) active.delete(session);
     }
   };
   const create = async (spec: VirtualUserSpec, workflow: JourneyName = "signOutIn", measured = false): Promise<AppSession> => {
     const started = now();
     let session: AppSession;
     try {
-      session = await backend.createSession(spec.credentials);
+      session = await backend.createSession(spec.credentials, { signal: controller.signal, timeoutMs: config.timeoutMs });
     } catch (error) {
       emit(options.onSample, { type: "sdk", name: "createSession", workflow, kind: "read", operationClass: "authSearch", elapsedMs: Math.max(0, now() - started), success: false, error: asError(error) }, measuring && measured);
       throw error;
@@ -196,7 +196,7 @@ export async function runWorkload(backend: Backend, config: BenchmarkConfig, opt
       } catch (error) {
         summary.failedWorkflowCount++;
         summary.stageFailed = true;
-        if (options.stopOnError) { controller.abort(); break; }
+        if (options.stopOnError) { abortWorkload(); break; }
         if (isAbort(error) || controller.signal.aborted) break;
       }
       if (controller.signal.aborted || now() >= deadline) break;
@@ -230,10 +230,10 @@ export async function runWorkload(backend: Backend, config: BenchmarkConfig, opt
     allWorkers = Promise.all(workers).then(() => undefined);
     const workersDone = allWorkers;
     const stopperController = new AbortController();
-    const stopper = (async () => { await Promise.resolve(); await sleep(durationMs, stopperController.signal); controller.abort(); })().catch(() => {});
+    const stopper = (async () => { await Promise.resolve(); await sleep(durationMs, stopperController.signal); abortWorkload(); })().catch(() => {});
     await Promise.race([workersDone, stopper]);
     stopperController.abort();
-    if (!controller.signal.aborted) controller.abort();
+    if (!controller.signal.aborted) abortWorkload();
     let settled = false;
     const graceController = new AbortController();
     await Promise.race([workersDone.then(() => { settled = true; }), sleep(graceMs, graceController.signal).catch(() => {})]);
@@ -246,7 +246,7 @@ export async function runWorkload(backend: Backend, config: BenchmarkConfig, opt
   } catch (error) {
     summary.stageFailed = true;
     if (!isAbort(error)) summary.failedWorkflowCount++;
-    controller.abort();
+    abortWorkload();
     measuring = false;
     // Do not close sessions while a worker can still issue backend operations.
     if (allWorkers) await allWorkers;

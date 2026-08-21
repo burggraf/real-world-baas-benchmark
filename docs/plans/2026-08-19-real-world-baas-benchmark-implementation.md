@@ -625,7 +625,7 @@ Use deterministic per-user random streams derived from run seed and virtual-user
 
 **Step 5: Implement virtual-user scheduling**
 
-Prepare ordinary-user sessions in deterministic input order in fixed batches of ten, with no retries and no measured samples. Use `AbortController`, `performance.now()`, and promise loops. Inject `now` and `sleep` into tests. Start the fixed-duration timer and resource collection only after every requested session is prepared; stop launching work at stage end, allow a bounded grace period for in-flight work, then end measurement before unmeasured final session cleanup. Keep sign-out/sign-in journey authentication measured.
+Prepare ordinary-user sessions in deterministic input order in fixed batches of ten, with no retries and no measured samples. Use `AbortController`, `performance.now()`, and promise loops. Inject `now` and `sleep` into tests. Every measured SDK request receives the configured `timeoutMs` through the official SDK fetch transport; cancellation starts at the stage deadline, workers are awaited after cancellation, and cleanup follows only after settlement. An SDK that ignores the transport signal invalidates/stops rather than being silently accepted. Start the fixed-duration timer and resource collection only after every requested session is prepared; stop launching work at stage end, allow a bounded grace period backed by request cancellation/timeouts, then end measurement before unmeasured final session cleanup. Keep sign-out/sign-in journey authentication measured.
 
 **Step 6: Verify**
 

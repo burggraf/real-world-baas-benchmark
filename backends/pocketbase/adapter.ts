@@ -1,6 +1,7 @@
 import { randomBytes } from "node:crypto";
 import PocketBase, { BaseAuthStore, ClientResponseError, type RecordModel } from "pocketbase";
-import type { Backend, AppSession, BackendInfo } from "../../src/backend.js";
+import type { Backend, AppSession, BackendInfo, SessionRequestOptions } from "../../src/backend.js";
+import { createSessionRequestController, type SessionRequestController } from "../../src/session-request.js";
 
 import type {
   Activity,
@@ -242,7 +243,7 @@ const newRecordId = (): string => randomBytes(8).toString("hex").slice(0, 15);
 class PocketBaseSession implements AppSession {
   private closed = false;
 
-  constructor(private readonly pb: PocketBase) {}
+  constructor(private readonly pb: PocketBase, private readonly request: SessionRequestController) {}
 
   private authRecord(): RecordModel {
     if (this.closed || !this.pb.authStore.isValid || !this.pb.authStore.record) {
@@ -526,10 +527,14 @@ class PocketBaseSession implements AppSession {
     this.pb.authStore.clear();
   }
 
+  cancelPending(): void {
+    this.request.cancelPending();
+    this.pb.cancelAllRequests();
+  }
+
   async close(): Promise<void> {
     if (this.closed) return;
     this.closed = true;
-    this.pb.cancelAllRequests();
     this.pb.authStore.clear();
   }
 }
@@ -717,8 +722,15 @@ export async function seedPocketBaseCorrectnessFixture(): Promise<PocketBaseCorr
   }
 }
 
-async function createSession(credentials: Credentials): Promise<AppSession> {
-  const pb = new PocketBase(pocketBaseProcess.options.endpoint, new BaseAuthStore());
+export function createPocketBaseMeasuredClient(endpoint: string, options: SessionRequestOptions = {}): { client: PocketBase; request: SessionRequestController } {
+  const request = createSessionRequestController(options);
+  const client = new PocketBase(endpoint, new BaseAuthStore());
+  client.beforeSend = (url, sendOptions) => ({ url, options: { ...sendOptions, signal: request.signal(sendOptions.signal) } });
+  return { client, request };
+}
+
+async function createSession(credentials: Credentials, options: SessionRequestOptions = {}): Promise<AppSession> {
+  const { client: pb, request } = createPocketBaseMeasuredClient(pocketBaseProcess.options.endpoint, options);
   try {
     await pb.collection("users").authWithPassword(credentials.email, credentials.password);
   } catch (error) {
@@ -727,7 +739,8 @@ async function createSession(credentials: Credentials): Promise<AppSession> {
     }
     throw normalizePocketBaseError(error);
   }
-  return new PocketBaseSession(pb);
+  request.detachParent();
+  return new PocketBaseSession(pb, request);
 }
 
 export const backend: Backend = {

@@ -364,6 +364,25 @@ test("null task creator emits invalid-response SDK and workflow failures", async
   assert.ok(samples.some(sample => sample.type === "workflow" && sample.workflow === "taskDetail" && !sample.success && sample.error?.message.includes("creator")));
 });
 
+test("measured close failure emits close and workflow failures without suppressing another user", async () => {
+  const backend = createFakeBackend();
+  const baseCreate = backend.createSession;
+  let closeCalls = 0;
+  backend.createSession = async credentials => {
+    const session = await baseCreate(credentials);
+    const close = session.close;
+    session.close = async () => { closeCalls++; if (closeCalls === 1) throw new Error("measured close failed"); await close(); };
+    return session;
+  };
+  const weights = { ...config.weights, dashboard: 0, taskList: 0, taskDetail: 0, createTask: 0, updateTask: 0, addComment: 0, search: 0, profileUpdate: 0, signIn: 100 };
+  const samples: any[] = [];
+  const summary = await runWorkload(backend, { ...config, weights }, { users: [user(backend), { ...user(backend), credentials: backend.fixture.member }], durationMs: 20, graceMs: 0, sleep: async milliseconds => { if (milliseconds === 20) await new Promise<void>(() => {}); }, onSample: sample => samples.push(sample) });
+  assert.equal(summary.stageFailed, true);
+  assert.ok(samples.some(sample => sample.type === "sdk" && sample.name === "close" && !sample.success));
+  assert.ok(samples.some(sample => sample.type === "workflow" && sample.workflow === "signOutIn" && !sample.success));
+  assert.ok(samples.some(sample => sample.type === "workflow" && sample.workflow === "signOutIn" && sample.success));
+});
+
 test("close failures are retried during final cleanup", async () => {
   const backend = createFakeBackend();
   const baseCreate = backend.createSession;

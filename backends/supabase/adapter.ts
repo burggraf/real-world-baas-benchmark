@@ -1,6 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
-import type { Backend, AppSession, BackendInfo } from "../../src/backend.js";
+import type { Backend, AppSession, BackendInfo, SessionRequestOptions } from "../../src/backend.js";
+import { createSessionRequestController, type SessionRequestController } from "../../src/session-request.js";
 
 import type {
   Activity, AddCommentInput, Comment, CreateTaskInput, Credentials, Dashboard, DashboardInput, DatasetProfile,
@@ -99,7 +100,7 @@ export function normalizeSupabaseError(error: unknown, responseStatus?: number):
   const classification =
     status === 401 || (status === 400 && /credential|auth/i.test(code)) || /^Auth.*Error$/.test(name) ? "authentication" :
     status === 403 || status === 404 || status === 406 || code === "42501" || code === "PGRST116" ? "authorization" :
-    status === 408 || code === "timeout" || name === "AbortError" ? "timeout" :
+    status === 408 || code === "timeout" || name === "AbortError" || name === "TimeoutError" ? "timeout":
     code.startsWith("23") ? "application" : "transport/sdk";
   return new BenchmarkOperationError(classification, { code, status });
 }
@@ -145,13 +146,13 @@ export function pageRange(page: number, pageSize: number): [number, number] {
   return [start, end];
 }
 export function escapeLikePattern(value: string): string { return value.replace(/[\\%_]/g, "\\$&"); }
-export function createSupabaseClient(url: string, key: string, projectId = SUPABASE_PROJECT_ID, suffix = "user"): SupabaseClient {
-  return createClient(url, key, { auth: { autoRefreshToken: false, persistSession: false, detectSessionInUrl: false, storageKey: `local-${projectId}-${suffix}-auth` } });
+export function createSupabaseClient(url: string, key: string, projectId = SUPABASE_PROJECT_ID, suffix = "user", request?: SessionRequestController): SupabaseClient {
+  return createClient(url, key, { auth: { autoRefreshToken: false, persistSession: false, detectSessionInUrl: false, storageKey: `local-${projectId}-${suffix}-auth` }, ...(request ? { global: { fetch: request.fetch.bind(request) } } : {}) });
 }
 const newId = (): string => randomBytes(8).toString("hex").slice(0, 15);
 
 class SupabaseSession implements AppSession {
-  constructor(private readonly client: SupabaseClient, private profileRow: Row) {}
+  constructor(private readonly client: SupabaseClient, private profileRow: Row, private readonly request: SessionRequestController) {}
 
   private async requireProject(organizationId: string, projectId: string): Promise<void> {
     const response = await sdk(() => this.client.from("projects").select("id").eq("id", projectId).eq("organization_id", organizationId).maybeSingle());
@@ -273,6 +274,7 @@ class SupabaseSession implements AppSession {
   }
   async refreshSession(): Promise<void> { checkedSupabaseResponse(await sdk(() => this.client.auth.refreshSession())); }
   async signOut(): Promise<void> { checkedSupabaseResponse(await sdk(() => this.client.auth.signOut())); }
+  cancelPending(): void { this.request.cancelPending(); }
   async close(): Promise<void> { await this.signOut().catch(() => undefined); }
 }
 
@@ -417,14 +419,16 @@ export async function seedSupabaseCorrectnessFixture(): Promise<SupabaseCorrectn
 }
 
 let measuredConfiguration: { url: string; publicKey: string } | undefined;
-async function createSession(credentials: Credentials): Promise<AppSession> {
+async function createSession(credentials: Credentials, options: SessionRequestOptions = {}): Promise<AppSession> {
   if (!measuredConfiguration) throw new BenchmarkOperationError("backend_health", { code: "supabase_not_started" });
-  const client = createSupabaseClient(measuredConfiguration.url, measuredConfiguration.publicKey, SUPABASE_PROJECT_ID, newId());
+  const request = createSessionRequestController(options);
+  const client = createSupabaseClient(measuredConfiguration.url, measuredConfiguration.publicKey, SUPABASE_PROJECT_ID, newId(), request);
   const auth = await sdk(() => client.auth.signInWithPassword(credentials));
   const user = requiredAuthPayload(auth, "auth_signin_response").user;
   if (!user) throw new BenchmarkOperationError("authentication", { code: "invalid_credentials" });
   const profile = await sdk(() => client.from("profiles").select(FIELDS.profile).eq("auth_id", user.id).maybeSingle());
-  return new SupabaseSession(client, row(required(profile, "profile_missing")));
+  request.detachParent();
+  return new SupabaseSession(client, row(required(profile, "profile_missing")), request);
 }
 
 export const backend: Backend = {

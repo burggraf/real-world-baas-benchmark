@@ -144,6 +144,7 @@ export async function runBenchmark(options: RunOptions): Promise<{ result: Bench
       saturationMaxThroughputGain: SATURATION_MAX_TPS_GAIN,
       maxLatencySamples: MAX_LATENCY_SAMPLES,
       maxErrorExamples: MAX_ERROR_EXAMPLES,
+      measuredRequestTimeoutMs: options.config.timeoutMs,
       sessionPreparationConcurrency: SESSION_PREPARATION_CONCURRENCY,
       boundarySessionsUnmeasured: true,
     },
@@ -218,7 +219,7 @@ export async function runBenchmark(options: RunOptions): Promise<{ result: Bench
       };
       let summary: WorkloadSummary;
       try {
-        summary = await workloadFn(backend, options.config, { users: users.slice(0, requestedUsers), durationMs: stageDurationMs, graceMs: options.config.timeoutMs, onSample: sample => acc.record(sample), onMeasuredStart: measuredStart, onMeasuredEnd: measuredEnd });
+        summary = await workloadFn(backend, options.config, { users: users.slice(0, requestedUsers), durationMs: stageDurationMs, graceMs: options.config.timeoutMs, signal: controller.signal, onSample: sample => acc.record(sample), onMeasuredStart: measuredStart, onMeasuredEnd: measuredEnd });
       } finally {
         if (stageStart !== undefined) await measuredEnd();
       }

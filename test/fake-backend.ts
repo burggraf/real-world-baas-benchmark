@@ -1,4 +1,4 @@
-import type { Backend, AppSession, BackendInfo } from "../src/backend.js";
+import type { Backend, AppSession, BackendInfo, SessionRequestOptions } from "../src/backend.js";
 import type { Comment, Credentials, DatasetProfile, Membership, Organization, Page, Project, Task, TaskDetail, User } from "../src/domain.js";
 import { BenchmarkOperationError } from "../src/correctness.js";
 
@@ -287,6 +287,7 @@ export function createFakeBackend(options: FakeOptions = {}): FakeBackend {
         check();
         active = false;
       },
+      cancelPending: () => {},
       close: async () => {
         if (active) active = false;
         closedSessions++;
@@ -301,7 +302,7 @@ export function createFakeBackend(options: FakeOptions = {}): FakeBackend {
     start: async () => { health = true; },
     reset: async () => {},
     seed: async (_profile: DatasetProfile, _seed: number) => {},
-    createSession: async (credentials: Credentials) => createSession(credentials),
+    createSession: async (credentials: Credentials, _options?: SessionRequestOptions) => createSession(credentials),
     stop: async () => { health = false; },
     fixture,
     sessions,

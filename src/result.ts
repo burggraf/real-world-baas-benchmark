@@ -42,6 +42,8 @@ export interface BenchmarkSettings {
   saturationMaxThroughputGain: number;
   maxLatencySamples: number;
   maxErrorExamples: number;
+  /** New results record the hard timeout applied to each measured SDK request. */
+  measuredRequestTimeoutMs?: number;
   /** New runs record the fixed unmeasured ordinary-user session preparation batch size. */
   sessionPreparationConcurrency?: number;
   /** New runs record that boundary preparation and final cleanup are unmeasured. */

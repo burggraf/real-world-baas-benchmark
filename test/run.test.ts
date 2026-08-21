@@ -164,7 +164,7 @@ test("settings are effective, recorded, and final disk result matches return val
   const output = await run.output; const saved = JSON.parse(await readFile(run.resultPath, "utf8"));
   assert.deepEqual(saved, output.result); assert.equal(output.result.valid, true); assert.equal(output.result.capacity.users, 1);
   assert.deepEqual(output.result.settings.overloadThresholds, { cpuPercent: 80, p99Ms: 100, maxMs: 250, consecutiveSamples: 3 });
-  assert.equal(output.result.settings.maxLatencySamples, 2_000_000); assert.equal(output.result.settings.maxErrorExamples, 100); assert.equal(output.result.settings.sessionPreparationConcurrency, 10); assert.equal(output.result.settings.boundarySessionsUnmeasured, true); assert.equal(resourceOptions.intervalMs, output.result.settings.resourceIntervalMs); assert.equal(resourceOptions.maxSamples, output.result.settings.resourceMaxSamples.value);
+  assert.equal(output.result.settings.maxLatencySamples, 2_000_000); assert.equal(output.result.settings.maxErrorExamples, 100); assert.equal(output.result.settings.measuredRequestTimeoutMs, output.result.config.timeoutMs); assert.equal(output.result.settings.sessionPreparationConcurrency, 10); assert.equal(output.result.settings.boundarySessionsUnmeasured, true); assert.equal(resourceOptions.intervalMs, output.result.settings.resourceIntervalMs); assert.equal(resourceOptions.maxSamples, output.result.settings.resourceMaxSamples.value);
 });
 
 test("session preparation failure is generic and does not fabricate a stage", async () => {

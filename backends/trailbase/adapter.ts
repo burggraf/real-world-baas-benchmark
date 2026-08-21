@@ -1,6 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { DeleteOperation, initClient, type Client, type FilterOrComposite, type ListOpts } from "trailbase";
-import type { Backend, AppSession } from "../../src/backend.js";
+import type { Backend, AppSession, SessionRequestOptions } from "../../src/backend.js";
+import { createSessionRequestController, type SessionRequestController } from "../../src/session-request.js";
 
 import type {
   Activity, AddCommentInput, Comment, CreateTaskInput, Credentials, Dashboard, DashboardInput, DatasetProfile,
@@ -128,7 +129,8 @@ export function normalizeTrailBaseError(error: unknown): BenchmarkOperationError
   const source = error && typeof error === "object" ? error as Row : {};
   const rawStatus = source.status;
   const status = typeof rawStatus === "number" ? rawStatus : typeof rawStatus === "string" && /^\d{3}$/.test(rawStatus) ? Number(rawStatus) : undefined;
-  const classification = status === 401 ? "authentication" : status === 403 || status === 404 ? "authorization" : status === 408 ? "timeout" : "transport/sdk";
+  const name = typeof source.name === "string" ? source.name : "";
+  const classification = status === 401 ? "authentication" : status === 403 || status === 404 ? "authorization" : status === 408 || name === "AbortError" || name === "TimeoutError" ? "timeout" : "transport/sdk";
   return new BenchmarkOperationError(classification, { code: "trailbase_request", status });
 }
 
@@ -188,7 +190,7 @@ const now = (): string => new Date().toISOString();
 
 class TrailBaseSession implements AppSession {
   private closed = false;
-  constructor(private readonly client: Client, private profileRow: Row) {}
+  constructor(private readonly client: Client, private profileRow: Row, private readonly request: SessionRequestController) {}
 
   private authUser(): void {
     if (this.closed || !this.client.user()) throw new BenchmarkOperationError("authentication", { code: "signed_out" });
@@ -356,10 +358,12 @@ class TrailBaseSession implements AppSession {
     await sdk(() => this.client.logout());
   }
 
+  cancelPending(): void { this.request.cancelPending(); }
+
   async close(): Promise<void> {
     if (this.closed) return;
-    this.closed = true;
     if (this.client.user()) await sdk(() => this.client.logout());
+    this.closed = true;
   }
 }
 
@@ -577,17 +581,14 @@ export async function seedTrailBase(profile: DatasetProfile, seed: number): Prom
   }
 }
 
-export const backend: Backend = {
-  name: "trailbase",
-  doctor: () => trailBaseProcess.doctor(),
-  start: () => trailBaseProcess.start(),
-  reset: () => trailBaseProcess.reset(),
-  stop: () => trailBaseProcess.stop(),
-  seed: seedTrailBase,
-  seedCorrectnessFixture: seedTrailBaseCorrectnessFixture,
-  buildVirtualUserSpecs: (profile, count, seedValue) => buildSeedVirtualUserSpecs(profile, count, seedValue, (id) => benchmarkEmail(profile, id), LOCAL_BENCHMARK_PASSWORD),
-  createSession: async (credentials: Credentials): Promise<AppSession> => {
-    const client = initClient(resolveTrailBaseOptions().endpoint);
+export function createTrailBaseMeasuredClient(endpoint: string, request: SessionRequestController): Client {
+  return initClient(endpoint, { transport: { fetch: (path, init) => request.fetch(new URL(path, endpoint), init) } });
+}
+
+export const createTrailBaseSession = async (credentials: Credentials, options: SessionRequestOptions = {}): Promise<AppSession> => {
+    const endpoint = resolveTrailBaseOptions().endpoint;
+    const request = createSessionRequestController(options);
+    const client = createTrailBaseMeasuredClient(endpoint, request);
     await sdk(() => client.login(credentials.email, credentials.password));
     const authId = client.user()?.id;
     if (!authId || !AUTH_ID.test(authId)) {
@@ -597,8 +598,20 @@ export const backend: Backend = {
     let profile: Row;
     try { profile = await oneRow(client, "profiles", [{ column: "authId", op: "equal", value: authId }], "profile_missing"); }
     catch (error) { await client.logout().catch(() => undefined); throw error; }
-    return new TrailBaseSession(client, profile);
-  },
+    request.detachParent();
+    return new TrailBaseSession(client, profile, request);
+  };
+
+export const backend: Backend = {
+  name: "trailbase",
+  doctor: () => trailBaseProcess.doctor(),
+  start: () => trailBaseProcess.start(),
+  reset: () => trailBaseProcess.reset(),
+  stop: () => trailBaseProcess.stop(),
+  seed: seedTrailBase,
+  seedCorrectnessFixture: seedTrailBaseCorrectnessFixture,
+  buildVirtualUserSpecs: (profile, count, seedValue) => buildSeedVirtualUserSpecs(profile, count, seedValue, (id) => benchmarkEmail(profile, id), LOCAL_BENCHMARK_PASSWORD),
+  createSession: createTrailBaseSession,
 };
 
 export { TRAILBASE_VERSION };

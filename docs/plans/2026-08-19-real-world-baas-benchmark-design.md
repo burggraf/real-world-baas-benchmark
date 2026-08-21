@@ -250,7 +250,7 @@ Backends run sequentially. Publishable comparisons repeat each backend at least 
 
 ## 11. Concurrency model
 
-Node runs asynchronous closed-model virtual users. Before measurement, ordinary-user sessions are prepared in deterministic input order in fixed batches of ten with no retries; preparation and final boundary cleanup are unmeasured and any preparation failure invalidates the stage. Each prepared virtual user owns an authenticated session and waits for an action to finish before thinking and starting the next action. Authentication performed by the measured sign-out/sign-in journey remains measured.
+Node runs asynchronous closed-model virtual users. Before measurement, ordinary-user sessions are prepared in deterministic input order in fixed batches of ten with no retries; preparation and final boundary cleanup are unmeasured and any preparation failure invalidates the stage. Each prepared virtual user owns an authenticated session and waits for an action to finish before thinking and starting the next action. Every SDK request uses the configured request timeout through the official fetch transport. At a stage deadline, transport cancellation begins before workers are awaited and cleanup starts only after workers settle; unsupported or ignored abort behavior invalidates/stops the run. Authentication performed by the measured sign-out/sign-in journey remains measured.
 
 Default full stages:
 
