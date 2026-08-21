@@ -9,7 +9,7 @@ import { StageMetricsAccumulator } from "./metrics.js";
 import type { BenchmarkResult, Capacity, Correctness } from "./result.js";
 import { buildSeedVirtualUserSpecs, profileExpectedCounts } from "./seed.js";
 import { captureEnvironment, collectResources, evaluateRunnerOverload, type ResourceCollection } from "./system.js";
-import { runWorkload, type WorkloadSummary } from "./workload.js";
+import { runWorkload, SESSION_PREPARATION_CONCURRENCY, type WorkloadSummary } from "./workload.js";
 export { buildSeedVirtualUserSpecs } from "./seed.js";
 
 export type SetupBackend = Backend;
@@ -144,6 +144,8 @@ export async function runBenchmark(options: RunOptions): Promise<{ result: Bench
       saturationMaxThroughputGain: SATURATION_MAX_TPS_GAIN,
       maxLatencySamples: MAX_LATENCY_SAMPLES,
       maxErrorExamples: MAX_ERROR_EXAMPLES,
+      sessionPreparationConcurrency: SESSION_PREPARATION_CONCURRENCY,
+      boundarySessionsUnmeasured: true,
     },
     correctness: { findings: [], aborted: true, abortReason: "not run" },
     stages: [], resources: [], capacity: emptyCapacity(), failures: [], valid: false, validityReasons: ["run incomplete"],
@@ -197,18 +199,31 @@ export async function runBenchmark(options: RunOptions): Promise<{ result: Bench
       const requestedUsers = stages[stageIndex]!;
       const stageInfo = await backend.doctor().catch(() => { throw new Error("pre-stage backend doctor failed"); });
       const preIdentityFailure = identityChange(baseline, stageInfo);
-      const stageStart = monotonic();
       const acc = new StageMetricsAccumulator({ maxLatencySamples: MAX_LATENCY_SAMPLES, maxErrorExamples: MAX_ERROR_EXAMPLES });
       const controller = new AbortController();
-      const resourcesPromise = resourceFn({ backend: stageInfo, maxSamples: resourceMaxSamples, intervalMs: RESOURCE_INTERVAL_MS, signal: controller.signal, shouldStop: () => controller.signal.aborted }).catch((): ResourceCollection => ({ samples: [], valid: false, validityReasons: ["resource collection failed"] }));
-      let summary: WorkloadSummary;
-      let workloadEnd = stageStart;
-      try {
-        summary = await workloadFn(backend, options.config, { users: users.slice(0, requestedUsers), durationMs: stageDurationMs, graceMs: options.config.timeoutMs, onSample: sample => acc.record(sample) });
-      } finally {
+      let stageStart: number | undefined;
+      let workloadEnd: number | undefined;
+      let resourcesPromise: Promise<ResourceCollection> | undefined;
+      const measuredStart = async (): Promise<void> => {
+        stageStart = monotonic();
+        resourcesPromise = resourceFn({ backend: stageInfo, maxSamples: resourceMaxSamples, intervalMs: RESOURCE_INTERVAL_MS, signal: controller.signal, shouldStop: () => controller.signal.aborted }).catch((): ResourceCollection => ({ samples: [], valid: false, validityReasons: ["resource collection failed"] }));
+      };
+      let measuredEndCalled = false;
+      const measuredEnd = async (): Promise<void> => {
+        if (measuredEndCalled) return;
+        measuredEndCalled = true;
         workloadEnd = monotonic();
         controller.abort();
+        if (resourcesPromise) await resourcesPromise;
+      };
+      let summary: WorkloadSummary;
+      try {
+        summary = await workloadFn(backend, options.config, { users: users.slice(0, requestedUsers), durationMs: stageDurationMs, graceMs: options.config.timeoutMs, onSample: sample => acc.record(sample), onMeasuredStart: measuredStart, onMeasuredEnd: measuredEnd });
+      } finally {
+        if (stageStart !== undefined) await measuredEnd();
       }
+      if (summary.preparationFailed) throw new Error("session preparation failed");
+      if (stageStart === undefined || workloadEnd === undefined || !resourcesPromise) throw new Error("measured stage did not start");
       const resources = await resourcesPromise;
       let postStageFailure: string | undefined;
       try {

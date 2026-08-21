@@ -59,7 +59,7 @@ The configured weights total 100%:
 | profile update | 1% | write |
 | sign out/sign in | 2% | auth/search |
 
-Users repeatedly select a workflow, execute its complete SDK journey, then wait a deterministic random think time from 1,000 through 5,000 ms. Writes are real and mutate the reset dataset. Dashboard/detail/list journeys validate returned shape, pagination, and tenant context. Task/comment writes include each backend's equivalent activity semantics. Search uses the same application intent, not a backend-specific peak query.
+Users repeatedly select a workflow, execute its complete SDK journey, then wait a deterministic random think time from 1,000 through 5,000 ms. Writes are real and mutate the reset dataset. Dashboard/detail/list journeys validate returned shape, pagination, and tenant context. Task/comment writes include each backend's equivalent activity semantics. Search uses the same application intent, not a backend-specific peak query. Before each measured stage, ordinary-user sessions are prepared in input order in fixed batches of ten with no retries; preparation failures invalidate the stage without emitting samples. Boundary session preparation and final cleanup are unmeasured, while the weighted sign-out/sign-in journey remains measured, including its close/create calls.
 
 Before measured stages, the 15-check correctness suite covers valid/invalid sign-in, profile mutation, task/comment CRUD and stable pagination, tenant read/write isolation, role authorization/restoration, refresh/sign-out, and required fixture identity. A correctness failure aborts load measurement.
 
@@ -76,7 +76,7 @@ A `run` performs this order inside one owning process:
 7. Seed the correctness fixture and run all correctness checks.
 8. Recheck backend identity and capture the measured environment.
 9. Run an unscored warm-up at the profile's maximum configured concurrency. Warm-up writes remain in the measured database state but warm-up samples do not contribute to scores.
-10. Run measured concurrency stages in configured order, checking backend identity before and after each stage and collecting resources in parallel.
+10. Run measured concurrency stages in configured order. Each stage prepares ordinary-user sessions in fixed batches of ten, then starts its timer/resource collection only after all requested sessions are ready; boundary preparation and final cleanup are unmeasured. Check backend identity before and after each stage and collect resources in parallel.
 11. Evaluate SLO capacity and, where necessary, add bounded adaptive stages/refinement up to `maxConcurrency`.
 12. Stop only the owned lifecycle and atomically write the raw result. A bounded `.partial.json` is retained on failure.
 
@@ -119,7 +119,7 @@ Saturation requires two adjacent passing stages where requested users increase b
 
 ## Stage and run validity
 
-A stage is invalid if any required integrity condition fails, including backend identity/restart changes, backend doctor failure, workload failure, session-close failure, grace expiry, failure to start all requested users, missing/malformed resource metrics, a resource sample ceiling breach, or runner overload. SLO failures constrain selected capacity but remain useful curve evidence when the stage itself is otherwise valid.
+A stage is invalid if any required integrity condition fails, including backend identity/restart changes, backend doctor failure, session-preparation failure, workload failure, session-close failure, grace expiry, failure to start all requested users, missing/malformed resource metrics, a resource sample ceiling breach, or runner overload. Preparation and final boundary session operations are excluded from measured samples and elapsed time; authentication inside the measured sign-out/sign-in journey is not excluded. SLO failures constrain selected capacity but remain useful curve evidence when the stage itself is otherwise valid.
 
 Runner overload is flagged when any of these is sustained for three consecutive resource snapshots:
 

@@ -42,6 +42,10 @@ export interface BenchmarkSettings {
   saturationMaxThroughputGain: number;
   maxLatencySamples: number;
   maxErrorExamples: number;
+  /** New runs record the fixed unmeasured ordinary-user session preparation batch size. */
+  sessionPreparationConcurrency?: number;
+  /** New runs record that boundary preparation and final cleanup are unmeasured. */
+  boundarySessionsUnmeasured?: true;
 }
 export interface BenchmarkResult {
   schemaVersion: 1; runId: string; startedAt: string; publishable: boolean; backend: BackendInfo; dataset: DatasetProfile["name"]; seed: number;

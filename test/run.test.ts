@@ -25,10 +25,10 @@ test("runBenchmark orders lifecycle and excludes warmup samples", async () => {
     buildVirtualUserSpecs: async () => [{ credentials: { email: "u", password: "p" }, organizationId: "o", projectId: "p", taskId: "t" }],
   };
   let calls = 0;
-  const workload = async (_backend: any, _config: any, opts: any) => { events.push(calls++ === 0 ? "warmup" : "measured"); opts.onSample?.({ type: "workflow", name: "dashboard", workflow: "dashboard", operationClass: "read", kind: "read", elapsedMs: 1, success: true }); return { requestedUsers: 1, startedUsers: 1, completedWorkflowCount: 1, failedWorkflowCount: 0, graceExpired: false, stageFailed: false, closeErrors: 0 }; };
+  const workload = async (_backend: any, _config: any, opts: any) => { events.push(calls++ === 0 ? "warmup" : "measured"); await opts.onMeasuredStart?.(); try { opts.onSample?.({ type: "workflow", name: "dashboard", workflow: "dashboard", operationClass: "read", kind: "read", elapsedMs: 1, success: true }); return { requestedUsers: 1, startedUsers: 1, completedWorkflowCount: 1, failedWorkflowCount: 0, graceExpired: false, stageFailed: false, closeErrors: 0, preparationFailed: false, preparationFailureCount: 0 }; } finally { await opts.onMeasuredEnd?.(); } };
   const resources = async () => { events.push("resources"); return { samples: [], valid: true, validityReasons: [] }; };
   await runBenchmark({ backend: "pocketbase", config, resultPath, dependencies: { loadBackend: async () => backend as any, correctness: async () => { events.push("correctness"); return { findings: [{ name: "ok", passed: true, classification: "application" as const }] }; }, workload: workload as any, resources: resources as any, captureEnvironment: async info => environment(info), now: () => new Date("2026-01-01T00:00:00.000Z"), monotonic: (() => { let n = 0; return () => ++n; })() } });
-  assert.deepEqual(events, ["doctor", "start", "doctor", "reset", "doctor", "seed", "fixture", "correctness", "doctor", "warmup", "doctor", "resources", "measured", "doctor", "stop"]);
+  assert.deepEqual(events, ["doctor", "start", "doctor", "reset", "doctor", "seed", "fixture", "correctness", "doctor", "warmup", "doctor", "measured", "resources", "doctor", "stop"]);
   const saved = JSON.parse(await readFile(resultPath, "utf8")); assert.equal(saved.stages[0].workflowTransactionsPerSecond, 1000); assert.equal(saved.correctness.findings[0].passed, true);
 });
 
@@ -53,7 +53,7 @@ async function fakeRun(options: { config?: ReturnType<typeof measuredConfig>; co
     seedCorrectnessFixture: async () => { options.onFixture?.(); return fixture; },
     buildVirtualUserSpecs: async (_profile: string, count: number) => Array.from({ length: count }, (_, i) => ({ credentials: { email: `u${i}`, password: "p" }, organizationId: "o", projectId: "p", taskId: "t" })),
   };
-  const workload = async (_backend: unknown, _config: unknown, opts: any) => { workloadCalls++; if (options.workload) return options.workload(opts); opts.onSample?.({ type: "workflow", name: "dashboard", workflow: "dashboard", operationClass: "read", kind: "read", elapsedMs: 1, success: true }); return summary(opts.users.length); };
+  const workload = async (_backend: unknown, _config: unknown, opts: any) => { workloadCalls++; await opts.onMeasuredStart?.(); try { if (options.workload) return await options.workload(opts); opts.onSample?.({ type: "workflow", name: "dashboard", workflow: "dashboard", operationClass: "read", kind: "read", elapsedMs: 1, success: true }); return summary(opts.users.length); } finally { await opts.onMeasuredEnd?.(); } };
   const correctness = async () => { events.push("correctness"); fail("correctness"); return { findings: [{ name: options.unsafeCorrectness ? "password=name-secret" : "ok", passed: !options.unsafeCorrectness, classification: "application" as const, message: options.unsafeCorrectness ? "Authorization: Bearer finding-secret" : undefined, evidence: options.unsafeCorrectness ? "api_key=evidence-secret" : undefined }] }; };
   const resources = options.resources ?? (async () => ({ samples: [snapshot()], valid: true, validityReasons: [] }));
   let captures = 0;
@@ -164,7 +164,18 @@ test("settings are effective, recorded, and final disk result matches return val
   const output = await run.output; const saved = JSON.parse(await readFile(run.resultPath, "utf8"));
   assert.deepEqual(saved, output.result); assert.equal(output.result.valid, true); assert.equal(output.result.capacity.users, 1);
   assert.deepEqual(output.result.settings.overloadThresholds, { cpuPercent: 80, p99Ms: 100, maxMs: 250, consecutiveSamples: 3 });
-  assert.equal(output.result.settings.maxLatencySamples, 2_000_000); assert.equal(output.result.settings.maxErrorExamples, 100); assert.equal(resourceOptions.intervalMs, output.result.settings.resourceIntervalMs); assert.equal(resourceOptions.maxSamples, output.result.settings.resourceMaxSamples.value);
+  assert.equal(output.result.settings.maxLatencySamples, 2_000_000); assert.equal(output.result.settings.maxErrorExamples, 100); assert.equal(output.result.settings.sessionPreparationConcurrency, 10); assert.equal(output.result.settings.boundarySessionsUnmeasured, true); assert.equal(resourceOptions.intervalMs, output.result.settings.resourceIntervalMs); assert.equal(resourceOptions.maxSamples, output.result.settings.resourceMaxSamples.value);
+});
+
+test("session preparation failure is generic and does not fabricate a stage", async () => {
+  let workloadCalls = 0;
+  const run = await fakeRun({ workload: async opts => workloadCalls++ === 0 ? summary(opts.users.length) : ({ ...summary(0), startedUsers: 0, preparationFailed: true, preparationFailureCount: 1, stageFailed: true }) });
+  await assert.rejects(run.output, /session preparation failed/);
+  const result = JSON.parse(await readFile(run.resultPath, "utf8"));
+  validateBenchmarkResult(result);
+  assert.equal(result.stages.length, 0);
+  assert.equal(result.resources.length, 0);
+  assert.doesNotMatch(JSON.stringify(result), /password|Bearer|hunter2|secret/i);
 });
 
 test("setup PID changes establish the final pre-warmup measured identity", async () => {

@@ -111,6 +111,8 @@ test("rejects semantically inconsistent benchmark results", async () => {
     ["stage uniqueness", result => { result.stages.push(structuredClone(result.stages[0]!)); }],
     ["stage validity", result => { result.stages[0]!.validityReasons = ["contradiction"]; }],
     ["settings integer", result => { result.settings.minClassSamples = 1.5; }],
+    ["session preparation integer", result => { result.settings.sessionPreparationConcurrency = 0; }],
+    ["boundary session flag", result => { result.settings.boundarySessionsUnmeasured = false as never; }],
     ["byte integer", result => { result.resources[0]!.snapshots![0]!.runner.rssBytes = 1.5; }],
     ["valid prerequisites", result => { result.failures = ["failure"]; }],
     ["selected capacity SLO", result => { Object.assign(result.stages[0]!.operationClassMetrics.read, { failed: 5, completed: 95, errorRate: 0.05 }); }],

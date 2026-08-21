@@ -55,6 +55,56 @@ test("workload can run a finite stage and cleans up sessions", async () => {
   assert.ok(samples.every(sample => sample.elapsedMs >= 0 && typeof sample.success === "boolean"));
 });
 
+test("prepares sessions in ordered batches of ten and measures only after preparation", async () => {
+  const backend = createFakeBackend();
+  const baseCreate = backend.createSession;
+  const users = Array.from({ length: 21 }, (_, index) => ({ ...user(backend), credentials: { ...backend.fixture.owner, email: `user-${index}@bench.test` } }));
+  const calls: string[] = [];
+  let inFlight = 0;
+  let maxInFlight = 0;
+  backend.createSession = async credentials => {
+    calls.push(credentials.email);
+    inFlight++;
+    maxInFlight = Math.max(maxInFlight, inFlight);
+    await new Promise<void>(resolve => queueMicrotask(resolve));
+    inFlight--;
+    return baseCreate(backend.fixture.owner);
+  };
+  let starts = 0;
+  let ends = 0;
+  const summary = await runWorkload(backend, config, { users, durationMs: 0, graceMs: 0, onMeasuredStart: () => { starts++; assert.equal(calls.length, 21); }, onMeasuredEnd: () => { ends++; } });
+  assert.equal(maxInFlight, 10);
+  assert.deepEqual(calls, users.map(item => item.credentials.email));
+  assert.equal(starts, 1);
+  assert.equal(ends, 1);
+  assert.equal(summary.startedUsers, 21);
+  assert.equal(backend.closedSessions, 21);
+});
+
+test("preparation failure stops later batches, closes successes, and emits no secret samples", async () => {
+  const backend = createFakeBackend();
+  const baseCreate = backend.createSession;
+  const users = Array.from({ length: 21 }, (_, index) => ({ ...user(backend), credentials: { ...backend.fixture.owner, email: `user-${index}@bench.test` } }));
+  const calls: string[] = [];
+  backend.createSession = async credentials => {
+    calls.push(credentials.email);
+    if (credentials.email === "user-10@bench.test") throw new Error("password=secret payload");
+    return baseCreate(backend.fixture.owner);
+  };
+  const samples: any[] = [];
+  let starts = 0;
+  const summary = await runWorkload(backend, config, { users, durationMs: 0, graceMs: 0, onSample: sample => samples.push(sample), onMeasuredStart: () => { starts++; } });
+  assert.equal(summary.preparationFailed, true);
+  assert.equal(summary.preparationFailureCount, 1);
+  assert.equal(summary.stageFailed, true);
+  assert.equal(summary.startedUsers, 0);
+  assert.equal(calls.length, 20);
+  assert.equal(backend.closedSessions, 19);
+  assert.equal(starts, 0);
+  assert.deepEqual(samples, []);
+  assert.doesNotMatch(JSON.stringify(summary), /secret|payload|password/i);
+});
+
 test("all journeys use bounded tenant-scoped requests and emit data-only samples", async () => {
   const backend = createFakeBackend();
   const weights = { dashboard: 12, taskList: 12, taskDetail: 12, createTask: 12, updateTask: 12, addComment: 12, search: 12, profileUpdate: 12, signIn: 4 };
@@ -68,6 +118,19 @@ test("all journeys use bounded tenant-scoped requests and emit data-only samples
   assert.equal(summary.failedWorkflowCount, 0);
   assert.equal(summary.stageFailed, false);
   assert.ok(samples.every(sample => Object.keys(sample).every(key => key !== "session" && key !== "input")));
+});
+
+test("boundary authentication is unmeasured while sign-out/in authentication is measured", async () => {
+  const backend = createFakeBackend();
+  const weights = { ...config.weights, dashboard: 0, taskList: 0, taskDetail: 0, createTask: 0, updateTask: 0, addComment: 0, search: 0, profileUpdate: 0, signIn: 100 };
+  let clock = 0;
+  const samples: any[] = [];
+  const summary = await runWorkload(backend, { ...config, weights }, { users: [user(backend)], durationMs: 20, graceMs: 0, now: () => ++clock, sleep: async milliseconds => { if (milliseconds === 20) await new Promise<void>(() => {}); }, onSample: sample => samples.push(sample) });
+  assert.equal(summary.failedWorkflowCount, 0);
+  assert.ok(samples.some(sample => sample.type === "sdk" && sample.name === "createSession"));
+  assert.ok(samples.some(sample => sample.type === "sdk" && sample.name === "close"));
+  assert.equal(samples.filter(sample => sample.type === "sdk" && sample.name === "createSession").length, backend.sessions - 1);
+  assert.equal(backend.closedSessions, backend.sessions);
 });
 
 test("sign-out/in closes the old session before replacing it", async () => {
@@ -132,22 +195,23 @@ test("external cancellation during think time stops the next journey", async () 
   assert.equal(backend.closedSessions, 1);
 });
 
-test("authentication resolving after grace expiry is still closed", async () => {
+test("aborted preparation closes a late same-batch session without samples", async () => {
   const backend = createFakeBackend();
   const baseCreate = backend.createSession;
   let resolveAuth!: (session: Awaited<ReturnType<typeof baseCreate>>) => void;
   backend.createSession = credentials => new Promise(resolve => { resolveAuth = resolve; void credentials; });
-  const weights = { ...config.weights, dashboard: 100, taskList: 0, taskDetail: 0, createTask: 0, updateTask: 0, addComment: 0, search: 0, profileUpdate: 0, signIn: 0 };
-  let clock = 0;
-  const stage = await runWorkload(backend, { ...config, weights }, { users: [user(backend)], durationMs: 100, graceMs: 0, now: () => ++clock, sleep: async () => {} });
-  assert.equal(stage.graceExpired, true);
-  assert.equal(backend.closedSessions, 0);
+  const controller = new AbortController();
+  const samples: any[] = [];
+  const stage = runWorkload(backend, config, { users: [user(backend)], signal: controller.signal, durationMs: 100, graceMs: 0, onSample: sample => samples.push(sample) });
+  controller.abort();
   const lateSession = await baseCreate(backend.fixture.owner);
   resolveAuth(lateSession);
-  await Promise.resolve();
-  await Promise.resolve();
-  await Promise.resolve();
+  const summary = await stage;
+  assert.equal(summary.preparationFailed, true);
+  assert.equal(summary.stageFailed, true);
+  assert.equal(summary.startedUsers, 0);
   assert.equal(backend.closedSessions, 1);
+  assert.equal(samples.length, 0);
 });
 
 test("unsafe page metadata fails the journey", async () => {

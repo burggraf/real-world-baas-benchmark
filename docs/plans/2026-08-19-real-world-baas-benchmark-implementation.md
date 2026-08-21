@@ -625,7 +625,7 @@ Use deterministic per-user random streams derived from run seed and virtual-user
 
 **Step 5: Implement virtual-user scheduling**
 
-Use `AbortController`, `performance.now()`, and promise loops. Inject `now` and `sleep` into tests. Stop launching work at stage end and allow a bounded grace period for in-flight work.
+Prepare ordinary-user sessions in deterministic input order in fixed batches of ten, with no retries and no measured samples. Use `AbortController`, `performance.now()`, and promise loops. Inject `now` and `sleep` into tests. Start the fixed-duration timer and resource collection only after every requested session is prepared; stop launching work at stage end, allow a bounded grace period for in-flight work, then end measurement before unmeasured final session cleanup. Keep sign-out/sign-in journey authentication measured.
 
 **Step 6: Verify**
 
