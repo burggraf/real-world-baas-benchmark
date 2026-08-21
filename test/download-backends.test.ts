@@ -6,7 +6,7 @@ import { spawnSync } from "node:child_process";
 import test from "node:test";
 import { pathToFileURL } from "node:url";
 // Resolve the plain-Node downloader from both source tests and compiled dist tests.
-const { cleanupTemporaryDirectories, downloadArchive, downloadBackend, extractEntry, listArchive, noClobberDecision, parseArchiveEntries, parseChecksumManifest, selectRelease, selectTarget, sha256, validateDownloadUrl, verifySha256 } = await import(pathToFileURL(resolve("scripts/download-backends.mjs")).href);
+const { cleanupTemporaryDirectories, downloadArchive, downloadBackend, main, extractEntry, listArchive, noClobberDecision, parseArchiveEntries, parseChecksumManifest, selectRelease, selectTarget, sha256, validateDownloadUrl, verifySha256 } = await import(pathToFileURL(resolve("scripts/download-backends.mjs")).href);
 
 const pocketAsset = "pocketbase_0.39.11_linux_amd64.zip";
 const pocketDigest = "08b9fcda0d5fd42cb315dc15a36dfa121c993855bd635f01d347c31b4328ec34";
@@ -213,26 +213,40 @@ test("existing identical, mismatch, symlink, and nonregular destinations are rea
   const root = await temporaryRepository("backend-destinations-");
   const archiveBytes = Buffer.from("archive fixture"); const executableBytes = Buffer.from("verified executable");
   const release = { backend: "fixture", version: "1", target: "linux-x64", asset: "fixture.zip", archiveSha256: sha256(archiveBytes), executableSha256: sha256(executableBytes), binary: "fixture", destination: ".tools/fixture-1/fixture", url: "https://github.com/example/example/releases/download/v1/fixture.zip" };
-  const run = async (prepare?: (destination: string) => Promise<void>) => { const destination = join(root, release.destination); await prepare?.(destination); return downloadBackend("fixture", { repoRoot: root, release, download: async (_r: unknown, archive: string) => { await writeFile(archive, archiveBytes); return { sha256: sha256(archiveBytes), size: archiveBytes.length }; }, runner: { listArchive: async () => "fixture\n", extractEntry: async (_a: string, _e: string, d: string) => { await writeFile(d, executableBytes); return { sha256: sha256(executableBytes), size: executableBytes.length }; } } }); };
+  const staged: string[] = [];
+  const run = async (prepare?: (destination: string) => Promise<void>) => { const destination = join(root, release.destination); await prepare?.(destination); return downloadBackend("fixture", { repoRoot: root, release, activeTemps: { add: (path: string) => { staged.push(path); }, delete: () => true }, download: async (_r: unknown, archive: string) => { await writeFile(archive, archiveBytes); return { sha256: sha256(archiveBytes), size: archiveBytes.length }; }, runner: { listArchive: async () => "fixture\n", extractEntry: async (_a: string, _e: string, d: string) => { await writeFile(d, executableBytes); return { sha256: sha256(executableBytes), size: executableBytes.length }; } } }); };
+  const assertLastStageRemoved = async () => { await assert.rejects(lstat(staged.at(-1)!), { code: "ENOENT" }); };
   try {
     await mkdir(join(root, ".tools/fixture-1"), { recursive: true });
     await writeFile(join(root, release.destination), executableBytes);
     assert.equal((await run()).status, "unchanged");
+    await assertLastStageRemoved();
     assert.deepEqual(await readdir(join(root, ".tools")), ["fixture-1"]);
     await rm(join(root, release.destination));
     await assert.rejects(run(async d => { await writeFile(d, "different"); }), /refusing to replace/i);
+    await assertLastStageRemoved();
     await assert.rejects(run(async d => { await rm(d); await symlink(join(root, "outside"), d); }), /non-regular|symlink/i);
+    await assertLastStageRemoved();
     await assert.rejects(run(async d => { await rm(d); await mkdir(d); }), /non-regular/i);
+    await assertLastStageRemoved();
     assert.deepEqual(await readdir(join(root, ".tools/fixture-1")), ["fixture"]);
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 
 
-test("retained staging is removed when a later backend fails", async () => {
+test("main removes retained staging when a later backend download fails", async () => {
   const first = await mkdtemp(join(tmpdir(), "backend-retained-first-"));
-  const second = await mkdtemp(join(tmpdir(), "backend-active-second-"));
-  try { const retained = new Set([first]); const active = new Set([second]); await cleanupTemporaryDirectories(new Set([...active, ...retained])); await assert.rejects(lstat(first), { code: "ENOENT" }); await assert.rejects(lstat(second), { code: "ENOENT" }); }
-  finally { await rm(first, { recursive: true, force: true }); await rm(second, { recursive: true, force: true }); }
+  try {
+    let calls = 0;
+    const code = await main([], { downloadBackend: async (backend: string) => {
+      calls++;
+      if (calls === 1) return { backend, target: "linux-x64", destination: "/tmp/missing", status: "missing", executableSha256: "0".repeat(64), retainedStaging: first, instructions: {} };
+      throw new Error("later backend failed");
+    }});
+    assert.equal(code, 1);
+    assert.equal(calls, 2);
+    await assert.rejects(lstat(first), { code: "ENOENT" });
+  } finally { await rm(first, { recursive: true, force: true }); }
 });
 
 test("invalid unzip extraction removes its partial destination", async t => {

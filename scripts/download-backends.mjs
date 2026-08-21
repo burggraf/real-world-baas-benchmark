@@ -380,7 +380,7 @@ export async function cleanupTemporaryDirectories(paths) {
 
 const help = `Usage: node scripts/download-backends.mjs\n\nDownloads and verifies pinned PocketBase 0.39.11 and TrailBase 0.33.1 archives.\nVerified executables are staged privately; existing identical files are retained. Missing files require manual copy and chmod 0755.`;
 
-export async function main(argv = process.argv.slice(2)) {
+export async function main(argv = process.argv.slice(2), options = {}) {
   if (argv.length === 1 && argv[0] === "--help") { console.log(help); return 0; }
   if (argv.length !== 0) { console.error("Usage: node scripts/download-backends.mjs [--help]"); return 1; }
   const controller = new AbortController();
@@ -396,8 +396,9 @@ export async function main(argv = process.argv.slice(2)) {
     // Select both before creating files so unsupported hosts fail without partial work.
     selectRelease("pocketbase", target);
     selectRelease("trailbase", target);
+    const download = options.downloadBackend ?? downloadBackend;
     for (const backend of ["pocketbase", "trailbase"]) {
-      const result = await downloadBackend(backend, { signal: controller.signal, activeTemps });
+      const result = await download(backend, { signal: controller.signal, activeTemps });
       if (result.retainedStaging) retainedTemps.add(result.retainedStaging);
       console.log(result.status === "missing" ? `${result.backend} missing: ${JSON.stringify(result.instructions)}` : `${result.backend} ${result.status}: ${relative(process.cwd(), result.destination)}`);
     }
