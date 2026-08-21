@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createSessionRequestController, validateSessionRequestTimeout } from "../src/session-request.js";
 import { createPocketBaseMeasuredClient } from "../backends/pocketbase/adapter.js";
-import { createSupabaseClient } from "../backends/supabase/adapter.js";
+import { createSupabaseClient, createSupabaseSession } from "../backends/supabase/adapter.js";
 import { createTrailBaseMeasuredClient } from "../backends/trailbase/adapter.js";
 
 test("request controller aborts injected pending fetch and rotation permits cleanup", async () => {
@@ -58,6 +58,24 @@ test("official adapter transports receive the rotatable bounded signal", async (
   try { await createSupabaseClient("http://127.0.0.1:54321", "public-key", "project", "test", createSessionRequestController({ timeoutMs: 1000 })).auth.signInWithPassword({ email: "user@example.test", password: "not-recorded" }); }
   finally { globalThis.fetch = original; }
   assert.ok(supabaseSignal);
+});
+
+test("Supabase post-auth setup failure signs out the authenticated client", async () => {
+  const original = globalThis.fetch;
+  const paths: string[] = [];
+  let requestCount = 0;
+  globalThis.fetch = (async (input) => {
+    const url = String(input);
+    paths.push(new URL(url).pathname);
+    requestCount++;
+    if (requestCount === 1) return new Response(JSON.stringify({ access_token: "access", token_type: "bearer", expires_in: 3600, expires_at: Math.floor(Date.now() / 1000) + 3600, refresh_token: "refresh", user: { id: "auth-user", aud: "authenticated", role: "authenticated", email: "user@example.test", app_metadata: {}, user_metadata: {}, created_at: new Date().toISOString(), updated_at: new Date().toISOString() } }), { status: 200, headers: { "content-type": "application/json" } });
+    if (requestCount === 2) return new Response(JSON.stringify({ message: "profile unavailable" }), { status: 500, headers: { "content-type": "application/json" } });
+    return new Response(JSON.stringify({}), { status: 204 });
+  }) as typeof fetch;
+  try {
+    await assert.rejects(createSupabaseSession({ email: "user@example.test", password: "not-recorded" }, { timeoutMs: 1000 }, { url: "http://127.0.0.1:54321", publicKey: "public-key" }), /profile|supabase/i);
+  } finally { globalThis.fetch = original; }
+  assert.ok(paths.some(path => path.endsWith("/auth/v1/logout")), paths.join(","));
 });
 
 test("request timeout validation rejects invalid values", () => {

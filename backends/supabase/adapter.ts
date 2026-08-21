@@ -419,17 +419,26 @@ export async function seedSupabaseCorrectnessFixture(): Promise<SupabaseCorrectn
 }
 
 let measuredConfiguration: { url: string; publicKey: string } | undefined;
-async function createSession(credentials: Credentials, options: SessionRequestOptions = {}): Promise<AppSession> {
-  if (!measuredConfiguration) throw new BenchmarkOperationError("backend_health", { code: "supabase_not_started" });
+export async function createSupabaseSession(credentials: Credentials, options: SessionRequestOptions = {}, configuration = measuredConfiguration): Promise<AppSession> {
+  if (!configuration) throw new BenchmarkOperationError("backend_health", { code: "supabase_not_started" });
   const request = createSessionRequestController(options);
-  const client = createSupabaseClient(measuredConfiguration.url, measuredConfiguration.publicKey, SUPABASE_PROJECT_ID, newId(), request);
-  const auth = await sdk(() => client.auth.signInWithPassword(credentials));
-  const user = requiredAuthPayload(auth, "auth_signin_response").user;
-  if (!user) throw new BenchmarkOperationError("authentication", { code: "invalid_credentials" });
-  const profile = await sdk(() => client.from("profiles").select(FIELDS.profile).eq("auth_id", user.id).maybeSingle());
-  request.detachParent();
-  return new SupabaseSession(client, row(required(profile, "profile_missing")), request);
+  const client = createSupabaseClient(configuration.url, configuration.publicKey, SUPABASE_PROJECT_ID, newId(), request);
+  let authenticated = false;
+  try {
+    const auth = await sdk(() => client.auth.signInWithPassword(credentials));
+    authenticated = true;
+    const user = requiredAuthPayload(auth, "auth_signin_response").user;
+    if (!user) throw new BenchmarkOperationError("authentication", { code: "invalid_credentials" });
+    const profile = await sdk(() => client.from("profiles").select(FIELDS.profile).eq("auth_id", user.id).maybeSingle());
+    request.detachParent();
+    return new SupabaseSession(client, row(required(profile, "profile_missing")), request);
+  } catch (error) {
+    if (authenticated) await client.auth.signOut().catch(() => undefined);
+    throw error;
+  }
 }
+
+const createSession = (credentials: Credentials, options: SessionRequestOptions = {}): Promise<AppSession> => createSupabaseSession(credentials, options);
 
 export const backend: Backend = {
   name: "supabase",
