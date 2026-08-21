@@ -88,6 +88,19 @@ test("renders invalid reasons, failures, and unavailable resources without inven
   assert.doesNotMatch(report.markdown, /\| 0 \| 0 \| 0 \| 0 \|/);
 });
 
+test("safe error metadata validates and renders without leaking arbitrary fields", async () => {
+  const result = await fixture();
+  result.stages[0]!.errorExamples = [{ ...result.stages[0]!.errorExamples[0]!, code: "23505", status: 409, message: "safe" }];
+  const report = createBenchmarkReport(result, "result.json");
+  assert.match(report.markdown + report.csv, /23505|409/);
+  const malformed = structuredClone(result) as any;
+  malformed.stages[0].errorExamples[0].status = 600;
+  assert.throws(() => validateBenchmarkResult(malformed), /errorExamples.*status/i);
+  malformed.stages[0].errorExamples[0].status = 409;
+  malformed.stages[0].errorExamples[0].code = "secret.body";
+  assert.throws(() => validateBenchmarkResult(malformed), /errorExamples.*code/i);
+});
+
 test("redacts bounded error text and rejects malformed or non-finite required fields", async () => {
   const result = await fixture();
   result.correctness.findings[0]!.message = "password=hunter2 Authorization: Bearer abc.def.ghi token=secret-token";
@@ -114,6 +127,9 @@ test("rejects semantically inconsistent benchmark results", async () => {
     ["session preparation integer", result => { result.settings.sessionPreparationConcurrency = 0; }],
     ["boundary session flag", result => { result.settings.boundarySessionsUnmeasured = false as never; }],
     ["measured request timeout", result => { result.settings.measuredRequestTimeoutMs = 0; }],
+    ["malformed error code", result => { result.stages[0]!.errorExamples = [{ ...result.stages[0]!.errorExamples[0]!, code: "bad.code" }]; }],
+    ["malformed error status", result => { result.stages[0]!.errorExamples = [{ ...result.stages[0]!.errorExamples[0]!, status: 99 }]; }],
+    ["malformed error classification", result => { result.stages[0]!.errorExamples = [{ ...result.stages[0]!.errorExamples[0]!, classification: "secret" as never }]; }],
     ["fractional measured request timeout", result => { result.settings.measuredRequestTimeoutMs = 0.5; }],
     ["oversized measured request timeout", result => { result.settings.measuredRequestTimeoutMs = 2_147_483_648; }],
     ["fractional config timeout", result => { result.config.timeoutMs = 0.5; }],

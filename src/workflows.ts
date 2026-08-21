@@ -1,6 +1,7 @@
 import type { AppSession } from "./backend.js";
 import type { BenchmarkConfig, OperationClass, WorkflowName } from "./config.js";
 import type { Comment, Dashboard, Page, Task, TaskDetail, User } from "./domain.js";
+import { safeErrorDetails } from "./errors.js";
 
 export type JourneyName = Exclude<WorkflowName, "signIn"> | "signOutIn";
 export type SampleKind = "read" | "write";
@@ -12,7 +13,7 @@ export interface WorkloadSample {
   operationClass: OperationClass;
   elapsedMs: number;
   success: boolean;
-  error?: { name: string; message: string; code?: string; classification?: string };
+  error?: { name: string; message: string; code?: string; classification?: string; status?: number };
 }
 export interface WorkflowContext {
   session: AppSession;
@@ -57,10 +58,7 @@ export function selectWorkflow(weights: BenchmarkConfig["weights"], random: () =
   return names[names.length - 1]!;
 }
 
-const errorData = (error: unknown): { name: string; message: string } => ({
-  name: error instanceof Error ? error.name : typeof error,
-  message: error instanceof Error ? error.message : String(error),
-});
+const errorData = safeErrorDetails;
 const nonempty = (value: unknown, label: string): string => {
   if (typeof value !== "string" || value.length === 0) throw new Error(`Invalid ${label}`);
   return value;

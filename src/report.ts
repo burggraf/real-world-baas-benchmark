@@ -10,6 +10,7 @@ export interface BenchmarkReport { markdown: string; csv: string }
 export interface WrittenBenchmarkReport { markdownPath: string; csvPath: string }
 
 const classes: OperationClass[] = ["read", "write", "authSearch"];
+const errorClassifications = new Set(["expected_rejection", "authentication", "authorization", "timeout", "transport/sdk", "invalid_response", "backend_health", "runner_overload", "application_failure"]);
 type RecordValue = Record<string, unknown>;
 
 function object(value: unknown, label: string): RecordValue {
@@ -102,7 +103,7 @@ function validateStage(value: unknown, index: number): void {
     const counts = object(item.errorCounts, `${label}.operations.${name}.errorCounts`); let classifiedErrors = 0; for (const [key, count] of Object.entries(counts)) classifiedErrors += integer(count, `${label}.operations.${name}.errorCounts.${key}`); if (classifiedErrors !== failed) throw new Error(`Invalid ${label}.operations.${name}.errorCounts consistency`);
   }
   if (!Array.isArray(raw.errorExamples)) throw new Error(`Invalid ${label}.errorExamples`);
-  for (const [errorIndex, example] of raw.errorExamples.entries()) { const item = object(example, `${label}.errorExamples[${errorIndex}]`); for (const key of ["type", "name", "workflow", "operationClass", "kind", "classification", "nameOfError", "message"] as const) string(item[key], `${label}.errorExamples[${errorIndex}].${key}`); integer(item.occurrences, `${label}.errorExamples[${errorIndex}].occurrences`, 1); }
+  for (const [errorIndex, example] of raw.errorExamples.entries()) { const item = object(example, `${label}.errorExamples[${errorIndex}]`); for (const key of ["type", "name", "workflow", "operationClass", "kind", "classification", "nameOfError", "message"] as const) string(item[key], `${label}.errorExamples[${errorIndex}].${key}`); if (!errorClassifications.has(item.classification as string)) throw new Error(`Invalid ${label}.errorExamples[${errorIndex}].classification`); if (item.code !== undefined && (typeof item.code !== "string" || !/^[A-Za-z0-9_-]{1,40}$/.test(item.code))) throw new Error(`Invalid ${label}.errorExamples[${errorIndex}].code`); if (item.status !== undefined && (!Number.isInteger(item.status) || (item.status as number) < 100 || (item.status as number) > 599)) throw new Error(`Invalid ${label}.errorExamples[${errorIndex}].status`); integer(item.occurrences, `${label}.errorExamples[${errorIndex}].occurrences`, 1); }
   const valid = boolean(raw.valid, `${label}.valid`); const validityReasons = strings(raw.validityReasons, `${label}.validityReasons`); if (valid !== (validityReasons.length === 0)) throw new Error(`Invalid ${label} validity state`);
 }
 
@@ -190,7 +191,7 @@ const slo = (metric: OperationClassMetric, target: { p95Ms: number; maxErrorRate
 const metricCells = (metric: OperationClassMetric, target: { p95Ms: number; maxErrorRate: number }): unknown[] => [metric.attempted, number(metric.latencyP50Ms), number(metric.latencyP95Ms), number(metric.latencyP99Ms), percent(metric.errorRate), slo(metric, target)];
 const csvMetricCells = (metric: OperationClassMetric, target: { p95Ms: number; maxErrorRate: number }): unknown[] => [metric.attempted, number(metric.latencyP50Ms), number(metric.latencyP95Ms), number(metric.latencyP99Ms), number(metric.errorRate), slo(metric, target)];
 const resourceValue = (value: number | null): string => value === null ? "unavailable" : number(value);
-const stageErrors = (examples: StageMetrics["errorExamples"], total: number): string => `${examples.map(example => `${example.classification}: ${example.nameOfError}: ${example.message} (${example.occurrences})`).join("; ") || "none"}${total > examples.length ? `; showing ${examples.length} of ${total}` : ""}`;
+const stageErrors = (examples: StageMetrics["errorExamples"], total: number): string => `${examples.map(example => `${example.classification}${example.code ? ` [${example.code}]` : ""}${example.status !== undefined ? ` HTTP ${example.status}` : ""}: ${example.nameOfError}: ${example.message} (${example.occurrences})`).join("; ") || "none"}${total > examples.length ? `; showing ${examples.length} of ${total}` : ""}`;
 
 export function createBenchmarkReport(result: BenchmarkResult, rawJsonPath: string): BenchmarkReport {
   validateBenchmarkResult(result);
@@ -207,7 +208,7 @@ export function createBenchmarkReport(result: BenchmarkResult, rawJsonPath: stri
     ...(snapshot.containers ?? []).map(container => [resource.name, "supabase-container", container.containerId, container.cpuPercent, container.memoryBytes, `block read (bytes) ${container.blockReadBytes}; block write (bytes) ${container.blockWriteBytes}`]),
   ]));
   const totalExamples = result.stages.reduce((total, stage) => total + stage.errorExamples.length, 0); const shownExamples: unknown[][] = []; const csvExamples = new Map<StageMetrics, StageMetrics["errorExamples"]>(); let remainingExamples = 20;
-  for (const stage of result.stages) { const selected = stage.errorExamples.slice(0, remainingExamples); csvExamples.set(stage, selected); remainingExamples -= selected.length; shownExamples.push(...selected.map(example => [stage.requestedUsers, example.type, example.name, example.operationClass, example.classification, example.nameOfError, example.message, example.occurrences])); }
+  for (const stage of result.stages) { const selected = stage.errorExamples.slice(0, remainingExamples); csvExamples.set(stage, selected); remainingExamples -= selected.length; shownExamples.push(...selected.map(example => [stage.requestedUsers, example.type, example.name, example.operationClass, example.classification, example.code ?? "", example.status ?? "", example.nameOfError, example.message, example.occurrences])); }
   const rawName = freeText(basename(rawJsonPath)); const rawTarget = `./${encodeURIComponent(rawName).replace(/%2F/gi, "/")}`;
   const markdown = [
     `# ${result.valid ? "VALID" : "INVALID"} benchmark result`, "",
@@ -220,7 +221,7 @@ export function createBenchmarkReport(result: BenchmarkResult, rawJsonPath: stri
     "## Stage metrics", "", markdownTable(stageHeaders, stageRows), "",
     "## Stage resources", "", markdownTable(resourceHeaders, resourceRows), "", "### Resource architecture detail", "", markdownTable(["Stage", "Kind", "Identity", "CPU (%)", "RSS/memory (bytes)", "Detail"], architectureRows.length ? architectureRows : [["", "", "unavailable", "", "", "no architecture detail"]]), "",
     "## Backend deviations", "", markdownTable(["Deviation"], sectionRows(result.backend.deviations ?? [])), "",
-    "## Bounded error examples", "", `showing ${shownExamples.length} of ${totalExamples}`, "", markdownTable(["Stage", "Type", "Name", "Class", "Classification", "Error", "Message", "Occurrences"], shownExamples.length ? shownExamples : [["", "", "", "", "", "", "none", ""]]), "",
+    "## Bounded error examples", "", `showing ${shownExamples.length} of ${totalExamples}`, "", markdownTable(["Stage", "Type", "Name", "Class", "Classification", "Code", "Status", "Error", "Message", "Occurrences"], shownExamples.length ? shownExamples : [["", "", "", "", "", "", "", "none", "", ""]]), "",
     "## Raw result", "", `[${mdLinkText(rawName)}](${rawTarget})`, "",
   ].join("\n");
   const csvHeaders = ["requestedUsers", "achievedUsers", "elapsedSeconds", "workflowTPS", "sdkTPS", "readSdkRate", "writeSdkRate", ...classes.flatMap(name => [`${name}Attempts`, `${name}P50Ms`, `${name}P95Ms`, `${name}P99Ms`, `${name}ErrorRate`, `${name}Slo`]), "resourceSamples", "runnerCpuMaxPercent", "runnerRssMaxBytes", "backendCpuMaxPercent", "backendRssMaxBytes", "eventLoopP99MaxMs", "eventLoopMaxMs", "supabaseCpuMaxPercent", "supabaseMemoryMaxBytes", "supabaseBlockReadMaxBytes", "supabaseBlockWriteMaxBytes", "valid", "validityReasons", "errorExamples"];

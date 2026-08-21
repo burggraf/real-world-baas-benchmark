@@ -4,6 +4,8 @@ import { loadConfig, parseConfig } from "../src/config.js";
 import { selectWorkflow } from "../src/workflows.js";
 import { createFakeBackend } from "./fake-backend.js";
 import { runWorkload } from "../src/workload.js";
+import { BenchmarkOperationError } from "../src/correctness.js";
+import { safeErrorDetails } from "../src/errors.js";
 
 const config = loadConfig("configs/quick.json");
 
@@ -25,6 +27,57 @@ test("workflow selection is deterministic and follows configured weights", () =>
 });
 
 const user = (backend: ReturnType<typeof createFakeBackend>) => ({ credentials: backend.fixture.owner, organizationId: backend.fixture.organizationId, projectId: backend.fixture.projectId, taskId: backend.fixture.taskId });
+
+test("safe error details preserve only bounded BenchmarkOperationError metadata", () => {
+  const safe = safeErrorDetails(new BenchmarkOperationError("application", { code: "23505", status: 409 }));
+  assert.deepEqual(safe, { name: "BenchmarkOperationError", message: "23505", code: "23505", classification: "application", status: 409 });
+  const arbitrary = safeErrorDetails(Object.assign(new Error("password=secret"), { classification: "backend_health", code: "secret.body", status: 999, response: { token: "secret" } }));
+  assert.deepEqual(arbitrary, { name: "Error", message: "password=secret" });
+  assert.deepEqual(safeErrorDetails({ response: { body: "secret" }, toString: () => "leak" }), { name: "object", message: "object" });
+});
+
+test("ordinary measured adapter errors are scored and users continue", async () => {
+  const backend = createFakeBackend();
+  const baseCreate = backend.createSession;
+  let dashboardCalls = 0;
+  let clock = 0;
+  backend.createSession = async credentials => {
+    const session = await baseCreate(credentials);
+    const original = session.dashboard;
+    session.dashboard = async input => { dashboardCalls++; if (dashboardCalls === 1) throw new BenchmarkOperationError("application", { code: "app_failure", status: 500 }); return original(input); };
+    return session;
+  };
+  const weights = { ...config.weights, dashboard: 100, taskList: 0, taskDetail: 0, createTask: 0, updateTask: 0, addComment: 0, search: 0, profileUpdate: 0, signIn: 0 };
+  const summary = await runWorkload(backend, { ...config, weights }, { users: [user(backend)], durationMs: 100, graceMs: 0, now: () => ++clock, sleep: async milliseconds => { if (milliseconds === 100) await new Promise<void>(() => {}); } });
+  assert.equal(summary.failedWorkflowCount, 1);
+  assert.equal(summary.stageFailed, false);
+  assert.ok(dashboardCalls > 1);
+});
+
+test("backend health, malformed, and sign-out failures invalidate immediately", async () => {
+  for (const error of [new BenchmarkOperationError("backend_health", { code: "down" }), new BenchmarkOperationError("invalid_response", { code: "shape" })]) {
+    const backend = createFakeBackend();
+    const baseCreate = backend.createSession;
+    backend.createSession = async credentials => { const session = await baseCreate(credentials); session.dashboard = async () => { throw error; }; return session; };
+    const weights = { ...config.weights, dashboard: 100, taskList: 0, taskDetail: 0, createTask: 0, updateTask: 0, addComment: 0, search: 0, profileUpdate: 0, signIn: 0 };
+    const summary = await runWorkload(backend, { ...config, weights }, { users: [user(backend)], durationMs: 100, graceMs: 0, now: () => 0, sleep: async milliseconds => { if (milliseconds === 100) await new Promise<void>(() => {}); } });
+    assert.equal(summary.stageFailed, true);
+  }
+});
+
+test("sign-out/in failures and stopOnError remain strict", async () => {
+  const weights = { ...config.weights, dashboard: 0, taskList: 0, taskDetail: 0, createTask: 0, updateTask: 0, addComment: 0, search: 0, profileUpdate: 0, signIn: 100 };
+  const backend = createFakeBackend();
+  const baseCreate = backend.createSession;
+  backend.createSession = async credentials => { const session = await baseCreate(credentials); session.signOut = async () => { throw new BenchmarkOperationError("application", { code: "signout_failed" }); }; return session; };
+  const strictSignOut = await runWorkload(backend, { ...config, weights }, { users: [user(backend)], durationMs: 100, graceMs: 0, now: () => 0, sleep: async milliseconds => { if (milliseconds === 100) await new Promise<void>(() => {}); } });
+  assert.equal(strictSignOut.stageFailed, true);
+  const stopOnErrorBackend = createFakeBackend();
+  const baseStopCreate = stopOnErrorBackend.createSession;
+  stopOnErrorBackend.createSession = async credentials => { const session = await baseStopCreate(credentials); session.dashboard = async () => { throw new BenchmarkOperationError("application", { code: "ordinary" }); }; return session; };
+  const stopOnError = await runWorkload(stopOnErrorBackend, { ...config, weights: { ...config.weights, dashboard: 100, taskList: 0, taskDetail: 0, createTask: 0, updateTask: 0, addComment: 0, search: 0, profileUpdate: 0, signIn: 0 } }, { users: [user(stopOnErrorBackend)], durationMs: 100, graceMs: 0, stopOnError: true, now: () => 0, sleep: async milliseconds => { if (milliseconds === 100) await new Promise<void>(() => {}); } });
+  assert.equal(stopOnError.stageFailed, true);
+});
 
 test("already-aborted workloads do not authenticate users", async () => {
   const backend = createFakeBackend();

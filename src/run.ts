@@ -185,8 +185,8 @@ export async function runBenchmark(options: RunOptions): Promise<{ result: Bench
     result.versions = { backend: ready.version, sdk: result.environment.sdkVersion ?? "unknown", runtime: result.environment.runtimeVersion };
     if (options.config.warmupSeconds > 0) {
       const warmup = await (d.workload ?? runWorkload)(backend, options.config, { users: users.slice(0, warmupUserCount), durationMs: options.config.warmupSeconds * 1_000, graceMs: options.config.timeoutMs, onSample: undefined });
-      result.validityReasons = warmup.stageFailed ? ["warmup failed"] : ["warmup writes are unscored"];
-      if (warmup.stageFailed) throw new Error("warmup failed");
+      result.validityReasons = warmup.stageFailed || warmup.failedWorkflowCount > 0 ? ["warmup failed"] : ["warmup writes are unscored"];
+      if (warmup.stageFailed || warmup.failedWorkflowCount > 0) throw new Error("warmup failed");
     }
     if (users.length < options.config.maxConcurrency) throw new Error("backend returned insufficient workload users");
     const monotonic = d.monotonic ?? (() => performance.now());

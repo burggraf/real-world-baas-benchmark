@@ -694,7 +694,7 @@ Cover:
 
 - all stages pass;
 - latency fails before error rate;
-- error rate fails;
+- ordinary measured operation error rate fails the class SLO; integrity/session errors invalidate the stage;
 - throughput plateaus with rising latency;
 - runner overload invalidates a stage;
 - no passing stage returns no capacity;

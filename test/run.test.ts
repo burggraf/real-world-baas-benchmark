@@ -12,6 +12,14 @@ import type { ResourceSnapshot } from "../src/system.js";
 
 const config = parseConfig({ name: "quick", publishable: false, dataset: "small", seed: 1, warmupSeconds: 1, stageSeconds: 1, concurrency: [1], maxConcurrency: 1, timeoutMs: 1, thinkTimeMs: { min: 0, max: 0 }, weights: { dashboard: 100, taskList: 0, taskDetail: 0, createTask: 0, updateTask: 0, addComment: 0, search: 0, profileUpdate: 0, signIn: 0 }, slos: { read: { p95Ms: 1000, maxErrorRate: 1 }, write: { p95Ms: 1000, maxErrorRate: 1 }, authSearch: { p95Ms: 1000, maxErrorRate: 1 } } });
 
+test("warmup scored workflow errors remain a strict prerequisite failure", async () => {
+  const run = await fakeRun({ workload: async (opts: any) => { await opts.onMeasuredStart?.(); try { return { ...summary(opts.users.length), failedWorkflowCount: 1 }; } finally { await opts.onMeasuredEnd?.(); } } });
+  await assert.rejects(run.output, /warmup failed/);
+  const saved = JSON.parse(await readFile(run.resultPath, "utf8"));
+  assert.deepEqual(saved.validityReasons, ["benchmark failed"]);
+  assert.match(saved.failures[0], /warmup failed/);
+});
+
 test("runBenchmark orders lifecycle and excludes warmup samples", async () => {
   const events: string[] = [];
   const dir = await mkdtemp(join(tmpdir(), "bench-run-")); const resultPath = join(dir, "result.json");

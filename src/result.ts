@@ -6,7 +6,7 @@ import type { Environment as CapturedEnvironment, ResourceSnapshot } from "./sys
 export type Environment = CapturedEnvironment;
 export type FindingClassification = "authentication" | "authorization" | "timeout" | "transport/sdk" | "invalid_response" | "application" | "backend_health";
 export type ErrorClassification = "expected_rejection" | "authentication" | "authorization" | "timeout" | "transport/sdk" | "invalid_response" | "backend_health" | "runner_overload" | "application_failure";
-export interface ErrorExample { type: "workflow" | "sdk"; name: string; workflow: string; operationClass: string; kind: "read" | "write"; classification: ErrorClassification; nameOfError: string; message: string; occurrences: number; }
+export interface ErrorExample { type: "workflow" | "sdk"; name: string; workflow: string; operationClass: string; kind: "read" | "write"; classification: ErrorClassification; nameOfError: string; message: string; occurrences: number; code?: string; status?: number; }
 export interface Correctness { findings: CorrectnessFinding[]; aborted?: boolean; abortReason?: string; }
 export interface CorrectnessFinding { name: string; passed: boolean; classification: FindingClassification; message?: string; evidence?: string; }
 export interface OperationMetric {

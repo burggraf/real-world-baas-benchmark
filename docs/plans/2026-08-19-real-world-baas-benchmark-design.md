@@ -343,7 +343,7 @@ Errors are classified as:
 - backend health/process failure
 - runner overload
 
-Expected denials in correctness tests pass only when the backend rejects the operation for the intended reason. Unexpected errors count against the measured error rate. Error examples are retained up to a configured bound so failures cannot exhaust runner memory.
+Expected denials in correctness tests pass only when the backend rejects the operation for the intended reason. Ordinary measured authentication, authorization, timeout, transport/SDK, and application operation errors count against the class error-rate SLO and do not by themselves invalidate a stage; backend health, malformed responses, unknown/local validation errors, and sign-out/in or session-lifecycle failures remain integrity failures. Error examples are retained up to a configured bound so failures cannot exhaust runner memory.
 
 Startup, reset, seed, or correctness failure aborts the run. A measured-stage failure writes partial results and backend logs before cleanup.
 

@@ -3,6 +3,7 @@ import type { BenchmarkConfig, WorkflowName } from "./config.js";
 import type { Credentials } from "./domain.js";
 import { mulberry32 } from "./random.js";
 import { MAX_PAGE_SIZE, runWorkflow, selectWorkflow, type JourneyName, type WorkloadSample, type WorkflowContext } from "./workflows.js";
+import { isIntegrityError, safeErrorDetails } from "./errors.js";
 
 export interface VirtualUserSpec {
   credentials: Credentials;
@@ -51,7 +52,7 @@ const defaultSleep = (milliseconds: number, signal?: AbortSignal): Promise<void>
 const abortError = (): Error => Object.assign(new Error("Workload aborted"), { name: "AbortError" });
 const isAbort = (error: unknown): boolean => error instanceof Error && error.name === "AbortError";
 const deriveSeed = (seed: number, index: number): number => (seed + Math.imul(index, 0x9e3779b9)) >>> 0;
-const asError = (error: unknown): { name: string; message: string } => ({ name: error instanceof Error ? error.name : typeof error, message: error instanceof Error ? error.message : String(error) });
+const asError = safeErrorDetails;
 
 const emit = (callback: ((sample: WorkloadSample) => void) | undefined, sample: WorkloadSample, enabled: boolean): void => {
   if (enabled) callback?.({ ...sample, elapsedMs: Math.max(0, sample.elapsedMs), error: sample.error && { ...sample.error } });
@@ -78,7 +79,8 @@ export async function runWorkload(backend: Backend, config: BenchmarkConfig, opt
     for (const session of active) session.cancelPending();
   };
   const abortWorkload = (): void => { stopScheduling(); cancelPending(); };
-  const stopFromParent = () => abortWorkload();
+  let boundaryClosing = false;
+  const stopFromParent = () => { if (!boundaryClosing) summary.stageFailed = true; abortWorkload(); };
   if (options.signal?.aborted) abortWorkload();
   else options.signal?.addEventListener("abort", stopFromParent, { once: true });
   const closed = new WeakSet<AppSession>();
@@ -215,8 +217,11 @@ export async function runWorkload(backend: Backend, config: BenchmarkConfig, opt
         summary.completedWorkflowCount++;
       } catch (error) {
         summary.failedWorkflowCount++;
-        summary.stageFailed = true;
-        if (options.stopOnError) { abortWorkload(); break; }
+        if (isIntegrityError(error, context.workflow) || options.stopOnError) {
+          summary.stageFailed = true;
+          abortWorkload();
+          break;
+        }
         if (isAbort(error) || loopController.signal.aborted) break;
       }
       if (loopController.signal.aborted || now() >= deadline) break;
@@ -263,6 +268,7 @@ export async function runWorkload(backend: Backend, config: BenchmarkConfig, opt
     else await workersDone;
     measuring = false;
     measuredEnded = true;
+    boundaryClosing = true;
     await options.onMeasuredEnd?.();
   } catch (error) {
     summary.stageFailed = true;
@@ -272,6 +278,7 @@ export async function runWorkload(backend: Backend, config: BenchmarkConfig, opt
     if (allWorkers) await awaitWorkersAfterDrainDeadline(allWorkers);
     measuring = false;
     if (measurementStarted && !measuredEnded) {
+      boundaryClosing = true;
       measuredEnded = true;
       try { await options.onMeasuredEnd?.(); } catch { summary.stageFailed = true; }
     }
