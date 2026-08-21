@@ -3,7 +3,7 @@ import type { BenchmarkConfig, WorkflowName } from "./config.js";
 import type { Credentials } from "./domain.js";
 import { mulberry32 } from "./random.js";
 import { MAX_PAGE_SIZE, runWorkflow, selectWorkflow, type JourneyName, type WorkloadSample, type WorkflowContext } from "./workflows.js";
-import { isIntegrityError, safeErrorDetails } from "./errors.js";
+import { isIntegrityError, isSessionLossError, safeErrorDetails } from "./errors.js";
 
 export interface VirtualUserSpec {
   credentials: Credentials;
@@ -33,6 +33,7 @@ export interface WorkloadSummary {
   startedUsers: number;
   completedWorkflowCount: number;
   failedWorkflowCount: number;
+  lostUsers: number;
   graceExpired: boolean;
   stageFailed: boolean;
   closeErrors: number;
@@ -68,7 +69,7 @@ export async function runWorkload(backend: Backend, config: BenchmarkConfig, opt
   if (!Number.isFinite(durationMs) || durationMs < 0 || !Number.isFinite(graceMs) || graceMs < 0) throw new RangeError("invalid workload duration or grace");
   const loopController = new AbortController();
   const requestController = new AbortController();
-  const summary: WorkloadSummary = { requestedUsers: options.users.length, startedUsers: 0, completedWorkflowCount: 0, failedWorkflowCount: 0, graceExpired: false, stageFailed: false, closeErrors: 0, preparationFailed: false, preparationFailureCount: 0 };
+  const summary: WorkloadSummary = { requestedUsers: options.users.length, startedUsers: 0, completedWorkflowCount: 0, failedWorkflowCount: 0, lostUsers: 0, graceExpired: false, stageFailed: false, closeErrors: 0, preparationFailed: false, preparationFailureCount: 0 };
   const active = new Set<AppSession>();
   let requestsCancelled = false;
   const stopScheduling = (): void => { if (!loopController.signal.aborted) loopController.abort(); };
@@ -80,8 +81,8 @@ export async function runWorkload(backend: Backend, config: BenchmarkConfig, opt
   };
   const abortWorkload = (): void => { stopScheduling(); cancelPending(); };
   let boundaryClosing = false;
-  const stopFromParent = () => { if (!boundaryClosing) summary.stageFailed = true; abortWorkload(); };
-  if (options.signal?.aborted) abortWorkload();
+  const stopFromParent = () => { if (boundaryClosing) return; summary.stageFailed = true; abortWorkload(); };
+  if (options.signal?.aborted) { summary.stageFailed = true; abortWorkload(); }
   else options.signal?.addEventListener("abort", stopFromParent, { once: true });
   const closed = new WeakSet<AppSession>();
   let cleanupStarted = false;
@@ -105,8 +106,6 @@ export async function runWorkload(backend: Backend, config: BenchmarkConfig, opt
       await call("signOutIn", "close", "authSearch", "read", () => session.close(), measured);
       closed.add(session);
     } catch (error) {
-      summary.closeErrors++;
-      summary.stageFailed = true;
       if (throwError) throw error;
     }
   };
@@ -118,6 +117,9 @@ export async function runWorkload(backend: Backend, config: BenchmarkConfig, opt
       }
       for (const session of batch) if (closed.has(session)) active.delete(session);
     }
+    const unresolved = [...active].filter(session => !closed.has(session)).length;
+    summary.closeErrors = unresolved;
+    if (unresolved > 0) summary.stageFailed = true;
   };
   const awaitWorkersAfterDrainDeadline = async (workersDone: Promise<void>): Promise<void> => {
     let settled = false;
@@ -186,6 +188,7 @@ export async function runWorkload(backend: Backend, config: BenchmarkConfig, opt
   const users = options.users.map((spec, index) => ({ spec, random: mulberry32(deriveSeed(config.seed, index)) }));
   const runUser = async (spec: VirtualUserSpec, random: () => number, initial: AppSession, deadline: number): Promise<void> => {
     let session: AppSession | undefined = initial;
+    let retired = false;
     const context: WorkflowContext = {
       get session() { if (!session) throw new Error("virtual user has no session"); return session; },
       set session(value: AppSession) { session = value; },
@@ -217,9 +220,13 @@ export async function runWorkload(backend: Backend, config: BenchmarkConfig, opt
         summary.completedWorkflowCount++;
       } catch (error) {
         summary.failedWorkflowCount++;
-        if (isIntegrityError(error, context.workflow) || options.stopOnError) {
+        if (isIntegrityError(error) || options.stopOnError) {
           summary.stageFailed = true;
           abortWorkload();
+          break;
+        }
+        if (isSessionLossError(error, context.workflow)) {
+          if (!retired) { retired = true; summary.lostUsers++; }
           break;
         }
         if (isAbort(error) || loopController.signal.aborted) break;

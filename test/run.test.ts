@@ -20,6 +20,19 @@ test("warmup scored workflow errors remain a strict prerequisite failure", async
   assert.match(saved.failures[0], /warmup failed/);
 });
 
+test("runBenchmark subtracts retired users from achieved concurrency", async () => {
+  let calls = 0;
+  const run = await fakeRun({ workload: async (opts: any) => {
+    calls++;
+    await opts.onMeasuredStart?.();
+    try { return { ...summary(opts.users.length), startedUsers: opts.users.length, lostUsers: calls === 2 ? 1 : 0 }; }
+    finally { await opts.onMeasuredEnd?.(); }
+  } });
+  const output = await run.output;
+  assert.equal(output.result.stages[0]!.achievedUsers, 0);
+  assert.equal(output.result.valid, false);
+});
+
 test("runBenchmark orders lifecycle and excludes warmup samples", async () => {
   const events: string[] = [];
   const dir = await mkdtemp(join(tmpdir(), "bench-run-")); const resultPath = join(dir, "result.json");
@@ -33,7 +46,7 @@ test("runBenchmark orders lifecycle and excludes warmup samples", async () => {
     buildVirtualUserSpecs: async () => [{ credentials: { email: "u", password: "p" }, organizationId: "o", projectId: "p", taskId: "t" }],
   };
   let calls = 0;
-  const workload = async (_backend: any, _config: any, opts: any) => { events.push(calls++ === 0 ? "warmup" : "measured"); await opts.onMeasuredStart?.(); try { opts.onSample?.({ type: "workflow", name: "dashboard", workflow: "dashboard", operationClass: "read", kind: "read", elapsedMs: 1, success: true }); return { requestedUsers: 1, startedUsers: 1, completedWorkflowCount: 1, failedWorkflowCount: 0, graceExpired: false, stageFailed: false, closeErrors: 0, preparationFailed: false, preparationFailureCount: 0 }; } finally { await opts.onMeasuredEnd?.(); } };
+  const workload = async (_backend: any, _config: any, opts: any) => { events.push(calls++ === 0 ? "warmup" : "measured"); await opts.onMeasuredStart?.(); try { opts.onSample?.({ type: "workflow", name: "dashboard", workflow: "dashboard", operationClass: "read", kind: "read", elapsedMs: 1, success: true }); return { requestedUsers: 1, startedUsers: 1, completedWorkflowCount: 1, failedWorkflowCount: 0, lostUsers: 0, graceExpired: false, stageFailed: false, closeErrors: 0, preparationFailed: false, preparationFailureCount: 0 }; } finally { await opts.onMeasuredEnd?.(); } };
   const resources = async () => { events.push("resources"); return { samples: [], valid: true, validityReasons: [] }; };
   await runBenchmark({ backend: "pocketbase", config, resultPath, dependencies: { loadBackend: async () => backend as any, correctness: async () => { events.push("correctness"); return { findings: [{ name: "ok", passed: true, classification: "application" as const }] }; }, workload: workload as any, resources: resources as any, captureEnvironment: async info => environment(info), now: () => new Date("2026-01-01T00:00:00.000Z"), monotonic: (() => { let n = 0; return () => ++n; })() } });
   assert.deepEqual(events, ["doctor", "start", "doctor", "reset", "doctor", "seed", "fixture", "correctness", "doctor", "warmup", "doctor", "measured", "resources", "doctor", "stop"]);
@@ -44,7 +57,7 @@ const measuredConfig = (input: Record<string, unknown> = {}) => parseConfig({ na
 const fixture = { owner: { email: "o", password: "p" }, admin: { email: "a", password: "p" }, member: { email: "m", password: "p" }, outsider: { email: "x", password: "p" }, organizationId: "o", projectId: "p", taskId: "t", ownerMembershipId: "om", memberMembershipId: "mm", adminMembershipId: "am" };
 const info = (processIds = [101]): BackendInfo => ({ name: "pocketbase", version: "fake", endpoint: "http://127.0.0.1:1", processIds, processExecutable: "/owned/pocketbase" });
 const snapshot = (cpuPercent = 1, timestampMs = 1): ResourceSnapshot => ({ timestampMs, runner: { pid: 1, cpuPercent, rssBytes: 100 }, backend: { totalCpuPercent: 1, totalRssBytes: 100, processes: [{ pid: 101, cpuPercent: 1, rssBytes: 100 }] }, containers: null, containerTotals: null, containerReason: "not required", eventLoop: { p99Ms: 1, maxMs: 2 } });
-const summary = (users: number) => ({ requestedUsers: users, startedUsers: users, completedWorkflowCount: 1, failedWorkflowCount: 0, graceExpired: false, stageFailed: false, closeErrors: 0 });
+const summary = (users: number) => ({ requestedUsers: users, startedUsers: users, completedWorkflowCount: 1, failedWorkflowCount: 0, lostUsers: 0, graceExpired: false, stageFailed: false, closeErrors: 0, preparationFailed: false, preparationFailureCount: 0 });
 const environment = (backend: BackendInfo) => ({ runtime: "node", runtimeVersion: "v1", os: "test", architecture: "test", host: "test", cpu: null, memoryBytes: null, release: "test", logicalCores: null, cpuModel: null, totalMemoryBytes: null, hostname: "test", nodeVersion: "v1", npmVersion: null, gitCommit: null, gitDirty: null, backend, sdkVersion: "1.0.0", dockerVersion: null, supabaseVersion: null, unavailable: { cpu: "test unavailable", memoryBytes: "test unavailable", npmVersion: "test unavailable", gitCommit: "test unavailable", gitDirty: "test unavailable", dockerVersion: "not required", supabaseVersion: "not required" } });
 
 async function fakeRun(options: { config?: ReturnType<typeof measuredConfig>; confirmLarge?: boolean; doctor?: () => Promise<BackendInfo>; phaseFailure?: "start" | "reset" | "seed" | "correctness"; captureFailure?: boolean; onSeed?: () => void; onFixture?: () => void; stopFailure?: boolean; unsafeCorrectness?: boolean; workload?: (opts: any) => Promise<any>; resources?: (opts: any) => Promise<any>; overloadThresholds?: { cpuPercent?: number; p99Ms?: number; maxMs?: number; consecutiveSamples?: number }; write?: (path: string, text: string, options: { flag: "wx" }) => Promise<void>; rename?: (from: string, to: string) => Promise<void>; onStop?: (resultPath: string) => void } = {}) {

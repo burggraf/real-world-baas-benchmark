@@ -28,11 +28,13 @@ export function safeErrorDetails(error: unknown): SafeErrorDetails {
 }
 
 export function isScoredMeasuredError(error: unknown): boolean {
-  return error instanceof BenchmarkOperationError && ["authentication", "authorization", "timeout", "transport/sdk", "application"].includes(error.classification);
+  return error instanceof BenchmarkOperationError && error.classification !== "invalid_response";
 }
 
-export function isIntegrityError(error: unknown, workflow?: string): boolean {
-  if (workflow === "signOutIn") return true;
-  if (error instanceof BenchmarkOperationError && error.code && sessionStateCodes.has(error.code)) return true;
+export function isSessionLossError(error: unknown, workflow?: string): boolean {
+  return workflow === "signOutIn" || (error instanceof BenchmarkOperationError && error.code !== undefined && sessionStateCodes.has(error.code));
+}
+
+export function isIntegrityError(error: unknown): boolean {
   return !isScoredMeasuredError(error);
 }

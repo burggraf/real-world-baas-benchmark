@@ -233,14 +233,15 @@ export async function runBenchmark(options: RunOptions): Promise<{ result: Bench
       } catch { postStageFailure = "post-stage backend doctor failed"; }
       const elapsed = (workloadEnd - stageStart) / 1_000;
       if (!Number.isFinite(elapsed) || elapsed <= 0) throw new Error("invalid monotonic stage elapsed time");
-      const stage = acc.finalize(elapsed, { requestedUsers, achievedUsers: summary.startedUsers });
+      const achievedUsers = Math.max(0, summary.startedUsers - summary.lostUsers);
+      const stage = acc.finalize(elapsed, { requestedUsers, achievedUsers });
       const reasons = [...stage.validityReasons];
       if (preIdentityFailure) reasons.push(preIdentityFailure);
       if (postStageFailure) reasons.push(postStageFailure);
       if (summary.stageFailed) reasons.push("workload failed");
       if (summary.closeErrors) reasons.push("session close failed");
       if (summary.graceExpired) reasons.push("grace period expired");
-      if (summary.startedUsers < requestedUsers) reasons.push("achieved user count below requested");
+      if (achievedUsers < requestedUsers) reasons.push("achieved user count below requested");
       if (!resources.valid) reasons.push(...resources.validityReasons);
       const overload = evaluateRunnerOverload(resources.samples, overloadThresholds);
       if (overload) reasons.push(overload);

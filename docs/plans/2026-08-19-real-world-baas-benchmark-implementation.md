@@ -694,7 +694,7 @@ Cover:
 
 - all stages pass;
 - latency fails before error rate;
-- ordinary measured operation error rate fails the class SLO; integrity/session errors invalidate the stage;
+- recognized measured operation errors fail the class SLO; malformed/unknown, external-cancellation, grace, and unresolved cleanup integrity errors invalidate; session loss retires only its owner;
 - throughput plateaus with rising latency;
 - runner overload invalidates a stage;
 - no passing stage returns no capacity;
@@ -1023,7 +1023,7 @@ git commit -m "docs: document reproducible benchmark runs"
 
 **Step 1: Prepare the host**
 
-Use one stable normal-power mode with Low Power Mode disabled and sufficient charge (AC and battery are equivalent protocol states on this benchmark host), record the source, prevent sleep, and do not switch source or power mode mid-run. Disable avoidable background jobs, leave product defaults unchanged, and record the clean Git commit. Confirm all correctness suites pass.
+Use one stable normal-power mode with Low Power Mode disabled and sufficient charge (AC and battery are equivalent protocol states on this benchmark host), record the source as context, and prevent sleep. Disable avoidable background jobs, leave product defaults unchanged, and record the clean Git commit. Confirm all correctness suites pass.
 
 **Step 2: Rotate run order**
 

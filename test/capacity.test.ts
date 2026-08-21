@@ -35,6 +35,8 @@ test("latency and boundary error rate fail SLOs", () => {
 
 test("achieved concurrency, invalid runner stage, and insufficient samples fail", () => {
   const miss = evaluateCapacity([pass(25)], config, { minAchievedRatio: 0.95 });
+  const exact = evaluateCapacity([{ ...pass(20), achievedUsers: 19 }], config);
+  assert.equal(exact.stages[0]!.passed, true);
   const missed = evaluateCapacity([{ ...pass(25), achievedUsers: 23 }], config);
   assert.equal(missed.stages[0]!.passed, false);
   assert.match(missed.stages[0]!.reasons.join(" "), /achieved\/requested/);
