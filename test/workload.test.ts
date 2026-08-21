@@ -54,6 +54,39 @@ test("ordinary measured adapter errors are scored and users continue", async () 
   assert.ok(dashboardCalls > 1);
 });
 
+test("prepared sessions stay paired with their users when authentication completes out of order", async () => {
+  const backend = createFakeBackend();
+  const baseCreate = backend.createSession;
+  let releaseFirst!: () => void;
+  const firstGate = new Promise<void>(resolve => { releaseFirst = resolve; });
+  let calls = 0;
+  backend.createSession = async credentials => {
+    if (calls++ === 0) await firstGate;
+    else releaseFirst();
+    const session = await baseCreate(credentials);
+    const expectedOrganizationId = credentials.email.startsWith("owner") ? "tenant-owner" : "tenant-member";
+    session.dashboard = async input => {
+      if (input.organizationId !== expectedOrganizationId) throw new BenchmarkOperationError("authorization", { code: "wrong_session_owner" });
+      return {
+        organization: { id: input.organizationId, name: "Tenant", ownerId: "owner", createdAt: "2026-01-01T00:00:00.000Z" },
+        projects: [{ id: input.projectId, organizationId: input.organizationId, name: "Project", status: "active", createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z" }],
+        recentActivity: [],
+      };
+    };
+    return session;
+  };
+  const weights = { ...config.weights, dashboard: 100, taskList: 0, taskDetail: 0, createTask: 0, updateTask: 0, addComment: 0, search: 0, profileUpdate: 0, signIn: 0 };
+  const users = [
+    { credentials: backend.fixture.owner, organizationId: "tenant-owner", projectId: "project-owner", taskId: "task-owner" },
+    { credentials: backend.fixture.member, organizationId: "tenant-member", projectId: "project-member", taskId: "task-member" },
+  ];
+  let clock = 0;
+  const summary = await runWorkload(backend, { ...config, weights }, { users, durationMs: 20, graceMs: 0, now: () => ++clock, sleep: async milliseconds => { if (milliseconds === 20) await new Promise<void>(() => {}); } });
+  assert.equal(summary.failedWorkflowCount, 0);
+  assert.equal(summary.lostUsers, 0);
+  assert.equal(summary.stageFailed, false);
+});
+
 test("session-state authentication failures retire only their users", async () => {
   for (const code of ["signed_out", "invalid_session", "session_missing", "http_401"]) {
     const backend = createFakeBackend();
