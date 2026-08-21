@@ -2,6 +2,7 @@ import { randomBytes } from "node:crypto";
 import PocketBase, { BaseAuthStore, ClientResponseError, type RecordModel } from "pocketbase";
 import type { Backend, AppSession, BackendInfo, SessionRequestOptions } from "../../src/backend.js";
 import { createSessionRequestController, type SessionRequestController } from "../../src/session-request.js";
+import { allSettledValues } from "../../src/settle.js";
 
 import type {
   Activity,
@@ -330,7 +331,7 @@ class PocketBaseSession implements AppSession {
   async dashboard(input: DashboardInput): Promise<Dashboard> {
     await this.requireProject(input.organizationId, input.projectId);
     const activity = input.activityPage || { page: 0, pageSize: 10 };
-    const [organization, projects, recentActivity] = await Promise.all([
+    const [organization, projects, recentActivity] = await allSettledValues([
       sdk(() => this.pb.collection("organizations").getOne(input.organizationId, { fields: "id,name,owner,created" })),
       this.listProjects(input.organizationId),
       sdk(() => this.pb.collection("activities").getList(activity.page + 1, activity.pageSize, {
@@ -358,7 +359,7 @@ class PocketBaseSession implements AppSession {
 
   async getTask(input: GetTaskInput): Promise<TaskDetail> {
     await this.requireTask(input.organizationId, input.projectId, input.taskId);
-    const [taskRecord, comments] = await Promise.all([
+    const [taskRecord, comments] = await allSettledValues([
       sdk(() => this.pb.collection("tasks").getOne(input.taskId, { expand: "creator,assignee" })),
       sdk(() => this.pb.collection("comments").getList(input.comments.page + 1, input.comments.pageSize, {
         filter: this.pb.filter("task = {:task} && organization = {:organization} && project = {:project}", {

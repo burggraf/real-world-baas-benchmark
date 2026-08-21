@@ -2,6 +2,7 @@ import { randomBytes } from "node:crypto";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import type { Backend, AppSession, BackendInfo, SessionRequestOptions } from "../../src/backend.js";
 import { createSessionRequestController, type SessionRequestController } from "../../src/session-request.js";
+import { allSettledValues } from "../../src/settle.js";
 
 import type {
   Activity, AddCommentInput, Comment, CreateTaskInput, Credentials, Dashboard, DashboardInput, DatasetProfile,
@@ -193,7 +194,7 @@ class SupabaseSession implements AppSession {
   async dashboard(input: DashboardInput): Promise<Dashboard> {
     await this.requireProject(input.organizationId, input.projectId);
     const activity = input.activityPage || { page: 0, pageSize: 10 };
-    const [organization, projects, recent] = await Promise.all([
+    const [organization, projects, recent] = await allSettledValues([
       sdk(() => this.client.from("organizations").select(FIELDS.organization).eq("id", input.organizationId).maybeSingle()),
       this.listProjects(input.organizationId),
       sdk(() => this.client.from("activities").select(FIELDS.activity).eq("organization_id", input.organizationId).order("created_at", { ascending: false }).order("id", { ascending: false }).range(...pageRange(activity.page, activity.pageSize))),
@@ -205,12 +206,12 @@ class SupabaseSession implements AppSession {
 
   async getTask(input: GetTaskInput): Promise<TaskDetail> {
     await this.requireTask(input.organizationId, input.projectId, input.taskId);
-    const [taskResponse, commentsResponse] = await Promise.all([
+    const [taskResponse, commentsResponse] = await allSettledValues([
       sdk(() => this.client.from("tasks").select(FIELDS.task).eq("id", input.taskId).eq("organization_id", input.organizationId).eq("project_id", input.projectId).maybeSingle()),
       sdk(() => this.client.from("comments").select(FIELDS.comment, { count: "exact" }).eq("organization_id", input.organizationId).eq("project_id", input.projectId).eq("task_id", input.taskId).order("created_at").order("id").range(...pageRange(input.comments.page, input.comments.pageSize))),
     ]);
     const task = mapSupabaseTask(required(taskResponse, "task_denied"));
-    const [creator, assignee] = await Promise.all([
+    const [creator, assignee] = await allSettledValues([
       sdk(() => this.client.from("profiles").select(FIELDS.profile).eq("id", task.creatorId).maybeSingle()),
       task.assigneeId ? sdk(() => this.client.from("profiles").select(FIELDS.profile).eq("id", task.assigneeId!).maybeSingle()) : Promise.resolve(null),
     ]);

@@ -2,6 +2,7 @@ import { randomBytes } from "node:crypto";
 import { DeleteOperation, initClient, type Client, type FilterOrComposite, type ListOpts } from "trailbase";
 import type { Backend, AppSession, SessionRequestOptions } from "../../src/backend.js";
 import { createSessionRequestController, type SessionRequestController } from "../../src/session-request.js";
+import { allSettledValues } from "../../src/settle.js";
 
 import type {
   Activity, AddCommentInput, Comment, CreateTaskInput, Credentials, Dashboard, DashboardInput, DatasetProfile,
@@ -235,7 +236,7 @@ class TrailBaseSession implements AppSession {
   async dashboard(input: DashboardInput): Promise<Dashboard> {
     await this.project(input.organizationId, input.projectId);
     const activity = input.activityPage || { page: 0, pageSize: 10 };
-    const [organization, projects, recent] = await Promise.all([
+    const [organization, projects, recent] = await allSettledValues([
       oneRow(this.client, "organizations", [{ column: "publicId", op: "equal", value: input.organizationId }], "organization_denied"),
       allRows(this.client, "projects", [{ column: "organizationId", op: "equal", value: input.organizationId }], ["createdAt", "publicId"]),
       listRows(this.client, "activities", activity.page, activity.pageSize, { filters: [{ column: "organizationId", op: "equal", value: input.organizationId }], order: ["-createdAt", "-publicId"] }),
@@ -260,7 +261,7 @@ class TrailBaseSession implements AppSession {
       order: ["createdAt", "publicId"],
     });
     const assigneeId = nullableString(task, "assigneeId");
-    const [creator, assignee] = await Promise.all([
+    const [creator, assignee] = await allSettledValues([
       this.profile(stringField(task, "creatorId")),
       assigneeId ? this.profile(assigneeId) : Promise.resolve(null),
     ]);
