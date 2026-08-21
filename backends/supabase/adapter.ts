@@ -99,6 +99,7 @@ export function normalizeSupabaseError(error: unknown, responseStatus?: number):
   const code = typeof source.code === "string" && /^[A-Za-z0-9_-]{1,40}$/.test(source.code) ? source.code : "supabase_error";
   const name = typeof source.name === "string" ? source.name : "";
   const classification =
+    status !== undefined && status >= 500 ? "backend_health" :
     status === 401 || (status === 400 && /credential|auth/i.test(code)) || /^Auth.*Error$/.test(name) ? "authentication" :
     status === 403 || status === 404 || status === 406 || code === "42501" || code === "PGRST116" ? "authorization" :
     status === 408 || code === "timeout" || name === "AbortError" || name === "TimeoutError" ? "timeout":

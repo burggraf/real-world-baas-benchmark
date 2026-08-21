@@ -98,6 +98,8 @@ test("TrailBase error normalization redacts remote response text", () => {
   const error = normalizeTrailBaseError({ status: 403, message: "secret" });
   assert.equal(error.classification, "authorization");
   assert.equal(error.message.includes("secret"), false);
+  assert.equal(normalizeTrailBaseError({ status: 500 }).classification, "backend_health");
+  assert.equal(normalizeTrailBaseError({ status: "503" }).classification, "backend_health");
 });
 
 test("TrailBase setup commands are bounded, shell-free, and never add users with password argv", async () => {

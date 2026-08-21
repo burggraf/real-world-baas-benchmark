@@ -132,7 +132,7 @@ export function normalizeTrailBaseError(error: unknown): BenchmarkOperationError
   const rawStatus = source.status;
   const status = typeof rawStatus === "number" ? rawStatus : typeof rawStatus === "string" && /^\d{3}$/.test(rawStatus) ? Number(rawStatus) : undefined;
   const name = typeof source.name === "string" ? source.name : "";
-  const classification = status === 401 ? "authentication" : status === 403 || status === 404 ? "authorization" : status === 408 || name === "AbortError" || name === "TimeoutError" ? "timeout" : "transport/sdk";
+  const classification = status !== undefined && status >= 500 ? "backend_health" : status === 401 ? "authentication" : status === 403 || status === 404 ? "authorization" : status === 408 || name === "AbortError" || name === "TimeoutError" ? "timeout" : "transport/sdk";
   return new BenchmarkOperationError(classification, { code: "trailbase_request", status });
 }
 

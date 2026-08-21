@@ -116,6 +116,8 @@ test("search escapes Postgres pattern metacharacters and errors expose no payloa
   assert.equal(error.message.includes("secret"), false);
   assert.equal(normalizeSupabaseError({ status: 400, code: "invalid_credentials" }).classification, "authentication");
   assert.equal(normalizeSupabaseError({ name: "AuthSessionMissingError" }).classification, "authentication");
+  assert.equal(normalizeSupabaseError({ status: 500 }).classification, "backend_health");
+  assert.equal(normalizeSupabaseError({ statusCode: "503" }).classification, "backend_health");
   assert.ok(createSupabaseClient("http://127.0.0.1:55321", "anon", "realworldbaasbench"));
 });
 
