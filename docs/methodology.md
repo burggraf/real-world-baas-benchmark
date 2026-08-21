@@ -145,7 +145,7 @@ set 3: TrailBase -> Supabase -> PocketBase
 
 The `compare` command is useful for a sequential smoke pass, but it does not impose thermal cooldowns or rotate later sets. Publishable collection should invoke individual `run` commands in the chosen order, wait the same cooldown after each backend, and record start/end times and rejected attempts. A current full run is approximately 30–55+ minutes per backend; nine rotated runs are multi-hour.
 
-Use AC power and disable sleep. Start from a stable cool/idle state, leave comparable thermal headroom, close browsers, IDE indexing, backups, virus scans, package updates, VMs, and other avoidable work, and do not change fan/power mode mid-set. Record unavoidable background services. Do not use a single laptop run to generalize to servers or other cooling/power states.
+Use one stable normal-power mode with Low Power Mode disabled and enough charge for the set; AC and battery are treated as equivalent protocol states on this benchmark host. Record the power source, prevent sleep, and do not switch source or power mode mid-run. Start from a stable cool/idle state, leave comparable thermal headroom, close browsers, IDE indexing, backups, virus scans, package updates, VMs, and other avoidable work. Record unavoidable background services. Do not use a single laptop run to generalize to servers or other cooling/power states.
 
 ## Cleanup ownership
 

@@ -117,7 +117,7 @@ Do not add `--confirm-large` to automation casually.
 
 ## Reproducible run discipline
 
-Use AC power, disable sleep, keep thermal conditions stable, close avoidable background work, and avoid software updates during a comparison. Keep product defaults and the committed schema/indexes unchanged. Run one backend at a time, rotate backend order across three run sets, and use one fixed documented cooldown between backends. Record rejected runs instead of deleting them.
+Use one stable normal-power mode with Low Power Mode disabled and sufficient charge (AC and battery are equivalent protocol states on this benchmark host), record the source, prevent sleep, and do not switch source or power mode mid-run. Keep thermal conditions stable, close avoidable background work, and avoid software updates during a comparison. Keep product defaults and the committed schema/indexes unchanged. Run one backend at a time, rotate backend order across three run sets, and use one fixed documented cooldown between backends. Record rejected runs instead of deleting them.
 
 Measured operations always use ordinary application-user credentials and official SDK clients. Backend administrative credentials are separate and confined to setup, deterministic seed, count validation, and cleanup paths; they are not measured sessions.
 

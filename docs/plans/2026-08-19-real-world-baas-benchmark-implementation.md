@@ -1023,7 +1023,7 @@ git commit -m "docs: document reproducible benchmark runs"
 
 **Step 1: Prepare the host**
 
-Use AC power, disable avoidable background jobs, leave product defaults unchanged, and record the clean Git commit. Confirm all correctness suites pass.
+Use one stable normal-power mode with Low Power Mode disabled and sufficient charge (AC and battery are equivalent protocol states on this benchmark host), record the source, prevent sleep, and do not switch source or power mode mid-run. Disable avoidable background jobs, leave product defaults unchanged, and record the clean Git commit. Confirm all correctness suites pass.
 
 **Step 2: Rotate run order**
 
