@@ -55,6 +55,76 @@ test("workload can run a finite stage and cleans up sessions", async () => {
   assert.ok(samples.every(sample => sample.elapsedMs >= 0 && typeof sample.success === "boolean"));
 });
 
+test("stage deadline gives an in-flight workflow grace before transport cancellation", async () => {
+  const backend = createFakeBackend();
+  const baseCreate = backend.createSession;
+  let started = false;
+  let cancelCalls = 0;
+  let release!: () => void;
+  const pending = new Promise<void>(resolve => { release = resolve; });
+  backend.createSession = async credentials => {
+    const session = await baseCreate(credentials);
+    const dashboard = session.dashboard;
+    session.dashboard = async input => { started = true; await pending; return dashboard(input); };
+    session.cancelPending = () => { cancelCalls++; release(); };
+    return session;
+  };
+  const weights = { ...config.weights, dashboard: 100, taskList: 0, taskDetail: 0, createTask: 0, updateTask: 0, addComment: 0, search: 0, profileUpdate: 0, signIn: 0 };
+  const summary = await runWorkload(backend, { ...config, weights }, {
+    users: [user(backend)], durationMs: 10, graceMs: 20, now: () => 0,
+    sleep: async milliseconds => {
+      if (milliseconds === 10) while (!started) await Promise.resolve();
+      if (milliseconds === 20) { release(); await new Promise<void>(() => {}); }
+    },
+  });
+  assert.equal(cancelCalls, 0);
+  assert.equal(summary.completedWorkflowCount, 1);
+  assert.equal(summary.failedWorkflowCount, 0);
+  assert.equal(summary.graceExpired, false);
+  assert.equal(summary.stageFailed, false);
+});
+
+test("grace expiry cancels an in-flight workflow before cleanup", async () => {
+  const backend = createFakeBackend();
+  const baseCreate = backend.createSession;
+  let started = false;
+  let graceStarted = false;
+  let cancelledBeforeGrace = false;
+  let operationSettled = false;
+  let measuredEnded = false;
+  let samplesAfterMeasurement = 0;
+  let cancelCalls = 0;
+  let release!: () => void;
+  const pending = new Promise<void>(resolve => { release = resolve; });
+  backend.createSession = async credentials => {
+    const session = await baseCreate(credentials);
+    session.dashboard = async () => {
+      started = true;
+      try { await pending; throw Object.assign(new Error("cancelled"), { name: "AbortError" }); }
+      finally { operationSettled = true; }
+    };
+    session.cancelPending = () => { cancelCalls++; if (!graceStarted) cancelledBeforeGrace = true; release(); };
+    return session;
+  };
+  const weights = { ...config.weights, dashboard: 100, taskList: 0, taskDetail: 0, createTask: 0, updateTask: 0, addComment: 0, search: 0, profileUpdate: 0, signIn: 0 };
+  const summary = await runWorkload(backend, { ...config, weights }, {
+    users: [user(backend)], durationMs: 10, graceMs: 20, now: () => 0,
+    sleep: async milliseconds => {
+      if (milliseconds === 10) while (!started) await Promise.resolve();
+      if (milliseconds === 20) graceStarted = true;
+    },
+    onSample: () => { if (measuredEnded) samplesAfterMeasurement++; },
+    onMeasuredEnd: () => { assert.equal(operationSettled, true); measuredEnded = true; },
+  });
+  assert.equal(cancelledBeforeGrace, false);
+  assert.equal(cancelCalls, 1);
+  assert.equal(summary.graceExpired, true);
+  assert.equal(summary.stageFailed, true);
+  assert.equal(measuredEnded, true);
+  assert.equal(samplesAfterMeasurement, 0);
+  assert.equal(backend.closedSessions, 1);
+});
+
 test("prepares sessions in ordered batches of ten and measures only after preparation", async () => {
   const backend = createFakeBackend();
   const baseCreate = backend.createSession;
@@ -133,7 +203,7 @@ test("boundary authentication is unmeasured while sign-out/in authentication is 
   assert.equal(backend.closedSessions, backend.sessions);
 });
 
-test("a measurement-end failure waits for blocked workers before cleanup", async () => {
+test("measurement end waits for blocked workers before cleanup", async () => {
   const backend = createFakeBackend();
   const baseCreate = backend.createSession;
   let release!: () => void;
@@ -152,13 +222,14 @@ test("a measurement-end failure waits for blocked workers before cleanup", async
   for (let i = 0; i < 100 && !blocked; i++) await Promise.resolve();
   await Promise.resolve();
   void stage.then(() => { settled = true; });
-  for (let i = 0; i < 100 && !ended; i++) await Promise.resolve();
+  await Promise.resolve();
   assert.equal(blocked, true);
   assert.equal(settled, false);
-  assert.equal(ended, 1);
+  assert.equal(ended, 0);
   assert.equal(backend.closedSessions, 0);
   release();
   const summary = await stage;
+  assert.equal(ended, 1);
   assert.equal(summary.stageFailed, true);
   assert.equal(backend.closedSessions, 1);
 });
@@ -227,7 +298,7 @@ test("external cancellation during think time stops the next journey", async () 
   const weights = { ...config.weights, dashboard: 100, taskList: 0, taskDetail: 0, createTask: 0, updateTask: 0, addComment: 0, search: 0, profileUpdate: 0, signIn: 0 };
   const summary = await runWorkload(backend, { ...config, weights }, {
     users: [user(backend)], durationMs: 100, graceMs: 0, signal: controller.signal,
-    sleep: async (milliseconds, signal) => { if (milliseconds !== 100) { thinks++; controller.abort(); } if (signal?.aborted) throw Object.assign(new Error("cancelled"), { name: "AbortError" }); },
+    sleep: async (milliseconds, signal) => { if (!controller.signal.aborted && milliseconds !== 100 && milliseconds !== 0) { thinks++; controller.abort(); } if (signal?.aborted) throw Object.assign(new Error("cancelled"), { name: "AbortError" }); },
   });
   assert.equal(thinks, 1);
   assert.equal(summary.completedWorkflowCount, 1);
