@@ -193,7 +193,29 @@ export function noClobberDecision(existing, candidate) {
   return "unchanged";
 }
 
-export async function inspectExisting(source, destination, candidate) {
+async function validateDestinationParents(repoRoot, destination) {
+  const root = resolve(repoRoot);
+  const tools = join(root, ".tools");
+  const target = resolve(destination);
+  if (!inside(tools, target)) throw new Error("Tool destination must be inside the repository-owned .tools directory");
+  for (const path of [root, tools]) {
+    let stat;
+    try { stat = await lstat(path); } catch (error) { if (error?.code === "ENOENT" && path !== root) continue; throw error; }
+    if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error("Tool destination parents must be non-symlink directories");
+  }
+  const parts = relative(tools, dirname(target)).split(sep).filter(Boolean);
+  let current = tools;
+  for (const part of parts) {
+    current = join(current, part);
+    try {
+      const stat = await lstat(current);
+      if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error("Tool destination parents must be non-symlink directories");
+    } catch (error) { if (error?.code === "ENOENT") break; throw error; }
+  }
+}
+
+export async function inspectExisting(source, destination, candidate, options = {}) {
+  await validateDestinationParents(options.repoRoot ?? resolve(dirname(destination), "../.."), destination);
   const actualCandidate = await hashFile(source);
   if (actualCandidate.sha256 !== candidate.sha256 || actualCandidate.size !== candidate.size) throw new Error("Candidate executable changed before installation");
   let existing;
@@ -342,6 +364,7 @@ export async function downloadBackend(backend, options = {}) {
   const destination = resolve(root, release.destination);
   const temporary = await mkdtemp(join(tmpdir(), "real-world-baas-backend-"));
   options.activeTemps?.add(temporary);
+  let retained = false;
   try {
     await (options.chmod ?? chmod)(temporary, 0o700);
     const archive = join(temporary, release.asset);
@@ -355,8 +378,10 @@ export async function downloadBackend(backend, options = {}) {
     const executable = await runner.extractEntry(archive, entry, extracted, { signal: options.signal, maxBytes: EXECUTABLE_MAX_BYTES });
     const actualExecutable = await hashFile(extracted, EXECUTABLE_MAX_BYTES).catch(() => null);
     if (!actualExecutable || actualExecutable.sha256 !== executable?.sha256 || actualExecutable.size !== executable?.size || (release.executableSha256 && actualExecutable.sha256 !== release.executableSha256)) throw new Error(`${backend} executable SHA-256 mismatch`);
-    const status = await inspectExisting(extracted, destination, actualExecutable);
+    const status = await inspectExisting(extracted, destination, actualExecutable, { repoRoot: root });
     if (status === "missing") {
+      retained = true;
+      options.activeTemps?.delete(temporary);
       const instructions = Object.freeze({ source: extracted, destination, sha256: actualExecutable.sha256, mode: "0755" });
       return Object.freeze({ backend, target, destination, status, executableSha256: actualExecutable.sha256, instructions, retainedStaging: temporary });
     }
@@ -364,7 +389,7 @@ export async function downloadBackend(backend, options = {}) {
     await rm(temporary, { recursive: true, force: true });
     return Object.freeze({ backend, target, destination, status, executableSha256: actualExecutable.sha256 });
   } finally {
-    if (options.activeTemps?.has(temporary)) { options.activeTemps.delete(temporary); await rm(temporary, { recursive: true, force: true }); }
+    if (!retained) { options.activeTemps?.delete(temporary); await rm(temporary, { recursive: true, force: true }); }
   }
 }
 
