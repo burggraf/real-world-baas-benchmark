@@ -2,10 +2,11 @@ import assert from "node:assert/strict";
 import { lstat, mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { spawnSync } from "node:child_process";
 import test from "node:test";
 import { pathToFileURL } from "node:url";
 // Resolve the plain-Node downloader from both source tests and compiled dist tests.
-const { downloadBackend, ensureSafeToolsParent, installNoClobber, noClobberDecision, parseArchiveEntries, parseChecksumManifest, selectRelease, selectTarget, sha256, verifySha256 } = await import(pathToFileURL(resolve("scripts/download-backends.mjs")).href);
+const { downloadArchive, downloadBackend, ensureSafeToolsParent, extractEntry, installNoClobber, listArchive, noClobberDecision, parseArchiveEntries, parseChecksumManifest, selectRelease, selectTarget, sha256, verifySha256 } = await import(pathToFileURL(resolve("scripts/download-backends.mjs")).href);
 
 const pocketAsset = "pocketbase_0.39.11_linux_amd64.zip";
 const pocketDigest = "08b9fcda0d5fd42cb315dc15a36dfa121c993855bd635f01d347c31b4328ec34";
@@ -14,6 +15,22 @@ async function temporaryRepository(prefix: string): Promise<string> {
   const root = await mkdtemp(join(tmpdir(), prefix));
   await writeFile(join(root, "package.json"), "{}\n");
   return root;
+}
+
+function crc32(bytes: Uint8Array): number {
+  let crc = 0xffffffff;
+  for (const byte of bytes) { crc ^= byte; for (let bit = 0; bit < 8; bit++) crc = (crc >>> 1) ^ (crc & 1 ? 0xedb88320 : 0); }
+  return (crc ^ 0xffffffff) >>> 0;
+}
+function storedZip(entries: Array<[string, Uint8Array]>): Buffer {
+  const locals: Buffer[] = [], central: Buffer[] = [];
+  let offset = 0;
+  for (const [name, data] of entries) {
+    const nameBytes = Buffer.from(name); const crc = crc32(data);
+    const local = Buffer.alloc(30 + nameBytes.length + data.length); local.writeUInt32LE(0x04034b50, 0); local.writeUInt16LE(20, 4); local.writeUInt32LE(0, 6); local.writeUInt16LE(0, 8); local.writeUInt16LE(0, 10); local.writeUInt16LE(0, 12); local.writeUInt32LE(crc, 14); local.writeUInt32LE(data.length, 18); local.writeUInt32LE(data.length, 22); local.writeUInt16LE(nameBytes.length, 26); local.writeUInt16LE(0, 28); nameBytes.copy(local, 30); Buffer.from(data).copy(local, 30 + nameBytes.length); locals.push(local);
+    const directory = Buffer.alloc(46 + nameBytes.length); directory.writeUInt32LE(0x02014b50, 0); directory.writeUInt16LE(20, 4); directory.writeUInt16LE(20, 6); directory.writeUInt32LE(0, 8); directory.writeUInt16LE(0, 10); directory.writeUInt16LE(0, 12); directory.writeUInt16LE(0, 14); directory.writeUInt32LE(crc, 16); directory.writeUInt32LE(data.length, 20); directory.writeUInt32LE(data.length, 24); directory.writeUInt16LE(nameBytes.length, 28); directory.writeUInt16LE(0, 30); directory.writeUInt16LE(0, 32); directory.writeUInt16LE(0, 34); directory.writeUInt16LE(0, 36); directory.writeUInt32LE(0, 38); directory.writeUInt32LE(offset, 42); nameBytes.copy(directory, 46); central.push(directory); offset += local.length;
+  }
+  const body = Buffer.concat(locals); const directory = Buffer.concat(central); const end = Buffer.alloc(22); end.writeUInt32LE(0x06054b50, 0); end.writeUInt16LE(entries.length, 8); end.writeUInt16LE(entries.length, 10); end.writeUInt32LE(directory.length, 12); end.writeUInt32LE(body.length, 16); return Buffer.concat([body, directory, end]);
 }
 
 async function downloadTemps(root: string): Promise<string[]> {
@@ -42,16 +59,16 @@ test("target and pinned release selection is exact", () => {
     target: "linux-x64",
     asset: pocketAsset,
     archiveSha256: pocketDigest,
-    executableSha256: null,
+    executableSha256: "88370d5f6fa4820cd2414fa53c6e168d3dd0e33b7a7fd9ff914265492a7aa3b6",
     binary: "pocketbase",
     destination: ".tools/pocketbase-0.39.11/pocketbase",
     url: `https://github.com/pocketbase/pocketbase/releases/download/v0.39.11/${pocketAsset}`,
   });
   const pinned: Record<string, [string, string, string | null]> = {
-    "pocketbase/darwin-arm64": ["pocketbase_0.39.11_darwin_arm64.zip", "9da6fbe11e82c5b1704e56f7457b24682e01c510206c29b798a458119fa2be20", null],
-    "pocketbase/darwin-x64": ["pocketbase_0.39.11_darwin_amd64.zip", "888892fe5fe64cea4a1441937671e191b32ed8f322fa09d3d7b3ca2fc1d7be29", null],
-    "pocketbase/linux-arm64": ["pocketbase_0.39.11_linux_arm64.zip", "8c785618840df7ebba795fdf4eba33a5fed64ac5307ad8023b955b4ebb82048b", null],
-    "pocketbase/linux-x64": [pocketAsset, pocketDigest, null],
+    "pocketbase/darwin-arm64": ["pocketbase_0.39.11_darwin_arm64.zip", "9da6fbe11e82c5b1704e56f7457b24682e01c510206c29b798a458119fa2be20", "804f9ef353684c1c6b03eaaa33ad7b3fef1eda8eb66ec5ecb113730a07f7a210"],
+    "pocketbase/darwin-x64": ["pocketbase_0.39.11_darwin_amd64.zip", "888892fe5fe64cea4a1441937671e191b32ed8f322fa09d3d7b3ca2fc1d7be29", "3e6092e9825030ff9b48a685efd8d688ad87c17f4ea9d6a7cd9fc1e17b3d0748"],
+    "pocketbase/linux-arm64": ["pocketbase_0.39.11_linux_arm64.zip", "8c785618840df7ebba795fdf4eba33a5fed64ac5307ad8023b955b4ebb82048b", "bb6f2e3373c7cdbed7f7919a203856f29d713d04cdc550dfec359d5d1437e5b3"],
+    "pocketbase/linux-x64": [pocketAsset, pocketDigest, "88370d5f6fa4820cd2414fa53c6e168d3dd0e33b7a7fd9ff914265492a7aa3b6"],
     "trailbase/darwin-arm64": ["trailbase_v0.33.1_arm64_apple_darwin.zip", "72ca231b0b02c51da587c69b120107312b1dd649bf6140db4f8101d0b58a4622", "cf870bd8daef2a9c5ae26d34267618b29961188ef3be312722f363538ed787fb"],
     "trailbase/darwin-x64": ["trailbase_v0.33.1_x86_64_apple_darwin.zip", "2d6c3d95d0153de320a86510836306e2ab26ba97337f4f7f0bbe67df521713e4", "21cf0e8e27e9c16d92fe0b7520ebf24c22e443f7f00ef03e2eca4262be81ef8d"],
     "trailbase/linux-arm64": ["trailbase_v0.33.1_arm64_linux.zip", "2315984a07a5cec42e271dbb2c824815c4c6c7b5f4d35817bc589eac14b0fb5f", "1ef3c8cdd44bdda20ef730f0ba0398908473eb3e4955aa4180b0dd4b5d9e6cd7"],
@@ -75,12 +92,92 @@ test("SHA-256 verification reports only a bounded label", () => {
   assert.throws(() => verifySha256(Buffer.from("secret response body"), "0".repeat(64), "archive"), /^Error: archive SHA-256 mismatch$/);
 });
 
+test("real unzip listing and extraction remain bounded and shell-free", async (t) => {
+  if (spawnSync("unzip", ["-v"], { stdio: "ignore" }).error) { t.skip("unzip is required for archive extraction"); return; }
+  const root = await temporaryRepository("backend-unzip-");
+  try {
+    const archive = join(root, "fixture.zip"); const extracted = join(root, "trail");
+    await writeFile(archive, storedZip([["trail", Buffer.from("verified executable")], ["README.md", Buffer.from("docs")]]));
+    assert.equal(await listArchive(archive), "trail\nREADME.md\n");
+    const result = await extractEntry(archive, "trail", extracted);
+    assert.deepEqual(result, { sha256: sha256(Buffer.from("verified executable")), size: 19 });
+    assert.deepEqual(await readFile(extracted), Buffer.from("verified executable"));
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
 test("archive listing rejects traversal and ambiguous root binaries", () => {
   assert.equal(parseArchiveEntries("trail\nREADME.md\ndocs/guide.md\n", "trail"), "trail");
   assert.throws(() => parseArchiveEntries("trail\n../outside\n", "trail"), /unsafe archive entry/i);
   assert.throws(() => parseArchiveEntries("trail\ntrail\n", "trail"), /duplicate|exactly one/i);
   assert.throws(() => parseArchiveEntries("./trail\n", "trail"), /unsafe archive entry|exactly one/i);
   assert.throws(() => parseArchiveEntries("docs/trail\n", "trail"), /exactly one/i);
+});
+
+test("download fetch follows only bounded HTTPS GitHub asset redirects", async () => {
+  const root = await temporaryRepository("backend-redirect-");
+  const release = selectRelease("pocketbase", "linux-x64");
+  const destination = join(root, "archive.zip");
+  const calls: string[] = [];
+  try {
+    await assert.rejects(downloadArchive(release, destination, {
+      fetchImpl: async (url: string) => {
+        calls.push(url);
+        return new Response(null, { status: 302, headers: { location: `http://evil.example/${release.asset}` } });
+      },
+    }), /unapproved URL/i);
+    assert.deepEqual(calls, [release.url]);
+    await assert.rejects(lstat(destination), { code: "ENOENT" });
+
+    calls.length = 0;
+    const bytes = Buffer.from("fixture archive");
+    const result = await downloadArchive(release, destination, {
+      fetchImpl: async (url: string) => {
+        calls.push(url);
+        if (calls.length === 1) return new Response(null, { status: 302, headers: { location: `https://release-assets.githubusercontent.com/path/${release.asset}` } });
+        return new Response(bytes, { status: 200 });
+      },
+    });
+    assert.equal(result.sha256, sha256(bytes));
+    assert.deepEqual(calls, [release.url, `https://release-assets.githubusercontent.com/path/${release.asset}`]);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test("download fetch rejects oversized and failed response streams without body details", async () => {
+  const root = await temporaryRepository("backend-fetch-limits-");
+  const release = selectRelease("pocketbase", "linux-x64");
+  try {
+    await assert.rejects(downloadArchive(release, join(root, "large.zip"), {
+      fetchImpl: async () => ({ status: 200, ok: true, url: release.url, headers: { get: () => String(128 * 1024 * 1024 + 1) }, body: new ReadableStream() }),
+    }), /byte ceiling/i);
+    const failedBody = new ReadableStream({ start(controller) { controller.enqueue(Buffer.from("partial")); controller.error(new Error("secret stream body")); } });
+    await assert.rejects(downloadArchive(release, join(root, "failed.zip"), {
+      fetchImpl: async () => ({ status: 200, ok: true, url: release.url, headers: { get: () => null }, body: failedBody }),
+    }), error => error instanceof Error && /download failed or timed out/i.test(error.message) && !error.message.includes("secret stream body"));
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test("download cleanup removes a temp directory when its initial chmod fails", async () => {
+  const root = await temporaryRepository("backend-chmod-cleanup-");
+  try {
+    await assert.rejects(downloadBackend("pocketbase", { repoRoot: root, platform: "linux", arch: "x64", chmod: async () => { throw new Error("chmod denied"); } }), /chmod denied/);
+    assert.deepEqual(await downloadTemps(root), []);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test("installation pins every parent directory handle and rejects a swapped symlink", async () => {
+  const root = await temporaryRepository("backend-parent-race-");
+  const outside = await mkdtemp(join(tmpdir(), "backend-parent-race-outside-"));
+  try {
+    const destination = join(root, ".tools/pocketbase-0.39.11/pocketbase");
+    await ensureSafeToolsParent(root, destination);
+    await rm(join(root, ".tools/pocketbase-0.39.11"), { recursive: true, force: true });
+    await symlink(outside, join(root, ".tools/pocketbase-0.39.11"));
+    const source = join(root, ".tools/source");
+    const bytes = Buffer.from("verified executable");
+    await writeFile(source, bytes);
+    await assert.rejects(installNoClobber(source, destination, { sha256: sha256(bytes), size: bytes.length }, { repoRoot: root }), /non-symlink|symbolic|directory|loop|not a directory/i);
+    assert.deepEqual(await readdir(outside), []);
+  } finally { await rm(root, { recursive: true, force: true }); await rm(outside, { recursive: true, force: true }); }
 });
 
 test("safe tool parents reject symlinks outside the repository", async () => {
@@ -143,9 +240,10 @@ test("archive mismatch is rejected without leaking a response body and temps are
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 
-test("TrailBase extracted digest mismatch is rejected and every temp is cleaned", async () => {
+test("TrailBase extracted digest mismatch is rejected by independent byte hashing", async () => {
   const root = await temporaryRepository("backend-extracted-mismatch-");
   try {
+    assert.throws(() => verifySha256(Buffer.from("wrong executable"), "cf870bd8daef2a9c5ae26d34267618b29961188ef3be312722f363538ed787fb", "trail executable"), /trail executable SHA-256 mismatch/);
     await assert.rejects(downloadBackend("trailbase", {
       repoRoot: root,
       platform: "darwin",
@@ -163,7 +261,7 @@ test("TrailBase extracted digest mismatch is rejected and every temp is cleaned"
           return { sha256: sha256(bytes), size: bytes.length };
         },
       },
-    }), /executable SHA-256 mismatch/);
+    }), /archive SHA-256 mismatch/);
     assert.deepEqual(await downloadTemps(root), []);
     await assert.rejects(lstat(join(root, ".tools/trailbase-0.33.1/trail")), { code: "ENOENT" });
   } finally { await rm(root, { recursive: true, force: true }); }

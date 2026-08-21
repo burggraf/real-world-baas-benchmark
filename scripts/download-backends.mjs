@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
+import { constants as fsConstants } from "node:fs";
 import {
   chmod,
   link,
@@ -22,6 +23,8 @@ const COMMAND_TIMEOUT_MS = 60_000;
 const DOWNLOAD_TIMEOUT_MS = 120_000;
 const SHA256 = /^[0-9a-f]{64}$/;
 const TARGETS = new Set(["darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64"]);
+const GITHUB_DOWNLOAD_HOSTS = new Set(["github.com", "objects.githubusercontent.com", "release-assets.githubusercontent.com"]);
+const MAX_REDIRECTS = 5;
 
 const releases = Object.freeze({
   pocketbase: Object.freeze({
@@ -29,10 +32,10 @@ const releases = Object.freeze({
     baseUrl: "https://github.com/pocketbase/pocketbase/releases/download/v0.39.11/",
     binary: "pocketbase",
     targets: Object.freeze({
-      "darwin-arm64": Object.freeze({ asset: "pocketbase_0.39.11_darwin_arm64.zip", archiveSha256: "9da6fbe11e82c5b1704e56f7457b24682e01c510206c29b798a458119fa2be20" }),
-      "darwin-x64": Object.freeze({ asset: "pocketbase_0.39.11_darwin_amd64.zip", archiveSha256: "888892fe5fe64cea4a1441937671e191b32ed8f322fa09d3d7b3ca2fc1d7be29" }),
-      "linux-arm64": Object.freeze({ asset: "pocketbase_0.39.11_linux_arm64.zip", archiveSha256: "8c785618840df7ebba795fdf4eba33a5fed64ac5307ad8023b955b4ebb82048b" }),
-      "linux-x64": Object.freeze({ asset: "pocketbase_0.39.11_linux_amd64.zip", archiveSha256: "08b9fcda0d5fd42cb315dc15a36dfa121c993855bd635f01d347c31b4328ec34" }),
+      "darwin-arm64": Object.freeze({ asset: "pocketbase_0.39.11_darwin_arm64.zip", archiveSha256: "9da6fbe11e82c5b1704e56f7457b24682e01c510206c29b798a458119fa2be20", executableSha256: "804f9ef353684c1c6b03eaaa33ad7b3fef1eda8eb66ec5ecb113730a07f7a210" }),
+      "darwin-x64": Object.freeze({ asset: "pocketbase_0.39.11_darwin_amd64.zip", archiveSha256: "888892fe5fe64cea4a1441937671e191b32ed8f322fa09d3d7b3ca2fc1d7be29", executableSha256: "3e6092e9825030ff9b48a685efd8d688ad87c17f4ea9d6a7cd9fc1e17b3d0748" }),
+      "linux-arm64": Object.freeze({ asset: "pocketbase_0.39.11_linux_arm64.zip", archiveSha256: "8c785618840df7ebba795fdf4eba33a5fed64ac5307ad8023b955b4ebb82048b", executableSha256: "bb6f2e3373c7cdbed7f7919a203856f29d713d04cdc550dfec359d5d1437e5b3" }),
+      "linux-x64": Object.freeze({ asset: "pocketbase_0.39.11_linux_amd64.zip", archiveSha256: "08b9fcda0d5fd42cb315dc15a36dfa121c993855bd635f01d347c31b4328ec34", executableSha256: "88370d5f6fa4820cd2414fa53c6e168d3dd0e33b7a7fd9ff914265492a7aa3b6" }),
     }),
   }),
   trailbase: Object.freeze({
@@ -181,7 +184,7 @@ async function hashFile(path, maxBytes = EXECUTABLE_MAX_BYTES) {
   const stat = await lstat(path);
   if (!stat.isFile() || stat.isSymbolicLink() || stat.size > maxBytes) throw new Error("Expected a bounded regular non-symlink file");
   const hash = createHash("sha256");
-  const input = await open(path, "r");
+  const input = await open(path, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW);
   try {
     for await (const chunk of input.createReadStream()) hash.update(chunk);
   } finally { await input.close(); }
@@ -197,38 +200,87 @@ export function noClobberDecision(existing, candidate) {
   return "unchanged";
 }
 
-export async function installNoClobber(source, destination, candidate) {
+const directoryFdPath = fd => process.platform === "linux" ? `/proc/self/fd/${fd}` : `/dev/fd/${fd}`;
+const openDirectoryChain = async (repoRoot, directory) => {
+  const root = resolve(repoRoot);
+  const target = resolve(directory);
+  if (!inside(root, target)) throw new Error("Tool destination must remain inside the repository");
+  const flags = fsConstants.O_RDONLY | fsConstants.O_DIRECTORY | fsConstants.O_NOFOLLOW;
+  if (process.platform === "darwin") {
+    const [canonicalRoot, canonical] = await Promise.all([realpath(root), realpath(target)]);
+    if (relative(canonicalRoot, canonical) !== relative(root, target)) throw new Error("Tool destination parents must remain non-symlink directories");
+    const handle = await open(target, flags);
+    return { handle, path: target, close: async () => handle.close() };
+  }
+  const handles = [];
+  try {
+    let handle = await open(root, flags);
+    handles.push(handle);
+    for (const part of relative(root, target).split(sep).filter(Boolean)) {
+      handle = await open(join(directoryFdPath(handle.fd), part), flags);
+      handles.push(handle);
+    }
+    return { handle: handles.at(-1), path: directoryFdPath(handles.at(-1).fd), close: async () => { for (const item of handles.reverse()) await item.close(); } };
+  } catch (error) {
+    for (const item of handles.reverse()) await item.close().catch(() => undefined);
+    throw error;
+  }
+};
+
+export async function installNoClobber(source, destination, candidate, options = {}) {
   noClobberDecision(null, candidate);
   const actualCandidate = await hashFile(source);
   if (actualCandidate.sha256 !== candidate.sha256 || actualCandidate.size !== candidate.size) throw new Error("Candidate executable changed before installation");
-  await chmod(source, 0o755);
+  const repoRoot = options.repoRoot ?? resolve(dirname(destination), "../..");
+  const parent = await openDirectoryChain(repoRoot, dirname(destination));
+  const safeDestination = join(parent.path, basename(destination));
   try {
-    await link(source, destination);
-    return "installed";
-  } catch (error) {
-    if (error?.code !== "EEXIST") throw error;
-  }
-  const existingStat = await lstat(destination);
-  if (!existingStat.isFile() || existingStat.isSymbolicLink()) throw new Error("Refusing to replace an existing different backend executable");
-  const existing = await hashFile(destination);
-  noClobberDecision(existing, candidate);
-  await chmod(destination, 0o755);
-  return "unchanged";
+    try {
+      await link(source, safeDestination);
+      await chmod(safeDestination, 0o755);
+      return "installed";
+    } catch (error) {
+      if (error?.code !== "EEXIST") throw error;
+    }
+    const existing = await hashFile(safeDestination);
+    noClobberDecision(existing, candidate);
+    await chmod(safeDestination, 0o755);
+    return "unchanged";
+  } finally { await parent.close(); }
 }
 
 function operationSignal(signal, timeoutMs) {
   return signal ? AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)]) : AbortSignal.timeout(timeoutMs);
 }
 
-async function downloadArchive(release, destination, options = {}) {
-  if (new URL(release.url).protocol !== "https:") throw new Error("Backend downloads require HTTPS");
+function validateDownloadUrl(url, release) {
+  const parsed = new URL(url);
+  if (parsed.protocol !== "https:" || !GITHUB_DOWNLOAD_HOSTS.has(parsed.hostname) || basename(parsed.pathname) !== release.asset) throw new Error("Backend download redirected to an unapproved URL");
+  return parsed.href;
+}
+
+export async function downloadArchive(release, destination, options = {}) {
   const fetchImpl = options.fetchImpl ?? fetch;
   const signal = operationSignal(options.signal, DOWNLOAD_TIMEOUT_MS);
+  let current = validateDownloadUrl(release.url, release);
   let response;
-  try { response = await fetchImpl(release.url, { redirect: "follow", signal }); }
-  catch { throw new Error("Backend download failed or timed out"); }
-  if (!response || typeof response.status !== "number" || !response.ok) throw new Error(`Backend download failed with HTTP ${response?.status ?? "unknown"}`);
-  if (response.url && new URL(response.url).protocol !== "https:") throw new Error("Backend download redirected away from HTTPS");
+  for (let redirects = 0; ; redirects++) {
+    try { response = await fetchImpl(current, { redirect: "manual", signal }); }
+    catch { throw new Error("Backend download failed or timed out"); }
+    if (!response || typeof response.status !== "number") throw new Error("Backend download failed");
+    if (response.status >= 300 && response.status < 400) {
+      if (redirects >= MAX_REDIRECTS) throw new Error("Backend download exceeded redirect limit");
+      const location = response.headers?.get?.("location");
+      if (!location) throw new Error("Backend download redirect missing location");
+      response.body?.cancel?.();
+      current = validateDownloadUrl(new URL(location, current).href, release);
+      continue;
+    }
+    if (!response.ok) throw new Error(`Backend download failed with HTTP ${response.status}`);
+    validateDownloadUrl(response.url || current, release);
+    break;
+  }
+  if (!response || !response.body) throw new Error("Backend download returned no body");
   if (!response.body) throw new Error("Backend download returned no body");
   const length = response.headers?.get?.("content-length");
   if (length !== null && length !== undefined && (!/^[0-9]+$/.test(length) || Number(length) > ARCHIVE_MAX_BYTES)) throw new Error("Backend archive exceeds the byte ceiling");
@@ -281,11 +333,11 @@ function spawnBounded(command, args, maxBytes, signal) {
   });
 }
 
-async function listArchive(archive, options = {}) {
+export async function listArchive(archive, options = {}) {
   return spawnBounded("unzip", ["-Z1", archive], LIST_MAX_BYTES, operationSignal(options.signal, COMMAND_TIMEOUT_MS));
 }
 
-async function extractEntry(archive, entry, destination, options = {}) {
+export async function extractEntry(archive, entry, destination, options = {}) {
   const signal = operationSignal(options.signal, COMMAND_TIMEOUT_MS);
   const output = await open(destination, "wx", 0o600);
   const child = spawn("unzip", ["-p", archive, entry], { shell: false, stdio: ["ignore", "pipe", "pipe"] });
@@ -328,24 +380,22 @@ export async function downloadBackend(backend, options = {}) {
   const destination = resolve(root, release.destination);
   await ensureSafeToolsParent(root, destination);
   const temporary = await mkdtemp(join(root, ".tools/.download-"));
-  await chmod(temporary, 0o700);
   options.activeTemps?.add(temporary);
   try {
+    await (options.chmod ?? chmod)(temporary, 0o700);
     const archive = join(temporary, release.asset);
     const extracted = join(temporary, "extracted");
     const download = options.download ?? ((selected, path) => downloadArchive(selected, path, { fetchImpl: options.fetchImpl, signal: options.signal }));
     const archiveResult = await download(release, archive);
-    if (archiveResult?.sha256 !== release.archiveSha256) throw new Error(`${backend} archive SHA-256 mismatch`);
-    const archiveStat = await lstat(archive);
-    if (!archiveStat.isFile() || archiveStat.isSymbolicLink() || archiveStat.size !== archiveResult.size || archiveStat.size > ARCHIVE_MAX_BYTES) throw new Error("Downloaded archive is not a bounded regular file");
+    const actualArchive = await hashFile(archive, ARCHIVE_MAX_BYTES).catch(() => null);
+    if (!actualArchive || actualArchive.sha256 !== release.archiveSha256 || actualArchive.sha256 !== archiveResult?.sha256 || actualArchive.size !== archiveResult?.size) throw new Error(`${backend} archive SHA-256 mismatch`);
     const runner = options.runner ?? defaultRunner;
     const entry = parseArchiveEntries(await runner.listArchive(archive, { signal: options.signal }), release.binary);
     const executable = await runner.extractEntry(archive, entry, extracted, { signal: options.signal, maxBytes: EXECUTABLE_MAX_BYTES });
-    checkedDigest(executable?.sha256, "extracted executable");
-    if (!Number.isSafeInteger(executable?.size) || executable.size <= 0 || executable.size > EXECUTABLE_MAX_BYTES) throw new Error("Invalid extracted executable size");
-    if (release.executableSha256 && executable.sha256 !== release.executableSha256) throw new Error(`${backend} executable SHA-256 mismatch`);
-    const status = await installNoClobber(extracted, destination, executable);
-    return Object.freeze({ backend, target, destination, status, executableSha256: executable.sha256 });
+    const actualExecutable = await hashFile(extracted, EXECUTABLE_MAX_BYTES).catch(() => null);
+    if (!actualExecutable || actualExecutable.sha256 !== executable?.sha256 || actualExecutable.size !== executable?.size || (release.executableSha256 && actualExecutable.sha256 !== release.executableSha256)) throw new Error(`${backend} executable SHA-256 mismatch`);
+    const status = await installNoClobber(extracted, destination, actualExecutable, { repoRoot: root });
+    return Object.freeze({ backend, target, destination, status, executableSha256: actualExecutable.sha256 });
   } finally {
     options.activeTemps?.delete(temporary);
     await rm(temporary, { recursive: true, force: true });

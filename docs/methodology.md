@@ -15,7 +15,7 @@ The answer is qualified by the raw result's Git commit, dirty state, host name, 
 - PocketBase server: `0.39.11`; SDK: `pocketbase@0.28.0`.
 - TrailBase server: `0.33.1`; SDK: `trailbase@0.14.0`.
 - npm dependencies: the committed `package-lock.json` installed with `npm ci`.
-- PocketBase and TrailBase: pinned release archives installed with `node scripts/download-backends.mjs`; TrailBase doctor also checks the exact current-target executable digest.
+- PocketBase and TrailBase: pinned release archives installed with `node scripts/download-backends.mjs`; both doctors check the exact current-target executable digest before version probing.
 
 Do not mix results after changing a backend binary, CLI, SDK, lockfile, schema, config, workload, seed, host, or benchmark settings.
 

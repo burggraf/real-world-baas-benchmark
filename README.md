@@ -12,7 +12,7 @@ See [the methodology](docs/methodology.md) before interpreting a result and [the
 | PocketBase | server `0.39.11` | `pocketbase@0.28.0` |
 | TrailBase | server `0.33.1` | `trailbase@0.14.0` |
 
-`package-lock.json` pins the npm dependency graph. Doctor rejects any Supabase CLI or PocketBase/TrailBase binary that does not match the required checks. TrailBase uses exact executable SHA-256 values per supported target; PocketBase doctor checks the exact version and the downloader checks the pinned release archive.
+`package-lock.json` pins the npm dependency graph. Doctor rejects any Supabase CLI or PocketBase/TrailBase binary that does not match the required checks. PocketBase and TrailBase use exact executable SHA-256 values per supported target, and the downloader independently checks both pinned archive and extracted executable bytes.
 
 ## Prerequisites
 

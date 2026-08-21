@@ -1,13 +1,35 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import PocketBase, { ClientResponseError } from "pocketbase";
-import { buildPocketBaseArgs, LOCAL_BENCHMARK_PASSWORD, LOCAL_SETUP_PASSWORD, resolvePocketBaseOptions, assertResetDataDirectorySafe } from "../backends/pocketbase/process.js";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
+import { buildPocketBaseArgs, LOCAL_BENCHMARK_PASSWORD, LOCAL_SETUP_PASSWORD, resolvePocketBaseOptions, assertResetDataDirectorySafe, POCKETBASE_EXECUTABLE_SHA256_BY_TARGET, pocketBaseExecutableSha256, PocketBaseProcess } from "../backends/pocketbase/process.js";
 import { backend, batchRecord, mapPocketBasePage, mapPocketBaseTask, normalizePocketBaseError, taskListFilter } from "../backends/pocketbase/adapter.js";
 import { profileExpectedCounts } from "../src/seed.js";
 import { BenchmarkOperationError } from "../src/correctness.js";
 
 test("PocketBase setup and measured users use distinct passwords", () => {
   assert.notEqual(LOCAL_SETUP_PASSWORD, LOCAL_BENCHMARK_PASSWORD);
+});
+
+test("PocketBase pins executable digests for every supported target before version probing", async () => {
+  assert.deepEqual(POCKETBASE_EXECUTABLE_SHA256_BY_TARGET, {
+    "darwin-arm64": "804f9ef353684c1c6b03eaaa33ad7b3fef1eda8eb66ec5ecb113730a07f7a210",
+    "darwin-x64": "3e6092e9825030ff9b48a685efd8d688ad87c17f4ea9d6a7cd9fc1e17b3d0748",
+    "linux-arm64": "bb6f2e3373c7cdbed7f7919a203856f29d713d04cdc550dfec359d5d1437e5b3",
+    "linux-x64": "88370d5f6fa4820cd2414fa53c6e168d3dd0e33b7a7fd9ff914265492a7aa3b6",
+  });
+  assert.equal(pocketBaseExecutableSha256(process.platform, process.arch), POCKETBASE_EXECUTABLE_SHA256_BY_TARGET[`${process.platform}-${process.arch}` as keyof typeof POCKETBASE_EXECUTABLE_SHA256_BY_TARGET]);
+  assert.throws(() => pocketBaseExecutableSha256("win32", "x64"), /unsupported.*win32.*x64/i);
+  const root = await mkdtemp(join(tmpdir(), "pocketbase-pin-"));
+  try {
+    const fake = join(root, "pocketbase");
+    await writeFile(fake, "spoofed version 0.39.11");
+    const options = resolvePocketBaseOptions({ POCKETBASE_BIN: fake, POCKETBASE_DATA_DIR: join(root, "data"), POCKETBASE_URL: "http://127.0.0.1:65534" }, root);
+    await assert.rejects(new PocketBaseProcess(options).doctor("win32", "x64"), /unsupported.*win32.*x64/i);
+    await assert.rejects(new PocketBaseProcess(options).doctor(), /SHA-256/);
+  } finally { await rm(root, { recursive: true, force: true }); }
 });
 
 test("PocketBase rejects noncanonical seed counts before setup", async () => {

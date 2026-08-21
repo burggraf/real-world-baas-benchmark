@@ -1,12 +1,25 @@
 import { closeSync, existsSync, openSync } from "node:fs";
 import { access, appendFile, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
+import { createHash } from "node:crypto";
+import { createReadStream } from "node:fs";
 import { dirname, isAbsolute, join, parse, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import type { BackendInfo } from "../../src/backend.js";
 
 export const POCKETBASE_VERSION = "0.39.11";
+export const POCKETBASE_EXECUTABLE_SHA256_BY_TARGET = Object.freeze({
+  "darwin-arm64": "804f9ef353684c1c6b03eaaa33ad7b3fef1eda8eb66ec5ecb113730a07f7a210",
+  "darwin-x64": "3e6092e9825030ff9b48a685efd8d688ad87c17f4ea9d6a7cd9fc1e17b3d0748",
+  "linux-arm64": "bb6f2e3373c7cdbed7f7919a203856f29d713d04cdc550dfec359d5d1437e5b3",
+  "linux-x64": "88370d5f6fa4820cd2414fa53c6e168d3dd0e33b7a7fd9ff914265492a7aa3b6",
+} as const);
+export function pocketBaseExecutableSha256(platform = process.platform, arch = process.arch): string {
+  const digest = POCKETBASE_EXECUTABLE_SHA256_BY_TARGET[`${platform}-${arch}` as keyof typeof POCKETBASE_EXECUTABLE_SHA256_BY_TARGET];
+  if (!digest) throw new Error(`Unsupported PocketBase target ${platform}/${arch}; supported targets are macOS or Linux on arm64 or x64`);
+  return digest;
+}
 export const LOCAL_SETUP_EMAIL = "setup@pocketbase.bench.test";
 export const LOCAL_SETUP_PASSWORD = "PocketBase-setup-only-39!";
 export const LOCAL_BENCHMARK_PASSWORD = "Benchmark-local-only-39!";
@@ -124,6 +137,16 @@ async function readOwner(dataDir: string): Promise<{ pid: number; binary: string
   }
 }
 
+export async function pocketBaseBinarySha256(binary: string): Promise<string> {
+  return new Promise((resolveDigest, reject) => {
+    const hash = createHash("sha256");
+    const input = createReadStream(binary);
+    input.once("error", reject);
+    input.on("data", chunk => hash.update(chunk));
+    input.once("end", () => resolveDigest(hash.digest("hex")));
+  });
+}
+
 export class PocketBaseProcess {
   readonly options: PocketBaseProcessOptions;
   private child?: ChildProcess;
@@ -132,8 +155,11 @@ export class PocketBaseProcess {
     this.options = options;
   }
 
-  async doctor(): Promise<BackendInfo> {
+  async doctor(platform = process.platform, arch = process.arch): Promise<BackendInfo> {
+    const expectedDigest = pocketBaseExecutableSha256(platform, arch);
     await access(this.options.binary);
+    const digest = await pocketBaseBinarySha256(this.options.binary);
+    if (digest !== expectedDigest) throw new Error(`Expected PocketBase executable SHA-256 ${expectedDigest}`);
     const version = spawnSync(this.options.binary, ["--version"], { encoding: "utf8", shell: false });
     if (version.error || version.status !== 0 || !version.stdout.includes(`version ${POCKETBASE_VERSION}`)) {
       throw new Error(`Expected PocketBase ${POCKETBASE_VERSION} binary`);

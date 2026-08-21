@@ -19,12 +19,12 @@ The downloader verifies the exact release archive, extracts only the root
 or repository-relative manual installation; doctor still requires exact version
 `0.39.11`.
 
-| Target | Release asset | Archive SHA-256 |
-| --- | --- | --- |
-| macOS ARM64 | `pocketbase_0.39.11_darwin_arm64.zip` | `9da6fbe11e82c5b1704e56f7457b24682e01c510206c29b798a458119fa2be20` |
-| macOS x64 | `pocketbase_0.39.11_darwin_amd64.zip` | `888892fe5fe64cea4a1441937671e191b32ed8f322fa09d3d7b3ca2fc1d7be29` |
-| Linux ARM64 | `pocketbase_0.39.11_linux_arm64.zip` | `8c785618840df7ebba795fdf4eba33a5fed64ac5307ad8023b955b4ebb82048b` |
-| Linux x64 | `pocketbase_0.39.11_linux_amd64.zip` | `08b9fcda0d5fd42cb315dc15a36dfa121c993855bd635f01d347c31b4328ec34` |
+| Target | Release asset | Archive SHA-256 | Executable SHA-256 |
+| --- | --- | --- | --- |
+| macOS ARM64 | `pocketbase_0.39.11_darwin_arm64.zip` | `9da6fbe11e82c5b1704e56f7457b24682e01c510206c29b798a458119fa2be20` | `804f9ef353684c1c6b03eaaa33ad7b3fef1eda8eb66ec5ecb113730a07f7a210` |
+| macOS x64 | `pocketbase_0.39.11_darwin_amd64.zip` | `888892fe5fe64cea4a1441937671e191b32ed8f322fa09d3d7b3ca2fc1d7be29` | `3e6092e9825030ff9b48a685efd8d688ad87c17f4ea9d6a7cd9fc1e17b3d0748` |
+| Linux ARM64 | `pocketbase_0.39.11_linux_arm64.zip` | `8c785618840df7ebba795fdf4eba33a5fed64ac5307ad8023b955b4ebb82048b` | `bb6f2e3373c7cdbed7f7919a203856f29d713d04cdc550dfec359d5d1437e5b3` |
+| Linux x64 | `pocketbase_0.39.11_linux_amd64.zip` | `08b9fcda0d5fd42cb315dc15a36dfa121c993855bd635f01d347c31b4328ec34` | `88370d5f6fa4820cd2414fa53c6e168d3dd0e33b7a7fd9ff914265492a7aa3b6` |
 
 ## Run
 
