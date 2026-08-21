@@ -592,12 +592,13 @@ export const createTrailBaseSession = async (credentials: Credentials, options: 
     await sdk(() => client.login(credentials.email, credentials.password));
     const authId = client.user()?.id;
     if (!authId || !AUTH_ID.test(authId)) {
+      request.detachParent();
       await client.logout().catch(() => undefined);
       throw new BenchmarkOperationError("authentication", { code: "auth_user" });
     }
     let profile: Row;
     try { profile = await oneRow(client, "profiles", [{ column: "authId", op: "equal", value: authId }], "profile_missing"); }
-    catch (error) { await client.logout().catch(() => undefined); throw error; }
+    catch (error) { request.detachParent(); await client.logout().catch(() => undefined); throw error; }
     request.detachParent();
     return new TrailBaseSession(client, profile, request);
   };

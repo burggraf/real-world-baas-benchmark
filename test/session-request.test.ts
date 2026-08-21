@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { createSessionRequestController, validateSessionRequestTimeout } from "../src/session-request.js";
 import { createPocketBaseMeasuredClient } from "../backends/pocketbase/adapter.js";
 import { createSupabaseClient, createSupabaseSession } from "../backends/supabase/adapter.js";
-import { createTrailBaseMeasuredClient } from "../backends/trailbase/adapter.js";
+import { createTrailBaseMeasuredClient, createTrailBaseSession } from "../backends/trailbase/adapter.js";
 
 test("request controller aborts injected pending fetch and rotation permits cleanup", async () => {
   const controller = createSessionRequestController({ timeoutMs: 1000 });
@@ -100,6 +100,33 @@ test("Supabase post-auth setup failure signs out the authenticated client", asyn
     await assert.rejects(createSupabaseSession({ email: "user@example.test", password: "not-recorded" }, { timeoutMs: 1000 }, { url: "http://127.0.0.1:54321", publicKey: "public-key" }), /profile|supabase/i);
   } finally { globalThis.fetch = original; }
   assert.ok(paths.some(path => path.endsWith("/auth/v1/logout")), paths.join(","));
+});
+
+test("TrailBase post-auth setup failure logs out after parent cancellation", async () => {
+  const original = globalThis.fetch;
+  const parent = new AbortController();
+  const subject = "A".repeat(22) + "==";
+  const payload = Buffer.from(JSON.stringify({ sub: subject, exp: Math.floor(Date.now() / 1000) + 3600 })).toString("base64url");
+  const authToken = `e30.${payload}.signature`;
+  const paths: string[] = [];
+  let logoutSignal: AbortSignal | undefined;
+  let requestCount = 0;
+  globalThis.fetch = (async (input, init) => {
+    paths.push(new URL(String(input)).pathname);
+    requestCount++;
+    if (requestCount === 1) return new Response(JSON.stringify({ auth_token: authToken, refresh_token: "refresh", csrf_token: null }), { status: 200, headers: { "content-type": "application/json" } });
+    if (requestCount === 2) {
+      parent.abort();
+      throw Object.assign(new Error("aborted"), { name: "AbortError" });
+    }
+    logoutSignal = init?.signal ?? undefined;
+    return new Response(null, { status: 204 });
+  }) as typeof fetch;
+  try {
+    await assert.rejects(createTrailBaseSession({ email: "user@example.test", password: "not-recorded" }, { signal: parent.signal, timeoutMs: 1000 }));
+  } finally { globalThis.fetch = original; }
+  assert.ok(paths.some(path => path.endsWith("/api/auth/v1/logout")), paths.join(","));
+  assert.equal(logoutSignal?.aborted, false);
 });
 
 test("request timeout validation rejects invalid values", () => {
