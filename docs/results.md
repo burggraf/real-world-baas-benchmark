@@ -30,8 +30,8 @@ A quick profile is explicitly nonpublishable, has short stages, and is not evide
 
 ## Verification status
 
-- macOS ARM64 clean-clone verification for this Task 16 change: **pending the parent rerun**.
-- Ubuntu x64 clean-clone verification: **pending** because no Ubuntu host or VPS is available.
+- macOS ARM64 same-host clean-clone setup verification: **passed** at commit `5915981` on the recorded Apple M1 host with Node `v26.7.0`, npm `11.19.0`, Supabase CLI `2.115.0`, and Docker `29.4.0`. A clean checkout completed `npm ci`, staged and manually installed both pinned binaries, passed 208 non-live tests with 6 live tests skipped, and passed all three backend doctors. This is not evidence from a newly provisioned machine.
+- Ubuntu x64 clean-host verification: **pending** because no Ubuntu host or VPS is available.
 
 The Ubuntu x64 prerequisites, exact downloader support, commands, and kernel/CPU/memory/version recording checklist are in [methodology.md](methodology.md). No Ubuntu outcome is fabricated here.
 

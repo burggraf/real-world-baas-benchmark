@@ -194,4 +194,4 @@ unzip -v | head -n 2
 uname -a
 ```
 
-On macOS also record `sysctl -n machdep.cpu.brand_string`, `sysctl -n hw.logicalcpu`, and `sysctl -n hw.memsize`. On Ubuntu record `uname -srvm`, `lscpu`, and `free -b`. Include Docker engine state/version and all backend/SDK versions captured in the result. As of this document, post-change macOS ARM64 clean-clone verification awaits the parent rerun and Ubuntu x64 verification is pending for lack of a host; neither is asserted complete.
+On macOS also record `sysctl -n machdep.cpu.brand_string`, `sysctl -n hw.logicalcpu`, and `sysctl -n hw.memsize`. On Ubuntu record `uname -srvm`, `lscpu`, and `free -b`. Include Docker engine state/version and all backend/SDK versions captured in the result. The macOS ARM64 clean-clone setup path passed on the recorded Apple M1 host at commit `5915981`: `npm ci`, pinned download and manual staging installation, 208 non-live tests, and all three backend doctors. This is same-host clean-checkout evidence, not a newly provisioned host. Ubuntu x64 verification remains pending for lack of a host.

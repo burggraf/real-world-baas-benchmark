@@ -28,7 +28,7 @@ On macOS ARM64, use a native Node 22+ build, Docker Desktop or another compatibl
 
 On Ubuntu x64, install a native x64 Node 22+ release, npm, Git, `unzip`, Docker Engine with Compose support, and the official Supabase CLI 2.115.0 x64 binary. Add the current user to Docker's permitted group only according to Docker's security guidance, then verify `docker info` works without changing benchmark commands. The pinned downloader supports the exact Linux x64 PocketBase and TrailBase release assets listed in the backend READMEs.
 
-Ubuntu clean-host verification is **pending** because no Ubuntu host or VPS is available. macOS ARM64 clean-clone verification is also **pending the parent rerun after this change**; do not treat the seed measurements below as that verification.
+Ubuntu clean-host verification is **pending** because no Ubuntu host or VPS is available. macOS ARM64 clean-clone verification passed on this Apple M1 host at commit `5915981`: `npm ci`, pinned download and manual staging installation, all 208 non-live tests, and all three backend doctors completed successfully. This verifies the setup path on the recorded host, not on a newly provisioned machine.
 
 ## Clean setup
 
