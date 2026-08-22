@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { cp, lstat, mkdir, readFile, readdir, writeFile } from "node:fs/promises";
+import { cp, lstat, mkdir, readFile, readdir, unlink, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
 import { dirname, isAbsolute, join, parse, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -57,6 +57,27 @@ export function resolveSupabaseOptions(env: NodeJS.ProcessEnv = process.env, rep
   };
 }
 
+async function safeDataRoot(options: SupabaseOptions): Promise<string> {
+  const dataRoot = join(options.repoRoot, ".data");
+  await mkdir(dataRoot, { recursive: true });
+  const stat = await lstat(dataRoot);
+  if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error("Refusing unsafe Supabase data directory");
+  return dataRoot;
+}
+
+export async function acquireSupabaseLifecycleLock(options: SupabaseOptions): Promise<string> {
+  const directory = join(await safeDataRoot(options), "supabase-locks");
+  await mkdir(directory, { recursive: true });
+  const stat = await lstat(directory);
+  if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error("Refusing unsafe Supabase lifecycle lock directory");
+  const path = join(directory, `${options.projectId}.lock`);
+  try { await writeFile(path, JSON.stringify({ pid: process.pid, projectId: options.projectId, workdir: options.workdir }) + "\n", { encoding: "utf8", mode: 0o600, flag: "wx" }); }
+  catch (error) { if ((error as NodeJS.ErrnoException).code === "EEXIST") throw new Error("Another Supabase lifecycle is active"); throw error; }
+  return path;
+}
+
+export async function releaseSupabaseLifecycleLock(path: string): Promise<void> { await unlink(path); }
+
 const generatedConfig = (options: SupabaseOptions): string => `project_id = "${options.projectId}"
 [api]
 port = ${options.ports.api}
@@ -77,6 +98,7 @@ port = ${options.ports.pooler}
 
 export async function prepareSupabaseWorkdir(options: SupabaseOptions): Promise<void> {
   if (!options.generatedWorkdir) return;
+  await safeDataRoot(options);
   await mkdir(options.workdir, { recursive: true });
   const stat = await lstat(options.workdir);
   if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error("Refusing non-directory Supabase workdir");
@@ -85,16 +107,22 @@ export async function prepareSupabaseWorkdir(options: SupabaseOptions): Promise<
   if (entries.length) {
     let owner: unknown;
     try { owner = JSON.parse(await readFile(markerPath, "utf8")); } catch { throw new Error("Refusing unowned nonempty Supabase workdir"); }
-    if (!owner || typeof owner !== "object" || (owner as { projectId?: unknown }).projectId !== options.projectId) throw new Error("Refusing unowned or mismatched Supabase workdir");
+    if (!owner || typeof owner !== "object" || (owner as { projectId?: unknown }).projectId !== options.projectId || (owner as { workdir?: unknown }).workdir !== options.workdir) throw new Error("Refusing unowned or mismatched Supabase workdir");
   } else {
-    await writeFile(markerPath, JSON.stringify({ projectId: options.projectId }) + "\n", { encoding: "utf8", mode: 0o600, flag: "wx" });
+    await writeFile(markerPath, JSON.stringify({ projectId: options.projectId, workdir: options.workdir }) + "\n", { encoding: "utf8", mode: 0o600, flag: "wx" });
   }
   const target = join(options.workdir, "supabase");
   const targetStat = await lstat(target).catch(() => undefined);
   if (targetStat && (!targetStat.isDirectory() || targetStat.isSymbolicLink())) throw new Error("Refusing unsafe generated Supabase config directory");
-  await mkdir(join(target, "migrations"), { recursive: true });
-  await cp(join(options.repoRoot, "backends/supabase/supabase/migrations"), join(target, "migrations"), { recursive: true, force: true });
-  await writeFile(join(target, "config.toml"), generatedConfig(options), { encoding: "utf8", mode: 0o600 });
+  const migrations = join(target, "migrations");
+  const migrationsStat = await lstat(migrations).catch(() => undefined);
+  if (migrationsStat && (!migrationsStat.isDirectory() || migrationsStat.isSymbolicLink())) throw new Error("Refusing unsafe generated Supabase migrations directory");
+  const config = join(target, "config.toml");
+  const configStat = await lstat(config).catch(() => undefined);
+  if (configStat && (!configStat.isFile() || configStat.isSymbolicLink())) throw new Error("Refusing unsafe generated Supabase config file");
+  await mkdir(migrations, { recursive: true });
+  await cp(join(options.repoRoot, "backends/supabase/supabase/migrations"), migrations, { recursive: true, force: true });
+  await writeFile(config, generatedConfig(options), { encoding: "utf8", mode: 0o600 });
 }
 
 export function buildSupabaseArgs(options: SupabaseOptions, args: readonly string[]): string[] {
@@ -191,12 +219,26 @@ function removeOwnContainers(projectId: string): void {
   if (ids.length) runSynchronousProbe("docker", ["rm", "-f", ...ids], "Docker");
 }
 
+export function assertSupabaseContainerOwnership(containerIds: readonly string[], lifecycleAcquired: boolean): void {
+  if (containerIds.length && !lifecycleAcquired) throw new Error("Refusing Supabase containers owned by another lifecycle");
+}
+
 export class SupabaseProcess {
+  private lifecycleAcquired = false;
+  private lifecycleLock?: string;
   constructor(readonly options = resolveSupabaseOptions()) {}
+
+  private async releaseLifecycleLock(): Promise<void> {
+    if (!this.lifecycleLock) return;
+    await releaseSupabaseLifecycleLock(this.lifecycleLock);
+    this.lifecycleLock = undefined;
+  }
 
   async doctor(): Promise<BackendInfo> {
     const version = runSynchronousProbe(this.options.binary, ["--version"], "Supabase CLI");
     if (version.trim() !== SUPABASE_VERSION) throw new Error(`Supabase CLI ${SUPABASE_VERSION} is required`);
+    const allIds = ownContainerIds(this.options.projectId);
+    assertSupabaseContainerOwnership(allIds, this.lifecycleAcquired);
     const ids = ownContainerIds(this.options.projectId, true);
     if (ids.length) {
       const status = await this.status();
@@ -209,12 +251,22 @@ export class SupabaseProcess {
   }
 
   async start(): Promise<SupabaseStatus> {
-    if (!ownContainerIds(this.options.projectId, true).length) {
-      await prepareSupabaseWorkdir(this.options);
-      for (const port of Object.values(this.options.ports)) if (!(await portAvailable(port))) throw new Error(`Supabase benchmark port ${port} is unavailable`);
-      await runSupabase(this.options, ["start"]);
+    if (!this.lifecycleLock) this.lifecycleLock = await acquireSupabaseLifecycleLock(this.options);
+    try {
+      assertSupabaseContainerOwnership(ownContainerIds(this.options.projectId), this.lifecycleAcquired);
+      const ids = ownContainerIds(this.options.projectId, true);
+      if (!ids.length) {
+        await prepareSupabaseWorkdir(this.options);
+        for (const port of Object.values(this.options.ports)) if (!(await portAvailable(port))) throw new Error(`Supabase benchmark port ${port} is unavailable`);
+        this.lifecycleAcquired = true;
+        await runSupabase(this.options, ["start"]);
+      }
+      return await this.status();
+    } catch (error) {
+      if (this.lifecycleAcquired) await this.stop().catch(() => undefined);
+      else await this.releaseLifecycleLock().catch(() => undefined);
+      throw error;
     }
-    return this.status();
   }
 
   async status(): Promise<SupabaseStatus> {
@@ -230,10 +282,14 @@ export class SupabaseProcess {
   }
 
   async stop(): Promise<void> {
-    if (!ownContainerIds(this.options.projectId).length) return;
+    const ids = ownContainerIds(this.options.projectId);
+    if (!ids.length) { this.lifecycleAcquired = false; await this.releaseLifecycleLock(); return; }
+    if (!this.lifecycleAcquired) return;
     await runSupabase(this.options, ["stop", "--project-id", this.options.projectId, "--no-backup"]);
     removeOwnContainers(this.options.projectId);
     if (ownContainerIds(this.options.projectId).length) throw new Error("Supabase benchmark containers did not stop");
+    this.lifecycleAcquired = false;
+    await this.releaseLifecycleLock();
   }
 }
 

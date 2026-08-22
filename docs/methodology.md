@@ -155,7 +155,7 @@ Use one stable normal-power mode with Low Power Mode disabled and enough charge 
 
 ## Configurable local ports and occupied hosts
 
-`--port-base N` accepts integers from 1024 through 65526. PocketBase and TrailBase use `N`; explicit backend URL variables remain higher-priority loopback overrides. Supabase derives its nine service ports at offsets 0/1/2/3/4/5/6/8/9, creates a marked private `.data/supabase-N` workdir, and derives a unique project label. It refuses nonempty unowned workdirs and never performs global Docker cleanup.
+`--port-base N` accepts integers from 1024 through 65526. PocketBase and TrailBase use `N`; explicit backend URL variables remain higher-priority loopback overrides. Supabase derives its nine service ports at offsets 0/1/2/3/4/5/6/8/9, creates a marked private `.data/supabase-N` workdir, atomically locks the derived project lifecycle, and derives a unique project label. It refuses symlinked data roots, concurrent lifecycles, nonempty unowned workdirs, and pre-existing project-labelled containers not started by the current process, and never performs global Docker cleanup. A crash leaves the lock in place for deliberate inspection rather than unsafe automatic adoption.
 
 On an occupied host, use a clean checkout, an unused port range, and one backend at a time. Do not stop or modify unrelated services even when temporary slowdown is accepted. Their CPU, memory, disk, network, and scheduler contention remains part of the recorded co-located host state. Preserve all attempts. Publish hardware-profile capacity only from at least three compatible runs on that exact host/configuration.
 

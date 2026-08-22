@@ -146,10 +146,12 @@ export async function holdBackendUntilSignal(backend: Pick<Backend, "start" | "s
 
 export async function main(argv: string[]): Promise<number> {
   if (argv.includes("--help")) { console.log(help); return 0; }
+  const previousPortBase = process.env.BENCH_PORT_BASE;
+  let portBaseOverridden = false;
   try {
     if (argv.length === 0) { console.error(help); return 1; }
     const args = parseArgs(argv);
-    if (args.portBase !== undefined) process.env.BENCH_PORT_BASE = String(args.portBase);
+    if (args.portBase !== undefined) { process.env.BENCH_PORT_BASE = String(args.portBase); portBaseOverridden = true; }
     if (args.command === "report") {
       const inputPath = await resolveReportInputPath(args.input!); let result: unknown;
       try { result = JSON.parse(await readFile(inputPath, "utf8")); } catch { throw new Error("Invalid result JSON"); }
@@ -214,6 +216,12 @@ export async function main(argv: string[]): Promise<number> {
     }
     throw new Error("Unsupported command");
   } catch (error) { console.error(safeErrorMessage(error)); return 1; }
+  finally {
+    if (portBaseOverridden) {
+      if (previousPortBase === undefined) delete process.env.BENCH_PORT_BASE;
+      else process.env.BENCH_PORT_BASE = previousPortBase;
+    }
+  }
 }
 
 const entryPoint = process.argv[1];

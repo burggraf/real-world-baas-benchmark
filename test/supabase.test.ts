@@ -1,14 +1,17 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  acquireSupabaseLifecycleLock,
+  assertSupabaseContainerOwnership,
   buildSupabaseArgs,
   parseSupabaseStatus,
   prepareSupabaseWorkdir,
   redactSupabaseOutput,
+  releaseSupabaseLifecycleLock,
   resolveSupabaseOptions,
   runSynchronousProbe,
   supabaseEnvironment,
@@ -71,13 +74,45 @@ test("Supabase derives custom ports and prepares only its owned workdir", async 
     const config = await readFile(join(options.workdir, "supabase/config.toml"), "utf8");
     assert.match(config, /project_id = "realworldbaasbench-18000"/);
     assert.match(config, /port = 18000/);
-    assert.equal(await readFile(join(options.workdir, "supabase/migrations/0001_benchmark.sql"), "utf8"), "select 1;\n");
+    const migrations = join(options.workdir, "supabase/migrations");
+    assert.equal(await readFile(join(migrations, "0001_benchmark.sql"), "utf8"), "select 1;\n");
+    await rm(migrations, { recursive: true });
+    await symlink(root, migrations);
+    await assert.rejects(prepareSupabaseWorkdir(options), /unsafe/i);
+    await rm(migrations);
+    await writeFile(join(options.workdir, ".bench-supabase-owner.json"), JSON.stringify({ projectId: options.projectId, workdir: "/other" }));
+    await assert.rejects(prepareSupabaseWorkdir(options), /unowned|mismatched/i);
 
     const foreign = resolveSupabaseOptions({ BENCH_PORT_BASE: "18001" }, root);
     await mkdir(foreign.workdir, { recursive: true });
     await writeFile(join(foreign.workdir, "foreign.txt"), "keep\n");
     await assert.rejects(prepareSupabaseWorkdir(foreign), /unowned/i);
   } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test("Supabase lifecycle lock is atomic across processes", async () => {
+  const root = await mkdtemp(join(tmpdir(), "supabase-lifecycle-lock-"));
+  try {
+    const options = resolveSupabaseOptions({ BENCH_PORT_BASE: "18000" }, root);
+    const lock = await acquireSupabaseLifecycleLock(options);
+    await assert.rejects(acquireSupabaseLifecycleLock(options), /lifecycle.*active/i);
+    await releaseSupabaseLifecycleLock(lock);
+    await releaseSupabaseLifecycleLock(await acquireSupabaseLifecycleLock(options));
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test("Supabase generated workdir rejects a symlinked data parent", async () => {
+  const root = await mkdtemp(join(tmpdir(), "supabase-data-link-")); const outside = await mkdtemp(join(tmpdir(), "supabase-data-outside-"));
+  try {
+    await symlink(outside, join(root, ".data"));
+    await assert.rejects(prepareSupabaseWorkdir(resolveSupabaseOptions({ BENCH_PORT_BASE: "18000" }, root)), /unsafe.*data/i);
+  } finally { await rm(root, { recursive: true, force: true }); await rm(outside, { recursive: true, force: true }); }
+});
+
+test("Supabase refuses to adopt containers not started by its process", () => {
+  assert.doesNotThrow(() => assertSupabaseContainerOwnership([], false));
+  assert.doesNotThrow(() => assertSupabaseContainerOwnership(["abc"], true));
+  assert.throws(() => assertSupabaseContainerOwnership(["abc"], false), /another lifecycle/i);
 });
 
 test("page ranges reject unsafe and unbounded offsets", () => {

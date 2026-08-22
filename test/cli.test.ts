@@ -157,6 +157,19 @@ test("report CLI creates reports, rejects overwrite, and prints only safe relati
   assert.notEqual(second.status, 0); assert.match(second.stderr, /already exists/i);
 });
 
+test("main restores a command-line port override for repeated embedded calls", async () => {
+  const previous = process.env.BENCH_PORT_BASE; const errors: string[] = []; const original = console.error;
+  process.env.BENCH_PORT_BASE = "19000"; console.error = (...values: unknown[]) => { errors.push(values.join(" ")); };
+  try {
+    assert.equal(await main(["run", "--port-base", "18000"]), 1);
+    assert.equal(process.env.BENCH_PORT_BASE, "19000");
+  } finally {
+    console.error = original;
+    if (previous === undefined) delete process.env.BENCH_PORT_BASE; else process.env.BENCH_PORT_BASE = previous;
+  }
+  assert.match(errors.join(" "), /missing --backend/i);
+});
+
 test("every effective large CLI dataset refuses without confirmation before command side effects", async () => {
   const errors: string[] = []; const original = console.error;
   console.error = (...values: unknown[]) => { errors.push(values.join(" ")); };
