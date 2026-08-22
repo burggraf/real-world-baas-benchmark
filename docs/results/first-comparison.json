@@ -1,0 +1,3822 @@
+{
+  "schemaVersion": 1,
+  "title": "First local BaaS comparison",
+  "generatedAt": "2026-08-22T13:49:17.788Z",
+  "workloadCommit": "79480b382f101f7867b93a5e4ae43e74e0169412",
+  "releaseUrl": "https://github.com/burggraf/real-world-baas-benchmark/releases/tag/first-comparison-2026-08-22",
+  "archive": {
+    "name": "first-comparison-full-evidence-79480b3.tar.gz",
+    "sha256": "e58d2fa52398e9d2f54b77b024f3c7898c77bfa937b2b99530360997ee78a1ed"
+  },
+  "sourcePaths": [
+    "results/full-s1-01-supabase-79480b3.json",
+    "results/full-s1-02-pocketbase-79480b3.json",
+    "results/full-s1-03-trailbase-79480b3.json",
+    "results/full-s2-01-pocketbase-79480b3.json",
+    "results/full-s2-02-trailbase-79480b3.json",
+    "results/full-s2-03-supabase-79480b3.json",
+    "results/full-s3-01-trailbase-79480b3.json",
+    "results/full-s3-02-supabase-79480b3.json",
+    "results/full-s3-03-pocketbase-79480b3.json"
+  ],
+  "aggregate": {
+    "pocketbase": {
+      "runCount": 3,
+      "runIds": [
+        "2026-08-22T05-09-13-880Z-pocketbase-full",
+        "2026-08-22T07-21-25-976Z-pocketbase-full",
+        "2026-08-22T12-52-34-954Z-pocketbase-full"
+      ],
+      "publishable": true,
+      "identity": {
+        "backend": "pocketbase",
+        "backendVersion": "0.39.11",
+        "sdkVersion": "0.28.0",
+        "config": {
+          "name": "full",
+          "publishable": true,
+          "dataset": "medium",
+          "seed": 42,
+          "warmupSeconds": 120,
+          "stageSeconds": 300,
+          "concurrency": [
+            5,
+            10,
+            25,
+            50
+          ],
+          "maxConcurrency": 1000,
+          "timeoutMs": 5000,
+          "thinkTimeMs": {
+            "min": 1000,
+            "max": 5000
+          },
+          "weights": {
+            "dashboard": 20,
+            "taskList": 25,
+            "taskDetail": 15,
+            "createTask": 10,
+            "updateTask": 12,
+            "addComment": 10,
+            "search": 5,
+            "profileUpdate": 1,
+            "signIn": 2
+          },
+          "slos": {
+            "read": {
+              "p95Ms": 500,
+              "maxErrorRate": 0.01
+            },
+            "write": {
+              "p95Ms": 750,
+              "maxErrorRate": 0.01
+            },
+            "authSearch": {
+              "p95Ms": 1000,
+              "maxErrorRate": 0.01
+            }
+          }
+        },
+        "settings": {
+          "warmupUserCount": 50,
+          "warmupWritesUnscored": true,
+          "resourceIntervalMs": 1000,
+          "resourceMaxSamples": {
+            "stageDurationMs": 300000,
+            "graceMs": 5000,
+            "formula": "ceil((stageDurationMs + graceMs) / intervalMs) + 2",
+            "value": 307
+          },
+          "overloadThresholds": {
+            "cpuPercent": 90,
+            "p99Ms": 100,
+            "maxMs": 250,
+            "consecutiveSamples": 3
+          },
+          "minClassSamples": 20,
+          "minAchievedRatio": 0.95,
+          "saturationMaterialIncrease": 0.2,
+          "saturationMaxThroughputGain": 0.1,
+          "maxLatencySamples": 2000000,
+          "maxErrorExamples": 100,
+          "measuredRequestTimeoutMs": 5000,
+          "sessionPreparationConcurrency": 10,
+          "boundarySessionsUnmeasured": true
+        },
+        "dataset": "medium",
+        "seed": 42,
+        "schemaVersion": 1,
+        "hardware": {
+          "cpuModel": "Apple M1",
+          "logicalCores": 8,
+          "totalMemoryBytes": 16386818048,
+          "architecture": "arm64",
+          "os": "darwin",
+          "release": "25.6.0",
+          "hostname": "Goldie.local"
+        }
+      },
+      "capacityUsers": {
+        "median": 75,
+        "min": 75,
+        "max": 75
+      },
+      "stages": [
+        {
+          "requestedUsers": 5,
+          "achievedUsers": {
+            "median": 5,
+            "min": 5,
+            "max": 5
+          },
+          "elapsedSeconds": {
+            "median": 300.00569029100006,
+            "min": 300.0037801669999,
+            "max": 300.00575683299985
+          },
+          "workflowTransactionsPerSecond": {
+            "median": 1.6299690833386489,
+            "min": 1.6299687218075787,
+            "max": 1.6299794613514322
+          },
+          "sdkOperationsPerSecond": {
+            "median": 6.019885816993047,
+            "min": 6.019884481767867,
+            "max": 6.019924145604676
+          },
+          "readOperationsPerSecond": {
+            "median": 4.069922803183007,
+            "min": 4.069921900464322,
+            "max": 4.06994871638057
+          },
+          "writeOperationsPerSecond": {
+            "median": 1.9499630138100401,
+            "min": 1.9499625813035448,
+            "max": 1.9499754292241063
+          },
+          "operationClasses": {
+            "read": {
+              "latencyP50Ms": {
+                "median": 16.156583999982104,
+                "min": 15.85033299983479,
+                "max": 16.771542000118643
+              },
+              "latencyP95Ms": {
+                "median": 82.38404199993238,
+                "min": 79.25291700009257,
+                "max": 91.44304100004956
+              },
+              "latencyP99Ms": {
+                "median": 102.9178330001887,
+                "min": 102.62366700009443,
+                "max": 109.65158300008625
+              },
+              "errorRate": {
+                "median": 0,
+                "min": 0,
+                "max": 0
+              }
+            },
+            "write": {
+              "latencyP50Ms": {
+                "median": 17.64595800009556,
+                "min": 17.308082999894395,
+                "max": 19.766708999872208
+              },
+              "latencyP95Ms": {
+                "median": 26.008499999996275,
+                "min": 25.893875000067055,
+                "max": 28.138417000183836
+              },
+              "latencyP99Ms": {
+                "median": 30.59512499999255,
+                "min": 27.374749999959022,
+                "max": 34.589582999935374
+              },
+              "errorRate": {
+                "median": 0,
+                "min": 0,
+                "max": 0
+              }
+            },
+            "authSearch": {
+              "latencyP50Ms": {
+                "median": 14.918290999950841,
+                "min": 12.893209000118077,
+                "max": 15.443875000113621
+              },
+              "latencyP95Ms": {
+                "median": 118.25087500014342,
+                "min": 115.59083299990743,
+                "max": 118.72695800010115
+              },
+              "latencyP99Ms": {
+                "median": 120.29674999997951,
+                "min": 119.09029199997894,
+                "max": 121.24300000001676
+              },
+              "errorRate": {
+                "median": 0,
+                "min": 0,
+                "max": 0
+              }
+            }
+          },
+          "resources": {
+            "sampleCount": {
+              "median": 291,
+              "min": 291,
+              "max": 292
+            },
+            "runnerCpuPercent": {
+              "median": 20.4,
+              "min": 16.9,
+              "max": 28
+            },
+            "runnerRssBytes": {
+              "median": 202162176,
+              "min": 160661504,
+              "max": 210010112
+            },
+            "backendCpuPercent": {
+              "median": 76,
+              "min": 73.3,
+              "max": 111.3
+            },
+            "backendRssBytes": {
+              "median": 155795456,
+              "min": 155074560,
+              "max": 157696000
+            },
+            "eventLoopP99Ms": {
+              "median": 15.810559,
+              "min": 14.163967,
+              "max": 42.401791
+            },
+            "eventLoopMaxMs": {
+              "median": 26.755071,
+              "min": 24.936447,
+              "max": 144.310271
+            },
+            "supabaseCpuPercent": null,
+            "supabaseMemoryBytes": null,
+            "supabaseBlockReadBytes": null,
+            "supabaseBlockWriteBytes": null
+          }
+        },
+        {
+          "requestedUsers": 10,
+          "achievedUsers": {
+            "median": 10,
+            "min": 10,
+            "max": 10
+          },
+          "elapsedSeconds": {
+            "median": 300.003594792,
+            "min": 300.0031861660001,
+            "max": 300.0037963749997
+          },
+          "workflowTransactionsPerSecond": {
+            "median": 3.273291911188072,
+            "min": 3.2699608172367127,
+            "max": 3.2732985690913035
+          },
+          "sdkOperationsPerSecond": {
+            "median": 11.783184222046675,
+            "min": 11.763192379233802,
+            "max": 11.78320818914232
+          },
+          "readOperationsPerSecond": {
+            "median": 7.646569902510629,
+            "min": 7.626575280160652,
+            "max": 7.646585455698014
+          },
+          "writeOperationsPerSecond": {
+            "median": 4.136617099073151,
+            "min": 4.136614319536046,
+            "max": 4.136622733444305
+          },
+          "operationClasses": {
+            "read": {
+              "latencyP50Ms": {
+                "median": 14.796499999938533,
+                "min": 14.76949999993667,
+                "max": 15.300042000133544
+              },
+              "latencyP95Ms": {
+                "median": 114.4049590001814,
+                "min": 106.05175000010058,
+                "max": 120.53425000002608
+              },
+              "latencyP99Ms": {
+                "median": 139.86395799997263,
+                "min": 121.68266599997878,
+                "max": 140.11645799991675
+              },
+              "errorRate": {
+                "median": 0,
+                "min": 0,
+                "max": 0
+              }
+            },
+            "write": {
+              "latencyP50Ms": {
+                "median": 16.405416999943554,
+                "min": 16.398207999998704,
+                "max": 16.752541000023484
+              },
+              "latencyP95Ms": {
+                "median": 25.35316599998623,
+                "min": 24.94954099995084,
+                "max": 25.462541999761015
+              },
+              "latencyP99Ms": {
+                "median": 27.598500000080094,
+                "min": 26.89408400002867,
+                "max": 34.1288750001695
+              },
+              "errorRate": {
+                "median": 0,
+                "min": 0,
+                "max": 0
+              }
+            },
+            "authSearch": {
+              "latencyP50Ms": {
+                "median": 12.646707999985665,
+                "min": 11.226165999891236,
+                "max": 13.025333000114188
+              },
+              "latencyP95Ms": {
+                "median": 113.4482919999864,
+                "min": 94.07308300002478,
+                "max": 118.33058400009759
+              },
+              "latencyP99Ms": {
+                "median": 119.62424999987707,
+                "min": 111.72837499994785,
+                "max": 122.13687500008382
+              },
+              "errorRate": {
+                "median": 0,
+                "min": 0,
+                "max": 0
+              }
+            }
+          },
+          "resources": {
+            "sampleCount": {
+              "median": 291,
+              "min": 291,
+              "max": 293
+            },
+            "runnerCpuPercent": {
+              "median": 30.9,
+              "min": 25.2,
+              "max": 41.4
+            },
+            "runnerRssBytes": {
+              "median": 134938624,
+              "min": 115130368,
+              "max": 158171136
+            },
+            "backendCpuPercent": {
+              "median": 147.8,
+              "min": 141.3,
+              "max": 236.3
+            },
+            "backendRssBytes": {
+              "median": 162758656,
+              "min": 160038912,
+              "max": 164003840
+            },
+            "eventLoopP99Ms": {
+              "median": 21.118975,
+              "min": 18.759679,
+              "max": 26.525695
+            },
+            "eventLoopMaxMs": {
+              "median": 40.599551,
+              "min": 21.905407,
+              "max": 46.104575
+            },
+            "supabaseCpuPercent": null,
+            "supabaseMemoryBytes": null,
+            "supabaseBlockReadBytes": null,
+            "supabaseBlockWriteBytes": null
+          }
+        },
+        {
+          "requestedUsers": 25,
+          "achievedUsers": {
+            "median": 25,
+            "min": 25,
+            "max": 25
+          },
+          "elapsedSeconds": {
+            "median": 300.0052342500002,
+            "min": 300.0028665,
+            "max": 300.00569620799973
+          },
+          "workflowTransactionsPerSecond": {
+            "median": 8.256522610988405,
+            "min": 8.25650989734091,
+            "max": 8.256587774970477
+          },
+          "sdkOperationsPerSecond": {
+            "median": 29.092825736256277,
+            "min": 29.092780938228284,
+            "max": 29.093055349189473
+          },
+          "readOperationsPerSecond": {
+            "median": 19.00300177845979,
+            "min": 19.0029725170531,
+            "max": 19.003151758218284
+          },
+          "writeOperationsPerSecond": {
+            "median": 10.089823957796488,
+            "min": 10.089808421175185,
+            "max": 10.089903590971188
+          },
+          "operationClasses": {
+            "read": {
+              "latencyP50Ms": {
+                "median": 13.119332999922335,
+                "min": 13.094459000043571,
+                "max": 13.209166000131518
+              },
+              "latencyP95Ms": {
+                "median": 183.90691700018942,
+                "min": 182.4941249997355,
+                "max": 185.12433300027624
+              },
+              "latencyP99Ms": {
+                "median": 258.22291700029746,
+                "min": 256.55937500018626,
+                "max": 266.29591699969023
+              },
+              "errorRate": {
+                "median": 0,
+                "min": 0,
+                "max": 0
+              }
+            },
+            "write": {
+              "latencyP50Ms": {
+                "median": 14.881000000052154,
+                "min": 14.69870899990201,
+                "max": 15.255541000049561
+              },
+              "latencyP95Ms": {
+                "median": 24.183167000301182,
+                "min": 23.905583000276238,
+                "max": 26.215458000078797
+              },
+              "latencyP99Ms": {
+                "median": 27.571665999945253,
+                "min": 26.588666999712586,
+                "max": 36.34945800015703
+              },
+              "errorRate": {
+                "median": 0,
+                "min": 0,
+                "max": 0
+              }
+            },
+            "authSearch": {
+              "latencyP50Ms": {
+                "median": 12.287917000241578,
+                "min": 11.918374999891967,
+                "max": 12.836250000167638
+              },
+              "latencyP95Ms": {
+                "median": 116.81474999990314,
+                "min": 111.22387500014156,
+                "max": 117.60654200008139
+              },
+              "latencyP99Ms": {
+                "median": 118.84445899957791,
+                "min": 117.49095800006762,
+                "max": 121.56612499989569
+              },
+              "errorRate": {
+                "median": 0,
+                "min": 0,
+                "max": 0
+              }
+            }
+          },
+          "resources": {
+            "sampleCount": {
+              "median": 291,
+              "min": 291,
+              "max": 294
+            },
+            "runnerCpuPercent": {
+              "median": 23,
+              "min": 19.5,
+              "max": 25.3
+            },
+            "runnerRssBytes": {
+              "median": 168869888,
+              "min": 148373504,
+              "max": 174014464
+            },
+            "backendCpuPercent": {
+              "median": 386.2,
+              "min": 372.4,
+              "max": 387.6
+            },
+            "backendRssBytes": {
+              "median": 179273728,
+              "min": 177160192,
+              "max": 179306496
+            },
+            "eventLoopP99Ms": {
+              "median": 20.168703,
+              "min": 17.268735,
+              "max": 23.379967
+            },
+            "eventLoopMaxMs": {
+              "median": 36.306943,
+              "min": 28.819455,
+              "max": 55.115775
+            },
+            "supabaseCpuPercent": null,
+            "supabaseMemoryBytes": null,
+            "supabaseBlockReadBytes": null,
+            "supabaseBlockWriteBytes": null
+          }
+        },
+        {
+          "requestedUsers": 50,
+          "achievedUsers": {
+            "median": 50,
+            "min": 50,
+            "max": 50
+          },
+          "elapsedSeconds": {
+            "median": 300.00835566700016,
+            "min": 300.00616220799975,
+            "max": 300.06427245799966
+          },
+          "workflowTransactionsPerSecond": {
+            "median": 16.53620609656137,
+            "min": 16.52645934611931,
+            "max": 16.536326999044935
+          },
+          "sdkOperationsPerSecond": {
+            "median": 58.075049147427684,
+            "min": 58.05089642065987,
+            "max": 58.075473756170105
+          },
+          "readOperationsPerSecond": {
+            "median": 37.96560924003911,
+            "min": 37.95520175296488,
+            "max": 37.96588682102838
+          },
+          "writeOperationsPerSecond": {
+            "median": 20.10943990738858,
+            "min": 20.09569466769499,
+            "max": 20.10958693514172
+          },
+          "operationClasses": {
+            "read": {
+              "latencyP50Ms": {
+                "median": 10.869249999988824,
+                "min": 10.660499999765307,
+                "max": 10.883417000062764
+              },
+              "latencyP95Ms": {
+                "median": 337.48383400030434,
+                "min": 328.621249999851,
+                "max": 340.6859579999
+              },
+              "latencyP99Ms": {
+                "median": 466.9373749997467,
+                "min": 460.79025000007823,
+                "max": 472.289666000288
+              },
+              "errorRate": {
+                "median": 0,
+                "min": 0,
+                "max": 0
+              }
+            },
+            "write": {
+              "latencyP50Ms": {
+                "median": 11.448499999940395,
+                "min": 11.194666999857873,
+                "max": 12.262957999948412
+              },
+              "latencyP95Ms": {
+                "median": 22.463874999899417,
+                "min": 22.244249999988824,
+                "max": 25.153917000163347
+              },
+              "latencyP99Ms": {
+                "median": 52.34408299997449,
+                "min": 38.851584000047296,
+                "max": 69.6543749999255
+              },
+              "errorRate": {
+                "median": 0,
+                "min": 0,
+                "max": 0
+              }
+            },
+            "authSearch": {
+              "latencyP50Ms": {
+                "median": 10.436624999623746,
+                "min": 10.195208999793977,
+                "max": 10.846791999880224
+              },
+              "latencyP95Ms": {
+                "median": 109.2338330000639,
+                "min": 106.04495899984613,
+                "max": 109.8478330001235
+              },
+              "latencyP99Ms": {
+                "median": 117.31858299998567,
+                "min": 115.57929200027138,
+                "max": 117.671875
+              },
+              "errorRate": {
+                "median": 0,
+                "min": 0,
+                "max": 0
+              }
+            }
+          },
+          "resources": {
+            "sampleCount": {
+              "median": 293,
+              "min": 293,
+              "max": 295
+            },
+            "runnerCpuPercent": {
+              "median": 25.6,
+              "min": 24.1,
+              "max": 27.5
+            },
+            "runnerRssBytes": {
+              "median": 178143232,
+              "min": 177029120,
+              "max": 183255040
+            },
+            "backendCpuPercent": {
+              "median": 547.5,
+              "min": 506,
+              "max": 568.7
+            },
+            "backendRssBytes": {
+              "median": 211075072,
+              "min": 209289216,
+              "max": 211566592
+            },
+            "eventLoopP99Ms": {
+              "median": 16.777215,
+              "min": 13.672447,
+              "max": 23.822335
+            },
+            "eventLoopMaxMs": {
+              "median": 33.619967,
+              "min": 23.838719,
+              "max": 115.343359
+            },
+            "supabaseCpuPercent": null,
+            "supabaseMemoryBytes": null,
+            "supabaseBlockReadBytes": null,
+            "supabaseBlockWriteBytes": null
+          }
+        },
+        {
+          "requestedUsers": 75,
+          "achievedUsers": {
+            "median": 75,
+            "min": 75,
+            "max": 75
+          },
+          "elapsedSeconds": {
+            "median": 300.16140758300014,
+            "min": 300.04782837500005,
+            "max": 300.1759334999998
+          },
+          "workflowTransactionsPerSecond": {
+            "median": 24.788796067823355,
+            "min": 24.770006443763382,
+            "max": 24.796046817914245
+          },
+          "sdkOperationsPerSecond": {
+            "median": 86.90570125269558,
+            "min": 86.82994995881708,
+            "max": 86.92947434834103
+          },
+          "readOperationsPerSecond": {
+            "median": 56.956598087834415,
+            "min": 56.892723609972734,
+            "max": 56.98091565132794
+          },
+          "writeOperationsPerSecond": {
+            "median": 29.948558697013095,
+            "min": 29.937226348844348,
+            "max": 29.949103164861167
+          },
+          "operationClasses": {
+            "read": {
+              "latencyP50Ms": {
+                "median": 8.954458999913186,
+                "min": 8.741249999962747,
+                "max": 9.053040999919176
+              },
+              "latencyP95Ms": {
+                "median": 485.12537499982864,
+                "min": 484.3622079999186,
+                "max": 497.6822919999249
+              },
+              "latencyP99Ms": {
+                "median": 674.6198750003241,
+                "min": 670.2600000002421,
+                "max": 696.2794590000995
+              },
+              "errorRate": {
+                "median": 0,
+                "min": 0,
+                "max": 0
+              }
+            },
+            "write": {
+              "latencyP50Ms": {
+                "median": 9.149916999973357,
+                "min": 8.950249999761581,
+                "max": 9.481625000014901
+              },
+              "latencyP95Ms": {
+                "median": 19.2527499999851,
+                "min": 18.632834000047296,
+                "max": 22.07416700012982
+              },
+              "latencyP99Ms": {
+                "median": 54.08429200015962,
+                "min": 47.53683300036937,
+                "max": 63.688124999869615
+              },
+              "errorRate": {
+                "median": 0,
+                "min": 0,
+                "max": 0
+              }
+            },
+            "authSearch": {
+              "latencyP50Ms": {
+                "median": 9.685583000071347,
+                "min": 8.974457999691367,
+                "max": 10.10129199968651
+              },
+              "latencyP95Ms": {
+                "median": 102.86366700008512,
+                "min": 99.87795899994671,
+                "max": 103.56366699980572
+              },
+              "latencyP99Ms": {
+                "median": 113.32845799997449,
+                "min": 112.57687500026077,
+                "max": 117.22595899971202
+              },
+              "errorRate": {
+                "median": 0,
+                "min": 0,
+                "max": 0
+              }
+            }
+          },
+          "resources": {
+            "sampleCount": {
+              "median": 295,
+              "min": 294,
+              "max": 296
+            },
+            "runnerCpuPercent": {
+              "median": 25.4,
+              "min": 21.8,
+              "max": 27.5
+            },
+            "runnerRssBytes": {
+              "median": 182484992,
+              "min": 156139520,
+              "max": 202915840
+            },
+            "backendCpuPercent": {
+              "median": 704,
+              "min": 651.7,
+              "max": 730.2
+            },
+            "backendRssBytes": {
+              "median": 242548736,
+              "min": 242401280,
+              "max": 243974144
+            },
+            "eventLoopP99Ms": {
+              "median": 18.776063,
+              "min": 14.819327,
+              "max": 19.759103
+            },
+            "eventLoopMaxMs": {
+              "median": 23.855103,
+              "min": 21.118975,
+              "max": 66.453503
+            },
+            "supabaseCpuPercent": null,
+            "supabaseMemoryBytes": null,
+            "supabaseBlockReadBytes": null,
+            "supabaseBlockWriteBytes": null
+          }
+        },
+        {
+          "requestedUsers": 100,
+          "achievedUsers": {
+            "median": 100,
+            "min": 100,
+            "max": 100
+          },
+          "elapsedSeconds": {
+            "median": 300.2545777500002,
+            "min": 300.20413312500017,
+            "max": 300.6465426250002
+          },
+          "workflowTransactionsPerSecond": {
+            "median": 32.885427006616204,
+            "min": 32.78268199575972,
+            "max": 32.89428395673756
+          },
+          "sdkOperationsPerSecond": {
+            "median": 115.4054011754363,
+            "min": 115.05537265780481,
+            "max": 115.4414485878174
+          },
+          "readOperationsPerSecond": {
+            "median": 75.89559556681891,
+            "min": 75.68688401111123,
+            "max": 75.92500397224498
+          },
+          "writeOperationsPerSecond": {
+            "median": 39.50980560861738,
+            "min": 39.368488646693585,
+            "max": 39.516444615572425
+          },
+          "operationClasses": {
+            "read": {
+              "latencyP50Ms": {
+                "median": 7.829375000204891,
+                "min": 7.771249999757856,
+                "max": 7.932749999687076
+              },
+              "latencyP95Ms": {
+                "median": 647.1502920002677,
+                "min": 638.2908749999478,
+                "max": 710.0717080002651
+              },
+              "latencyP99Ms": {
+                "median": 909.5549579998478,
+                "min": 900.7935000001453,
+                "max": 1016.082375000231
+              },
+              "errorRate": {
+                "median": 0,
+                "min": 0,
+                "max": 0
+              }
+            },
+            "write": {
+              "latencyP50Ms": {
+                "median": 7.944250000175089,
+                "min": 7.738499999977648,
+                "max": 8.223708000034094
+              },
+              "latencyP95Ms": {
+                "median": 16.822582999709994,
+                "min": 16.612416999880224,
+                "max": 19.327958000358194
+              },
+              "latencyP99Ms": {
+                "median": 125.74716700008139,
+                "min": 92.73791699996218,
+                "max": 145.79987500002608
+              },
+              "errorRate": {
+                "median": 0,
+                "min": 0,
+                "max": 0
+              }
+            },
+            "authSearch": {
+              "latencyP50Ms": {
+                "median": 8.38904199982062,
+                "min": 8.126958000008017,
+                "max": 9.005417000036687
+              },
+              "latencyP95Ms": {
+                "median": 85.07229200005531,
+                "min": 83.34291600016877,
+                "max": 88.9682080000639
+              },
+              "latencyP99Ms": {
+                "median": 111.08245899993926,
+                "min": 107.44187500001863,
+                "max": 113.39358300017193
+              },
+              "errorRate": {
+                "median": 0,
+                "min": 0,
+                "max": 0
+              }
+            }
+          },
+          "resources": {
+            "sampleCount": {
+              "median": 295,
+              "min": 295,
+              "max": 297
+            },
+            "runnerCpuPercent": {
+              "median": 21.9,
+              "min": 17.9,
+              "max": 33.5
+            },
+            "runnerRssBytes": {
+              "median": 197361664,
+              "min": 185090048,
+              "max": 198705152
+            },
+            "backendCpuPercent": {
+              "median": 718.9,
+              "min": 716.1,
+              "max": 722.2
+            },
+            "backendRssBytes": {
+              "median": 243990528,
+              "min": 243859456,
+              "max": 244547584
+            },
+            "eventLoopP99Ms": {
+              "median": 15.745023,
+              "min": 14.286847,
+              "max": 23.543807
+            },
+            "eventLoopMaxMs": {
+              "median": 28.622847,
+              "min": 20.316159,
+              "max": 60.620799
+            },
+            "supabaseCpuPercent": null,
+            "supabaseMemoryBytes": null,
+            "supabaseBlockReadBytes": null,
+            "supabaseBlockWriteBytes": null
+          }
+        }
+      ],
+      "missingStages": [],
+      "compatibilityMismatches": []
+    },
+    "supabase": {
+      "runCount": 3,
+      "runIds": [
+        "2026-08-22T04-04-02-210Z-supabase-full",
+        "2026-08-22T09-31-44-519Z-supabase-full",
+        "2026-08-22T11-46-18-212Z-supabase-full"
+      ],
+      "publishable": true,
+      "identity": {
+        "backend": "supabase",
+        "backendVersion": "2.115.0",
+        "sdkVersion": "2.112.3",
+        "config": {
+          "name": "full",
+          "publishable": true,
+          "dataset": "medium",
+          "seed": 42,
+          "warmupSeconds": 120,
+          "stageSeconds": 300,
+          "concurrency": [
+            5,
+            10,
+            25,
+            50
+          ],
+          "maxConcurrency": 1000,
+          "timeoutMs": 5000,
+          "thinkTimeMs": {
+            "min": 1000,
+            "max": 5000
+          },
+          "weights": {
+            "dashboard": 20,
+            "taskList": 25,
+            "taskDetail": 15,
+            "createTask": 10,
+            "updateTask": 12,
+            "addComment": 10,
+            "search": 5,
+            "profileUpdate": 1,
+            "signIn": 2
+          },
+          "slos": {
+            "read": {
+              "p95Ms": 500,
+              "maxErrorRate": 0.01
+            },
+            "write": {
+              "p95Ms": 750,
+              "maxErrorRate": 0.01
+            },
+            "authSearch": {
+              "p95Ms": 1000,
+              "maxErrorRate": 0.01
+            }
+          }
+        },
+        "settings": {
+          "warmupUserCount": 50,
+          "warmupWritesUnscored": true,
+          "resourceIntervalMs": 1000,
+          "resourceMaxSamples": {
+            "stageDurationMs": 300000,
+            "graceMs": 5000,
+            "formula": "ceil((stageDurationMs + graceMs) / intervalMs) + 2",
+            "value": 307
+          },
+          "overloadThresholds": {
+            "cpuPercent": 90,
+            "p99Ms": 100,
+            "maxMs": 250,
+            "consecutiveSamples": 3
+          },
+          "minClassSamples": 20,
+          "minAchievedRatio": 0.95,
+          "saturationMaterialIncrease": 0.2,
+          "saturationMaxThroughputGain": 0.1,
+          "maxLatencySamples": 2000000,
+          "maxErrorExamples": 100,
+          "measuredRequestTimeoutMs": 5000,
+          "sessionPreparationConcurrency": 10,
+          "boundarySessionsUnmeasured": true
+        },
+        "dataset": "medium",
+        "seed": 42,
+        "schemaVersion": 1,
+        "hardware": {
+          "cpuModel": "Apple M1",
+          "logicalCores": 8,
+          "totalMemoryBytes": 16386818048,
+          "architecture": "arm64",
+          "os": "darwin",
+          "release": "25.6.0",
+          "hostname": "Goldie.local"
+        }
+      },
+      "capacityUsers": {
+        "median": 600,
+        "min": 600,
+        "max": 600
+      },
+      "stages": [
+        {
+          "requestedUsers": 5,
+          "achievedUsers": {
+            "median": 5,
+            "min": 5,
+            "max": 5
+          },
+          "elapsedSeconds": {
+            "median": 300.00426066599994,
+            "min": 300.00308412500004,
+            "max": 300.004455416
+          },
+          "workflowTransactionsPerSecond": {
+            "median": 1.6299768507101717,
+            "min": 1.6266425087698007,
+            "max": 1.6299832430931012
+          },
+          "sdkOperationsPerSecond": {
+            "median": 5.416589739067544,
+            "min": 5.4099196551913655,
+            "max": 5.416610981648853
+          },
+          "readOperationsPerSecond": {
+            "median": 3.9966099059335294,
+            "min": 3.989940743847236,
+            "max": 3.996625579690446
+          },
+          "writeOperationsPerSecond": {
+            "median": 1.4199798331340145,
+            "min": 1.4199789113441292,
+            "max": 1.419985401958407
+          },
+          "operationClasses": {
+            "read": {
+              "latencyP50Ms": {
+                "median": 22.04500000004191,
+                "min": 21.744999999995343,
+                "max": 24.616666999994777
+              },
+              "latencyP95Ms": {
+                "median": 34.807459000032395,
+                "min": 32.83379199996125,
+                "max": 39.398167000035755
+              },
+              "latencyP99Ms": {
+                "median": 41.44625000003725,
+                "min": 37.68254099995829,
+                "max": 49.365875000017695
+              },
+              "errorRate": {
+                "median": 0,
+                "min": 0,
+                "max": 0
+              }
+            },
+            "write": {
+              "latencyP50Ms": {
+                "median": 25.623708999948576,
+                "min": 25.399457999970764,
+                "max": 28.09849999996368
+              },
+              "latencyP95Ms": {
+                "median": 38.355916000087745,
+                "min": 37.617749999975786,
+                "max": 46.99499999999534
+              },
+              "latencyP99Ms": {
+                "median": 44.07545899995603,
+                "min": 43.17849999992177,
+                "max": 55.84533400007058
+              },
+              "errorRate": {
+                "median": 0,
+                "min": 0,
+                "max": 0
+              }
+            },
+            "authSearch": {
+              "latencyP50Ms": {
+                "median": 27.217959000030532,
+                "min": 24.435624999983702,
+                "max": 28.122749999980442
+              },
+              "latencyP95Ms": {
+                "median": 220.20937499997672,
+                "min": 218.10437499999534,
+                "max": 247.78016600001138
+              },
+              "latencyP99Ms": {
+                "median": 248.8313339999877,
+                "min": 235.23945800005458,
+                "max": 275.52870900009293
+              },
+              "errorRate": {
+                "median": 0,
+                "min": 0,
+                "max": 0
+              }
+            }
+          },
+          "resources": {
+            "sampleCount": {
+              "median": 96,
+              "min": 95,
+              "max": 96
+            },
+            "runnerCpuPercent": {
+              "median": 7,
+              "min": 6.3,
+              "max": 12.2
+            },
+            "runnerRssBytes": {
+              "median": 125206528,
+              "min": 101613568,
+              "max": 136052736
+            },
+            "backendCpuPercent": null,
+            "backendRssBytes": null,
+            "eventLoopP99Ms": {
+              "median": 14.598143,
+              "min": 13.942783,
+              "max": 37.617663
+            },
+            "eventLoopMaxMs": {
+              "median": 21.348351,
+              "min": 21.282815,
+              "max": 97.189887
+            },
+            "supabaseCpuPercent": {
+              "median": 36.65,
+              "min": 25.87,
+              "max": 37.68
+            },
+            "supabaseMemoryBytes": {
+              "median": 2012951347,
+              "min": 1977970852,
+              "max": 2017428766
+            },
+            "supabaseBlockReadBytes": {
+              "median": 2311200000,
+              "min": 2289700000,
+              "max": 2355700000
+            },
+            "supabaseBlockWriteBytes": {
+              "median": 2260962190,
+              "min": 2191028190,
+              "max": 2261044190
+            }
+          }
+        },
+        {
+          "requestedUsers": 10,
+          "achievedUsers": {
+            "median": 10,
+            "min": 10,
+            "max": 10
+          },
+          "elapsedSeconds": {
+            "median": 300.0029138330001,
+            "min": 300.001863292,
+            "max": 300.00382054099987
+          },
+          "workflowTransactionsPerSecond": {
+            "median": 3.273301540486507,
+            "min": 3.273291647516854,
+            "max": 3.273313002873561
+          },
+          "sdkOperationsPerSecond": {
+            "median": 10.666563064721815,
+            "min": 10.666530826938832,
+            "max": 10.666600416695921
+          },
+          "readOperationsPerSecond": {
+            "median": 7.636592494149275,
+            "min": 7.636569413911519,
+            "max": 7.6366192358282365
+          },
+          "writeOperationsPerSecond": {
+            "median": 3.0299705705725404,
+            "min": 3.0299614130273116,
+            "max": 3.029981180867685
+          },
+          "operationClasses": {
+            "read": {
+              "latencyP50Ms": {
+                "median": 21.4045000000624,
+                "min": 21.390374999959022,
+                "max": 21.755250000045635
+              },
+              "latencyP95Ms": {
+                "median": 33.421458999975584,
+                "min": 33.24720899993554,
+                "max": 33.45154199982062
+              },
+              "latencyP99Ms": {
+                "median": 37.99620799999684,
+                "min": 37.386499999905936,
+                "max": 43.82820799993351
+              },
+              "errorRate": {
+                "median": 0,
+                "min": 0,
+                "max": 0
+              }
+            },
+            "write": {
+              "latencyP50Ms": {
+                "median": 24.405041999998502,
+                "min": 24.20654199994169,
+                "max": 24.43508299998939
+              },
+              "latencyP95Ms": {
+                "median": 36.50304199999664,
+                "min": 35.725790999946184,
+                "max": 36.66070800006855
+              },
+              "latencyP99Ms": {
+                "median": 42.28404199995566,
+                "min": 41.32254099997226,
+                "max": 43.44804199994542
+              },
+              "errorRate": {
+                "median": 0,
+                "min": 0,
+                "max": 0
+              }
+            },
+            "authSearch": {
+              "latencyP50Ms": {
+                "median": 24.158374999882653,
+                "min": 23.98533299996052,
+                "max": 25.76720799994655
+              },
+              "latencyP95Ms": {
+                "median": 213.65800000005402,
+                "min": 205.4282499999972,
+                "max": 221.89937499992084
+              },
+              "latencyP99Ms": {
+                "median": 228.53958300012164,
+                "min": 215.11720800003968,
+                "max": 230.82037500001024
+              },
+              "errorRate": {
+                "median": 0,
+                "min": 0,
+                "max": 0
+              }
+            }
+          },
+          "resources": {
+            "sampleCount": {
+              "median": 96,
+              "min": 96,
+              "max": 96
+            },
+            "runnerCpuPercent": {
+              "median": 10.7,
+              "min": 8.8,
+              "max": 16.9
+            },
+            "runnerRssBytes": {
+              "median": 85917696,
+              "min": 69091328,
+              "max": 103170048
+            },
+            "backendCpuPercent": null,
+            "backendRssBytes": null,
+            "eventLoopP99Ms": {
+              "median": 13.778943,
+              "min": 13.598719,
+              "max": 17.711103
+            },
+            "eventLoopMaxMs": {
+              "median": 19.529727,
+              "min": 18.874367,
+              "max": 34.078719
+            },
+            "supabaseCpuPercent": {
+              "median": 35.93000000000001,
+              "min": 31.189999999999998,
+              "max": 39.43000000000001
+            },
+            "supabaseMemoryBytes": {
+              "median": 2029739047,
+              "min": 1988183982,
+              "max": 2030923941
+            },
+            "supabaseBlockReadBytes": {
+              "median": 3018300000,
+              "min": 2993900000,
+              "max": 3057500000
+            },
+            "supabaseBlockWriteBytes": {
+              "median": 2291044190,
+              "min": 2231028190,
+              "max": 2300962190
+            }
+          }
+        },
+        {
+          "requestedUsers": 25,
+          "achievedUsers": {
+            "median": 25,
+            "min": 25,
+            "max": 25
+          },
+          "elapsedSeconds": {
+            "median": 300.0039477090002,
+            "min": 300.00178254199983,
+            "max": 300.0090609589999
+          },
+          "workflowTransactionsPerSecond": {
+            "median": 8.273224465724386,
+            "min": 8.27308345976656,
+            "max": 8.273284175078272
+          },
+          "sdkOperationsPerSecond": {
+            "median": 26.649649316465137,
+            "min": 26.64919510911912,
+            "max": 26.649841651793224
+          },
+          "readOperationsPerSecond": {
+            "median": 19.249746692005775,
+            "min": 19.24941860602413,
+            "max": 19.249885620901296
+          },
+          "writeOperationsPerSecond": {
+            "median": 7.399902624459362,
+            "min": 7.39977650309499,
+            "max": 7.399956030891927
+          },
+          "operationClasses": {
+            "read": {
+              "latencyP50Ms": {
+                "median": 18.562542000086978,
+                "min": 18.450249999994412,
+                "max": 18.781541999895126
+              },
+              "latencyP95Ms": {
+                "median": 31.890999999828637,
+                "min": 30.57575000007637,
+                "max": 36.2398749999702
+              },
+              "latencyP99Ms": {
+                "median": 44.440625000046566,
+                "min": 38.833917000098154,
+                "max": 53.42645899998024
+              },
+              "errorRate": {
+                "median": 0,
+                "min": 0,
+                "max": 0
+              }
+            },
+            "write": {
+              "latencyP50Ms": {
+                "median": 21.209415999939665,
+                "min": 20.68845900008455,
+                "max": 21.51391700003296
+              },
+              "latencyP95Ms": {
+                "median": 33.71499999985099,
+                "min": 33.339250000193715,
+                "max": 41.07662499998696
+              },
+              "latencyP99Ms": {
+                "median": 38.91866700001992,
+                "min": 38.33312499988824,
+                "max": 69.29829200007953
+              },
+              "errorRate": {
+                "median": 0,
+                "min": 0,
+                "max": 0
+              }
+            },
+            "authSearch": {
+              "latencyP50Ms": {
+                "median": 22.976250000065193,
+                "min": 21.546290999976918,
+                "max": 24.437792000127956
+              },
+              "latencyP95Ms": {
+                "median": 205.04883300000802,
+                "min": 203.75837499997579,
+                "max": 233.79799999995157
+              },
+              "latencyP99Ms": {
+                "median": 218.71225000009872,
+                "min": 217.2783749999944,
+                "max": 377.72870799992234
+              },
+              "errorRate": {
+                "median": 0,
+                "min": 0,
+                "max": 0
+              }
+            }
+          },
+          "resources": {
+            "sampleCount": {
+              "median": 96,
+              "min": 95,
+              "max": 96
+            },
+            "runnerCpuPercent": {
+              "median": 13.9,
+              "min": 13.4,
+              "max": 19.6
+            },
+            "runnerRssBytes": {
+              "median": 129105920,
+              "min": 112984064,
+              "max": 141180928
+            },
+            "backendCpuPercent": null,
+            "backendRssBytes": null,
+            "eventLoopP99Ms": {
+              "median": 19.152895,
+              "min": 13.467647,
+              "max": 24.903679
+            },
+            "eventLoopMaxMs": {
+              "median": 28.786687,
+              "min": 21.938175,
+              "max": 31.080447
+            },
+            "supabaseCpuPercent": {
+              "median": 49.309999999999995,
+              "min": 49.11000000000001,
+              "max": 50.34999999999999
+            },
+            "supabaseMemoryBytes": {
+              "median": 1995198956,
+              "min": 1991046596,
+              "max": 2032161261
+            },
+            "supabaseBlockReadBytes": {
+              "median": 3682900000,
+              "min": 3573800000,
+              "max": 3715000000
+            },
+            "supabaseBlockWriteBytes": {
+              "median": 2351044190,
+              "min": 2301028190,
+              "max": 2370962190
+            }
+          }
+        },
+        {
+          "requestedUsers": 50,
+          "achievedUsers": {
+            "median": 50,
+            "min": 50,
+            "max": 50
+          },
+          "elapsedSeconds": {
+            "median": 300.00366558300004,
+            "min": 300.00212466600004,
+            "max": 300.0047633750001
+          },
+          "workflowTransactionsPerSecond": {
+            "median": 16.619882294337216,
+            "min": 16.606402991583828,
+            "max": 16.623130221788173
+          },
+          "sdkOperationsPerSecond": {
+            "median": 53.589620466518134,
+            "min": 53.549149751062664,
+            "max": 53.59934509050608
+          },
+          "readOperationsPerSecond": {
+            "median": 38.79619263111942,
+            "min": 38.75605130131376,
+            "max": 38.796391902084004
+          },
+          "writeOperationsPerSecond": {
+            "median": 14.793228564434127,
+            "min": 14.793098449748902,
+            "max": 14.80315245938666
+          },
+          "operationClasses": {
+            "read": {
+              "latencyP50Ms": {
+                "median": 15.72829100000672,
+                "min": 15.304583000019193,
+                "max": 15.781166999833658
+              },
+              "latencyP95Ms": {
+                "median": 28.345375000033528,
+                "min": 28.08520899992436,
+                "max": 31.93520800000988
+              },
+              "latencyP99Ms": {
+                "median": 53.10691600013524,
+                "min": 45.40591700002551,
+                "max": 57.60662499978207
+              },
+              "errorRate": {
+                "median": 0,
+                "min": 0,
+                "max": 0
+              }
+            },
+            "write": {
+              "latencyP50Ms": {
+                "median": 17.45091599994339,
+                "min": 17.2904579997994,
+                "max": 18.027916999999434
+              },
+              "latencyP95Ms": {
+                "median": 30.563708000117913,
+                "min": 30.261415999848396,
+                "max": 34.44637500005774
+              },
+              "latencyP99Ms": {
+                "median": 92.76537499995902,
+                "min": 65.3825829999987,
+                "max": 117.40208399994299
+              },
+              "errorRate": {
+                "median": 0,
+                "min": 0,
+                "max": 0
+              }
+            },
+            "authSearch": {
+              "latencyP50Ms": {
+                "median": 20.20175000000745,
+                "min": 20.107833000132814,
+                "max": 20.33754099998623
+              },
+              "latencyP95Ms": {
+                "median": 205.7544170001056,
+                "min": 204.77958400011994,
+                "max": 221.43612500000745
+              },
+              "latencyP99Ms": {
+                "median": 223.8133749999106,
+                "min": 211.35633399989456,
+                "max": 343.04175000009127
+              },
+              "errorRate": {
+                "median": 0,
+                "min": 0,
+                "max": 0
+              }
+            }
+          },
+          "resources": {
+            "sampleCount": {
+              "median": 96,
+              "min": 96,
+              "max": 96
+            },
+            "runnerCpuPercent": {
+              "median": 22.9,
+              "min": 20.2,
+              "max": 25.5
+            },
+            "runnerRssBytes": {
+              "median": 130990080,
+              "min": 116604928,
+              "max": 145031168
+            },
+            "backendCpuPercent": null,
+            "backendRssBytes": null,
+            "eventLoopP99Ms": {
+              "median": 16.941055,
+              "min": 13.139967,
+              "max": 21.266431
+            },
+            "eventLoopMaxMs": {
+              "median": 24.625151,
+              "min": 23.003135,
+              "max": 33.439743
+            },
+            "supabaseCpuPercent": {
+              "median": 61.050000000000004,
+              "min": 58.85000000000001,
+              "max": 83.41
+            },
+            "supabaseMemoryBytes": {
+              "median": 2035002900,
+              "min": 2022378046,
+              "max": 2039312548
+            },
+            "supabaseBlockReadBytes": {
+              "median": 4332200000,
+              "min": 4208900000,
+              "max": 4349000000
+            },
+            "supabaseBlockWriteBytes": {
+              "median": 2471044190,
+              "min": 2421028190,
+              "max": 2490962190
+            }
+          }
+        },
+        {
+          "requestedUsers": 100,
+          "achievedUsers": {
+            "median": 100,
+            "min": 100,
+            "max": 100
+          },
+          "elapsedSeconds": {
+            "median": 300.00421208299997,
+            "min": 300.00263991699995,
+            "max": 300.0057002910001
+          },
+          "workflowTransactionsPerSecond": {
+            "median": 33.3130401877963,
+            "min": 33.309367089715195,
+            "max": 33.31619889801666
+          },
+          "sdkOperationsPerSecond": {
+            "median": 107.63571950211428,
+            "min": 107.62128842446059,
+            "max": 107.64182201237139
+          },
+          "readOperationsPerSecond": {
+            "median": 78.31597750773203,
+            "min": 78.30184552231559,
+            "max": 78.3222336675035
+          },
+          "writeOperationsPerSecond": {
+            "median": 29.31958834486789,
+            "min": 29.31944290214499,
+            "max": 29.319741994382248
+          },
+          "operationClasses": {
+            "read": {
+              "latencyP50Ms": {
+                "median": 11.969958999892697,
+                "min": 10.99729200010188,
+                "max": 12.07058300008066
+              },
+              "latencyP95Ms": {
+                "median": 22.449833000078797,
+                "min": 20.31816599983722,
+                "max": 22.849374999990687
+              },
+              "latencyP99Ms": {
+                "median": 57.97991700004786,
+                "min": 43.84758400009014,
+                "max": 69.36529199988581
+              },
+              "errorRate": {
+                "median": 0,
+                "min": 0,
+                "max": 0
+              }
+            },
+            "write": {
+              "latencyP50Ms": {
+                "median": 13.362749999854714,
+                "min": 12.713957999832928,
+                "max": 13.594250000081956
+              },
+              "latencyP95Ms": {
+                "median": 24.010666999965906,
+                "min": 22.06583400000818,
+                "max": 24.5025420000311
+              },
+              "latencyP99Ms": {
+                "median": 146.68350000004284,
+                "min": 130.39145800005645,
+                "max": 168.99625000008382
+              },
+              "errorRate": {
+                "median": 0,
+                "min": 0,
+                "max": 0
+              }
+            },
+            "authSearch": {
+              "latencyP50Ms": {
+                "median": 15.136834000004455,
+                "min": 13.973958000075072,
+                "max": 15.56512499996461
+              },
+              "latencyP95Ms": {
+                "median": 193.83599999989383,
+                "min": 192.44179099984467,
+                "max": 194.793124999851
+              },
+              "latencyP99Ms": {
+                "median": 234.06566600012593,
+                "min": 230.35479100001976,
+                "max": 248.01608299999498
+              },
+              "errorRate": {
+                "median": 0,
+                "min": 0,
+                "max": 0
+              }
+            }
+          },
+          "resources": {
+            "sampleCount": {
+              "median": 97,
+              "min": 97,
+              "max": 97
+            },
+            "runnerCpuPercent": {
+              "median": 21.5,
+              "min": 19.7,
+              "max": 25.7
+            },
+            "runnerRssBytes": {
+              "median": 138215424,
+              "min": 124338176,
+              "max": 146587648
+            },
+            "backendCpuPercent": null,
+            "backendRssBytes": null,
+            "eventLoopP99Ms": {
+              "median": 13.557759,
+              "min": 13.279231,
+              "max": 22.298623
+            },
+            "eventLoopMaxMs": {
+              "median": 25.378815,
+              "min": 24.936447,
+              "max": 43.417599
+            },
+            "supabaseCpuPercent": {
+              "median": 93.71999999999998,
+              "min": 91,
+              "max": 96.82000000000001
+            },
+            "supabaseMemoryBytes": {
+              "median": 2034981929,
+              "min": 2027662867,
+              "max": 2040445012
+            },
+            "supabaseBlockReadBytes": {
+              "median": 5035300000,
+              "min": 4969000000,
+              "max": 5116000000
+            },
+            "supabaseBlockWriteBytes": {
+              "median": 2691044190,
+              "min": 2641028190,
+              "max": 2720962190
+            }
+          }
+        },
+        {
+          "requestedUsers": 200,
+          "achievedUsers": {
+            "median": 200,
+            "min": 200,
+            "max": 200
+          },
+          "elapsedSeconds": {
+            "median": 300.006370625,
+            "min": 300.0057736249999,
+            "max": 300.00779666700004
+          },
+          "workflowTransactionsPerSecond": {
+            "median": 66.53525376283,
+            "min": 66.52827100408298,
+            "max": 66.5453859729864
+          },
+          "sdkOperationsPerSecond": {
+            "median": 214.57877666360307,
+            "min": 214.54775747526455,
+            "max": 214.59253674388356
+          },
+          "readOperationsPerSecond": {
+            "median": 155.49669796282848,
+            "min": 155.4692928589828,
+            "max": 155.510340472035
+          },
+          "writeOperationsPerSecond": {
+            "median": 59.082078700774595,
+            "min": 59.078464616281714,
+            "max": 59.08219627184852
+          },
+          "operationClasses": {
+            "read": {
+              "latencyP50Ms": {
+                "median": 9.097457999829203,
+                "min": 8.994249999988824,
+                "max": 9.410875000059605
+              },
+              "latencyP95Ms": {
+                "median": 17.971792000345886,
+                "min": 17.904000000096858,
+                "max": 19.565417000092566
+              },
+              "latencyP99Ms": {
+                "median": 93.77929199999198,
+                "min": 66.66441700002179,
+                "max": 99.89704199996777
+              },
+              "errorRate": {
+                "median": 0,
+                "min": 0,
+                "max": 0
+              }
+            },
+            "write": {
+              "latencyP50Ms": {
+                "median": 10.560291999951005,
+                "min": 10.466082999948412,
+                "max": 10.932499999878928
+              },
+              "latencyP95Ms": {
+                "median": 19.480750000104308,
+                "min": 19.342333000153303,
+                "max": 22.177209000103176
+              },
+              "latencyP99Ms": {
+                "median": 269.8562910000328,
+                "min": 190.93691699998453,
+                "max": 325.5128750000149
+              },
+              "errorRate": {
+                "median": 0,
+                "min": 0,
+                "max": 0
+              }
+            },
+            "authSearch": {
+              "latencyP50Ms": {
+                "median": 11.42995800031349,
+                "min": 11.22683299984783,
+                "max": 11.903166000032797
+              },
+              "latencyP95Ms": {
+                "median": 201.92224999982864,
+                "min": 191.63954199990258,
+                "max": 204.9804999998305
+              },
+              "latencyP99Ms": {
+                "median": 277.987709000241,
+                "min": 226.28962500020862,
+                "max": 492.124792000046
+              },
+              "errorRate": {
+                "median": 0,
+                "min": 0,
+                "max": 0
+              }
+            }
+          },
+          "resources": {
+            "sampleCount": {
+              "median": 97,
+              "min": 97,
+              "max": 97
+            },
+            "runnerCpuPercent": {
+              "median": 27.2,
+              "min": 26.5,
+              "max": 27.3
+            },
+            "runnerRssBytes": {
+              "median": 154025984,
+              "min": 135413760,
+              "max": 172343296
+            },
+            "backendCpuPercent": null,
+            "backendRssBytes": null,
+            "eventLoopP99Ms": {
+              "median": 16.957439,
+              "min": 14.778367,
+              "max": 26.542079
+            },
+            "eventLoopMaxMs": {
+              "median": 30.392319,
+              "min": 26.820607,
+              "max": 38.895615
+            },
+            "supabaseCpuPercent": {
+              "median": 145.26999999999998,
+              "min": 134.6,
+              "max": 185.33999999999997
+            },
+            "supabaseMemoryBytes": {
+              "median": 2065179871,
+              "min": 2045543185,
+              "max": 2088637562
+            },
+            "supabaseBlockReadBytes": {
+              "median": 5979400000,
+              "min": 5946000000,
+              "max": 6123000000
+            },
+            "supabaseBlockWriteBytes": {
+              "median": 3101044190,
+              "min": 3061028190,
+              "max": 3120962190
+            }
+          }
+        },
+        {
+          "requestedUsers": 400,
+          "achievedUsers": {
+            "median": 398,
+            "min": 396,
+            "max": 399
+          },
+          "elapsedSeconds": {
+            "median": 300.01067629199986,
+            "min": 300.00903354199977,
+            "max": 300.0555235410002
+          },
+          "workflowTransactionsPerSecond": {
+            "median": 131.712700559292,
+            "min": 131.6619811274807,
+            "max": 132.27218593287057
+          },
+          "sdkOperationsPerSecond": {
+            "median": 424.10722936510376,
+            "min": 423.6715891946724,
+            "max": 425.887843996108
+          },
+          "readOperationsPerSecond": {
+            "median": 307.6807351771875,
+            "min": 307.36906146049375,
+            "max": 309.0061429491755
+          },
+          "writeOperationsPerSecond": {
+            "median": 116.42649418791622,
+            "min": 116.30252773417862,
+            "max": 116.88170104693249
+          },
+          "operationClasses": {
+            "read": {
+              "latencyP50Ms": {
+                "median": 8.344791000243276,
+                "min": 8.210041999816895,
+                "max": 8.552625000011176
+              },
+              "latencyP95Ms": {
+                "median": 17.341624999884516,
+                "min": 16.92599999997765,
+                "max": 29.121999999973923
+              },
+              "latencyP99Ms": {
+                "median": 379.90258300025016,
+                "min": 227.26283399993554,
+                "max": 1339.920167000033
+              },
+              "errorRate": {
+                "median": 0,
+                "min": 0,
+                "max": 0
+              }
+            },
+            "write": {
+              "latencyP50Ms": {
+                "median": 9.819457999896258,
+                "min": 9.748083000071347,
+                "max": 9.921957999933511
+              },
+              "latencyP95Ms": {
+                "median": 19.14312499994412,
+                "min": 18.91700000036508,
+                "max": 34.08625000016764
+              },
+              "latencyP99Ms": {
+                "median": 343.0296669998206,
+                "min": 147.3787079998292,
+                "max": 1270.362625000067
+              },
+              "errorRate": {
+                "median": 0.0005275056518462698,
+                "min": 0,
+                "max": 0.0006807866868381241
+              }
+            },
+            "authSearch": {
+              "latencyP50Ms": {
+                "median": 10.230499999597669,
+                "min": 10.027083000168204,
+                "max": 10.772832999937236
+              },
+              "latencyP95Ms": {
+                "median": 222.09862499963492,
+                "min": 216.4696249999106,
+                "max": 287.8869579997845
+              },
+              "latencyP99Ms": {
+                "median": 326.4878329997882,
+                "min": 290.59491600003093,
+                "max": 1203.3035840000957
+              },
+              "errorRate": {
+                "median": 0.0007280669821623589,
+                "min": 0.00036656891495601173,
+                "max": 0.0014635931211123307
+              }
+            }
+          },
+          "resources": {
+            "sampleCount": {
+              "median": 96,
+              "min": 96,
+              "max": 97
+            },
+            "runnerCpuPercent": {
+              "median": 35.5,
+              "min": 29.6,
+              "max": 42.2
+            },
+            "runnerRssBytes": {
+              "median": 241139712,
+              "min": 229965824,
+              "max": 245547008
+            },
+            "backendCpuPercent": null,
+            "backendRssBytes": null,
+            "eventLoopP99Ms": {
+              "median": 28.917759,
+              "min": 22.085631,
+              "max": 47.251455
+            },
+            "eventLoopMaxMs": {
+              "median": 41.517055,
+              "min": 40.435711,
+              "max": 47.251455
+            },
+            "supabaseCpuPercent": {
+              "median": 409.37,
+              "min": 265.07000000000005,
+              "max": 591.29
+            },
+            "supabaseMemoryBytes": {
+              "median": 2137532659,
+              "min": 2103474913,
+              "max": 2155358454
+            },
+            "supabaseBlockReadBytes": {
+              "median": 7608500000,
+              "min": 7490000000,
+              "max": 7834000000
+            },
+            "supabaseBlockWriteBytes": {
+              "median": 3931044190,
+              "min": 3871028190,
+              "max": 3950962190
+            }
+          }
+        },
+        {
+          "requestedUsers": 600,
+          "achievedUsers": {
+            "median": 588,
+            "min": 587,
+            "max": 588
+          },
+          "elapsedSeconds": {
+            "median": 300.1603451670003,
+            "min": 300.0109064170001,
+            "max": 300.1732731249998
+          },
+          "workflowTransactionsPerSecond": {
+            "median": 193.23172711597834,
+            "min": 190.90305977207842,
+            "max": 194.03629072853005
+          },
+          "sdkOperationsPerSecond": {
+            "median": 622.170648491509,
+            "min": 614.817648474489,
+            "max": 624.6261473869483
+          },
+          "readOperationsPerSecond": {
+            "median": 452.73850861268306,
+            "min": 447.4537329433342,
+            "max": 454.4604315540248
+          },
+          "writeOperationsPerSecond": {
+            "median": 169.43213987882598,
+            "min": 167.36391553115482,
+            "max": 170.1657158329235
+          },
+          "operationClasses": {
+            "read": {
+              "latencyP50Ms": {
+                "median": 9.470000000204891,
+                "min": 9.349958000238985,
+                "max": 9.610375000163913
+              },
+              "latencyP95Ms": {
+                "median": 27.036333000287414,
+                "min": 25.427832999732345,
+                "max": 89.73558299988508
+              },
+              "latencyP99Ms": {
+                "median": 1499.3342079999857,
+                "min": 647.1976250000298,
+                "max": 2337.597250000108
+              },
+              "errorRate": {
+                "median": 0.00031669257787758393,
+                "min": 0,
+                "max": 0.0010488593654400839
+              }
+            },
+            "write": {
+              "latencyP50Ms": {
+                "median": 10.619415999855846,
+                "min": 10.586457999888808,
+                "max": 10.621791999787092
+              },
+              "latencyP95Ms": {
+                "median": 28.522832999937236,
+                "min": 27.118083000183105,
+                "max": 87.25483400002122
+              },
+              "latencyP99Ms": {
+                "median": 1160.3878330001608,
+                "min": 957.5035830000415,
+                "max": 2030.067792000249
+              },
+              "errorRate": {
+                "median": 0.0009853238603951668,
+                "min": 0.00030998140111593303,
+                "max": 0.001679437388474861
+              }
+            },
+            "authSearch": {
+              "latencyP50Ms": {
+                "median": 12.164582999888808,
+                "min": 12.064166999887675,
+                "max": 12.670957999769598
+              },
+              "latencyP95Ms": {
+                "median": 270.3395000002347,
+                "min": 269.4301670002751,
+                "max": 296.0157080003992
+              },
+              "latencyP99Ms": {
+                "median": 925.5757920001633,
+                "min": 420.56766599975526,
+                "max": 945.9886660003103
+              },
+              "errorRate": {
+                "median": 0.0029791459781529296,
+                "min": 0.0029636947394418374,
+                "max": 0.003769791404875597
+              }
+            }
+          },
+          "resources": {
+            "sampleCount": {
+              "median": 96,
+              "min": 96,
+              "max": 96
+            },
+            "runnerCpuPercent": {
+              "median": 54,
+              "min": 49.2,
+              "max": 58.4
+            },
+            "runnerRssBytes": {
+              "median": 274120704,
+              "min": 273629184,
+              "max": 284508160
+            },
+            "backendCpuPercent": null,
+            "backendRssBytes": null,
+            "eventLoopP99Ms": {
+              "median": 22.822911,
+              "min": 21.168127,
+              "max": 33.882111
+            },
+            "eventLoopMaxMs": {
+              "median": 23.461887,
+              "min": 22.822911,
+              "max": 33.882111
+            },
+            "supabaseCpuPercent": {
+              "median": 444.48,
+              "min": 400.18000000000006,
+              "max": 530.9300000000001
+            },
+            "supabaseMemoryBytes": {
+              "median": 2225193616,
+              "min": 2189970898,
+              "max": 2243648553
+            },
+            "supabaseBlockReadBytes": {
+              "median": 11358200000,
+              "min": 11212000000,
+              "max": 11859000000
+            },
+            "supabaseBlockWriteBytes": {
+              "median": 7580962190,
+              "min": 7561028190,
+              "max": 7651044190
+            }
+          }
+        },
+        {
+          "requestedUsers": 800,
+          "achievedUsers": {
+            "median": 739,
+            "min": 733,
+            "max": 749
+          },
+          "elapsedSeconds": {
+            "median": 300.161032292,
+            "min": 300.14165079200035,
+            "max": 300.4771066669999
+          },
+          "workflowTransactionsPerSecond": {
+            "median": 228.40073368786585,
+            "min": 222.99137698280379,
+            "max": 229.7912169279522
+          },
+          "sdkOperationsPerSecond": {
+            "median": 737.6806986211229,
+            "min": 721.0162249356425,
+            "max": 741.8601785427851
+          },
+          "readOperationsPerSecond": {
+            "median": 537.3082534014808,
+            "min": 525.6617986329977,
+            "max": 540.4305233142551
+          },
+          "writeOperationsPerSecond": {
+            "median": 200.37244521964212,
+            "min": 195.35442630264487,
+            "max": 201.42965522852995
+          },
+          "operationClasses": {
+            "read": {
+              "latencyP50Ms": {
+                "median": 27.879583000205457,
+                "min": 20.508125000167638,
+                "max": 49.153000000398606
+              },
+              "latencyP95Ms": {
+                "median": 1536.7762080002576,
+                "min": 1462.0129589997232,
+                "max": 1731.047666999977
+              },
+              "latencyP99Ms": {
+                "median": 3931.8714169999585,
+                "min": 3419.807041000109,
+                "max": 4514.382875000127
+              },
+              "errorRate": {
+                "median": 0.0009163178880110949,
+                "min": 0.0008898294894302686,
+                "max": 0.0009926880054234662
+              }
+            },
+            "write": {
+              "latencyP50Ms": {
+                "median": 30.094541999977082,
+                "min": 21.744249999988824,
+                "max": 51.4678329997696
+              },
+              "latencyP95Ms": {
+                "median": 1292.160666000098,
+                "min": 1198.8034999999218,
+                "max": 1471.8468339997344
+              },
+              "latencyP99Ms": {
+                "median": 3299.958374999929,
+                "min": 2737.9715829999186,
+                "max": 3636.886874999851
+              },
+              "errorRate": {
+                "median": 0.010663869586119487,
+                "min": 0.009555661729574774,
+                "max": 0.013351254480286739
+              }
+            },
+            "authSearch": {
+              "latencyP50Ms": {
+                "median": 212.77391600003466,
+                "min": 204.3194160000421,
+                "max": 228.30750000011176
+              },
+              "latencyP95Ms": {
+                "median": 1238.3863750002347,
+                "min": 1203.674875000026,
+                "max": 1381.2632500003092
+              },
+              "latencyP99Ms": {
+                "median": 2763.9621250000782,
+                "min": 2437.6634579999372,
+                "max": 3630.7318330002017
+              },
+              "errorRate": {
+                "median": 0.01375952582557155,
+                "min": 0.011150852093414685,
+                "max": 0.015314926660914581
+              }
+            }
+          },
+          "resources": {
+            "sampleCount": {
+              "median": 94,
+              "min": 94,
+              "max": 95
+            },
+            "runnerCpuPercent": {
+              "median": 72.5,
+              "min": 67.8,
+              "max": 76
+            },
+            "runnerRssBytes": {
+              "median": 322142208,
+              "min": 317521920,
+              "max": 326189056
+            },
+            "backendCpuPercent": null,
+            "backendRssBytes": null,
+            "eventLoopP99Ms": {
+              "median": 68.550655,
+              "min": 66.748415,
+              "max": 102.170623
+            },
+            "eventLoopMaxMs": {
+              "median": 68.550655,
+              "min": 66.748415,
+              "max": 102.170623
+            },
+            "supabaseCpuPercent": {
+              "median": 587.3499999999999,
+              "min": 583.47,
+              "max": 636.6899999999999
+            },
+            "supabaseMemoryBytes": {
+              "median": 2227259308,
+              "min": 2215316029,
+              "max": 2275734978
+            },
+            "supabaseBlockReadBytes": {
+              "median": 9517200000,
+              "min": 9362000000,
+              "max": 9845000000
+            },
+            "supabaseBlockWriteBytes": {
+              "median": 5781044190,
+              "min": 5731028190,
+              "max": 5820962190
+            }
+          }
+        }
+      ],
+      "missingStages": [],
+      "compatibilityMismatches": []
+    },
+    "trailbase": {
+      "runCount": 3,
+      "runIds": [
+        "2026-08-22T06-14-33-965Z-trailbase-full",
+        "2026-08-22T08-26-48-116Z-trailbase-full",
+        "2026-08-22T10-38-28-900Z-trailbase-full"
+      ],
+      "publishable": true,
+      "identity": {
+        "backend": "trailbase",
+        "backendVersion": "0.33.1",
+        "sdkVersion": "0.14.0",
+        "config": {
+          "name": "full",
+          "publishable": true,
+          "dataset": "medium",
+          "seed": 42,
+          "warmupSeconds": 120,
+          "stageSeconds": 300,
+          "concurrency": [
+            5,
+            10,
+            25,
+            50
+          ],
+          "maxConcurrency": 1000,
+          "timeoutMs": 5000,
+          "thinkTimeMs": {
+            "min": 1000,
+            "max": 5000
+          },
+          "weights": {
+            "dashboard": 20,
+            "taskList": 25,
+            "taskDetail": 15,
+            "createTask": 10,
+            "updateTask": 12,
+            "addComment": 10,
+            "search": 5,
+            "profileUpdate": 1,
+            "signIn": 2
+          },
+          "slos": {
+            "read": {
+              "p95Ms": 500,
+              "maxErrorRate": 0.01
+            },
+            "write": {
+              "p95Ms": 750,
+              "maxErrorRate": 0.01
+            },
+            "authSearch": {
+              "p95Ms": 1000,
+              "maxErrorRate": 0.01
+            }
+          }
+        },
+        "settings": {
+          "warmupUserCount": 50,
+          "warmupWritesUnscored": true,
+          "resourceIntervalMs": 1000,
+          "resourceMaxSamples": {
+            "stageDurationMs": 300000,
+            "graceMs": 5000,
+            "formula": "ceil((stageDurationMs + graceMs) / intervalMs) + 2",
+            "value": 307
+          },
+          "overloadThresholds": {
+            "cpuPercent": 90,
+            "p99Ms": 100,
+            "maxMs": 250,
+            "consecutiveSamples": 3
+          },
+          "minClassSamples": 20,
+          "minAchievedRatio": 0.95,
+          "saturationMaterialIncrease": 0.2,
+          "saturationMaxThroughputGain": 0.1,
+          "maxLatencySamples": 2000000,
+          "maxErrorExamples": 100,
+          "measuredRequestTimeoutMs": 5000,
+          "sessionPreparationConcurrency": 10,
+          "boundarySessionsUnmeasured": true
+        },
+        "dataset": "medium",
+        "seed": 42,
+        "schemaVersion": 1,
+        "hardware": {
+          "cpuModel": "Apple M1",
+          "logicalCores": 8,
+          "totalMemoryBytes": 16386818048,
+          "architecture": "arm64",
+          "os": "darwin",
+          "release": "25.6.0",
+          "hostname": "Goldie.local"
+        }
+      },
+      "capacityUsers": {
+        "median": 1000,
+        "min": 1000,
+        "max": 1000
+      },
+      "stages": [
+        {
+          "requestedUsers": 5,
+          "achievedUsers": {
+            "median": 5,
+            "min": 5,
+            "max": 5
+          },
+          "elapsedSeconds": {
+            "median": 300.00378925,
+            "min": 300.00359395900006,
+            "max": 300.00728374999994
+          },
+          "workflowTransactionsPerSecond": {
+            "median": 1.6333127032327974,
+            "min": 1.633293678323902,
+            "max": 1.6333137664576305
+          },
+          "sdkOperationsPerSecond": {
+            "median": 7.219908806535183,
+            "min": 7.219824708672595,
+            "max": 7.219913506422913
+          },
+          "readOperationsPerSecond": {
+            "median": 4.733273548144026,
+            "min": 4.733218414734573,
+            "max": 4.733276629326194
+          },
+          "writeOperationsPerSecond": {
+            "median": 2.486635258391157,
+            "min": 2.4866062939380225,
+            "max": 2.486636877096719
+          },
+          "operationClasses": {
+            "read": {
+              "latencyP50Ms": {
+                "median": 15.248791999998502,
+                "min": 14.469832999981008,
+                "max": 15.737874999991618
+              },
+              "latencyP95Ms": {
+                "median": 23.473083000048064,
+                "min": 22.8722500000149,
+                "max": 25.258707999950275
+              },
+              "latencyP99Ms": {
+                "median": 26.239459000062197,
+                "min": 23.914083000039682,
+                "max": 29.95533400005661
+              },
+              "errorRate": {
+                "median": 0,
+                "min": 0,
+                "max": 0
+              }
+            },
+            "write": {
+              "latencyP50Ms": {
+                "median": 16.139499999932013,
+                "min": 15.761624999926426,
+                "max": 16.40225000004284
+              },
+              "latencyP95Ms": {
+                "median": 23.580958000035025,
+                "min": 22.619916999945417,
+                "max": 24.0171669999836
+              },
+              "latencyP99Ms": {
+                "median": 25.348665999947116,
+                "min": 24.410333000007086,
+                "max": 27.496374999987893
+              },
+              "errorRate": {
+                "median": 0,
+                "min": 0,
+                "max": 0
+              }
+            },
+            "authSearch": {
+              "latencyP50Ms": {
+                "median": 17.74558399990201,
+                "min": 14.774999999906868,
+                "max": 17.825749999959953
+              },
+              "latencyP95Ms": {
+                "median": 55.29033300001174,
+                "min": 54.26079099997878,
+                "max": 65.64850000001024
+              },
+              "latencyP99Ms": {
+                "median": 56.34012499998789,
+                "min": 54.53895800001919,
+                "max": 68.0599579999689
+              },
+              "errorRate": {
+                "median": 0,
+                "min": 0,
+                "max": 0
+              }
+            }
+          },
+          "resources": {
+            "sampleCount": {
+              "median": 290,
+              "min": 289,
+              "max": 291
+            },
+            "runnerCpuPercent": {
+              "median": 36.9,
+              "min": 20.9,
+              "max": 42.1
+            },
+            "runnerRssBytes": {
+              "median": 165052416,
+              "min": 164790272,
+              "max": 181813248
+            },
+            "backendCpuPercent": {
+              "median": 49.5,
+              "min": 12.7,
+              "max": 58.8
+            },
+            "backendRssBytes": {
+              "median": 156975104,
+              "min": 155484160,
+              "max": 168787968
+            },
+            "eventLoopP99Ms": {
+              "median": 18.497535,
+              "min": 15.507455,
+              "max": 25.853951
+            },
+            "eventLoopMaxMs": {
+              "median": 52.002815,
+              "min": 36.208639,
+              "max": 54.034431
+            },
+            "supabaseCpuPercent": null,
+            "supabaseMemoryBytes": null,
+            "supabaseBlockReadBytes": null,
+            "supabaseBlockWriteBytes": null
+          }
+        },
+        {
+          "requestedUsers": 10,
+          "achievedUsers": {
+            "median": 10,
+            "min": 10,
+            "max": 10
+          },
+          "elapsedSeconds": {
+            "median": 300.002063917,
+            "min": 300.001898458,
+            "max": 300.00285437499997
+          },
+          "workflowTransactionsPerSecond": {
+            "median": 3.2799687924635936,
+            "min": 3.27664412426163,
+            "max": 3.2799792436572166
+          },
+          "sdkOperationsPerSecond": {
+            "median": 14.38986308644851,
+            "min": 14.379901070259077,
+            "max": 14.389908937874191
+          },
+          "readOperationsPerSecond": {
+            "median": 9.116579926207244,
+            "min": 9.106604015750532,
+            "max": 9.116608975002528
+          },
+          "writeOperationsPerSecond": {
+            "median": 5.273297054508544,
+            "min": 5.273283160241266,
+            "max": 5.273299962871663
+          },
+          "operationClasses": {
+            "read": {
+              "latencyP50Ms": {
+                "median": 14.400167000014335,
+                "min": 13.639583999989554,
+                "max": 15.031415999983437
+              },
+              "latencyP95Ms": {
+                "median": 22.58087500021793,
+                "min": 22.45787499996368,
+                "max": 23.030416999943554
+              },
+              "latencyP99Ms": {
+                "median": 25.27308399998583,
+                "min": 24.88129199994728,
+                "max": 29.736499999882653
+              },
+              "errorRate": {
+                "median": 0,
+                "min": 0,
+                "max": 0
+              }
+            },
+            "write": {
+              "latencyP50Ms": {
+                "median": 14.922166000120342,
+                "min": 14.608249999815598,
+                "max": 15.431916999979876
+              },
+              "latencyP95Ms": {
+                "median": 22.61220799991861,
+                "min": 22.160083000082523,
+                "max": 22.932625000132248
+              },
+              "latencyP99Ms": {
+                "median": 24.43883299990557,
+                "min": 24.195042000035755,
+                "max": 25.8562090001069
+              },
+              "errorRate": {
+                "median": 0,
+                "min": 0,
+                "max": 0
+              }
+            },
+            "authSearch": {
+              "latencyP50Ms": {
+                "median": 15.79645799996797,
+                "min": 14.345665999921039,
+                "max": 16.366666999878362
+              },
+              "latencyP95Ms": {
+                "median": 54.49562499998137,
+                "min": 52.81633299996611,
+                "max": 56.80520800012164
+              },
+              "latencyP99Ms": {
+                "median": 59.484458999941126,
+                "min": 57.119334000046365,
+                "max": 61.52929199999198
+              },
+              "errorRate": {
+                "median": 0,
+                "min": 0,
+                "max": 0
+              }
+            }
+          },
+          "resources": {
+            "sampleCount": {
+              "median": 291,
+              "min": 290,
+              "max": 291
+            },
+            "runnerCpuPercent": {
+              "median": 56.4,
+              "min": 48.8,
+              "max": 60.9
+            },
+            "runnerRssBytes": {
+              "median": 152961024,
+              "min": 146866176,
+              "max": 177471488
+            },
+            "backendCpuPercent": {
+              "median": 18.1,
+              "min": 15.3,
+              "max": 62.8
+            },
+            "backendRssBytes": {
+              "median": 217022464,
+              "min": 216973312,
+              "max": 229081088
+            },
+            "eventLoopP99Ms": {
+              "median": 15.368191,
+              "min": 14.049279,
+              "max": 31.195135
+            },
+            "eventLoopMaxMs": {
+              "median": 21.839871,
+              "min": 21.331967,
+              "max": 122.814463
+            },
+            "supabaseCpuPercent": null,
+            "supabaseMemoryBytes": null,
+            "supabaseBlockReadBytes": null,
+            "supabaseBlockWriteBytes": null
+          }
+        },
+        {
+          "requestedUsers": 25,
+          "achievedUsers": {
+            "median": 25,
+            "min": 25,
+            "max": 25
+          },
+          "elapsedSeconds": {
+            "median": 300.0037732920002,
+            "min": 300.00333687500006,
+            "max": 300.0039006659999
+          },
+          "workflowTransactionsPerSecond": {
+            "median": 8.29656231549262,
+            "min": 8.286574495789097,
+            "max": 8.299892082977165
+          },
+          "sdkOperationsPerSecond": {
+            "median": 36.0562131645977,
+            "min": 36.03959913454212,
+            "max": 36.06286443603612
+          },
+          "readOperationsPerSecond": {
+            "median": 23.13970895707102,
+            "min": 23.139699132541153,
+            "max": 23.14974250734323
+          },
+          "writeOperationsPerSecond": {
+            "median": 12.916504207526678,
+            "min": 12.889856627198888,
+            "max": 12.923165303494967
+          },
+          "operationClasses": {
+            "read": {
+              "latencyP50Ms": {
+                "median": 13.418291999958456,
+                "min": 13.382457999978215,
+                "max": 13.569333999883384
+              },
+              "latencyP95Ms": {
+                "median": 22.235083000035957,
+                "min": 21.62125000008382,
+                "max": 22.634416999993846
+              },
+              "latencyP99Ms": {
+                "median": 30.785499999998137,
+                "min": 24.466166999889538,
+                "max": 35.97158299991861
+              },
+              "errorRate": {
+                "median": 0,
+                "min": 0,
+                "max": 0
+              }
+            },
+            "write": {
+              "latencyP50Ms": {
+                "median": 13.834749999921769,
+                "min": 13.77654099999927,
+                "max": 13.941749999998137
+              },
+              "latencyP95Ms": {
+                "median": 22.131957999896258,
+                "min": 21.933666999917477,
+                "max": 23.258249999955297
+              },
+              "latencyP99Ms": {
+                "median": 36.750292000127956,
+                "min": 28.078791999956593,
+                "max": 37.250707999803126
+              },
+              "errorRate": {
+                "median": 0.0011904761904761906,
+                "min": 0,
+                "max": 0.005952380952380952
+              }
+            },
+            "authSearch": {
+              "latencyP50Ms": {
+                "median": 14.996207999996841,
+                "min": 14.584917000029236,
+                "max": 15.230457999976352
+              },
+              "latencyP95Ms": {
+                "median": 54.76516599999741,
+                "min": 53.963541000150144,
+                "max": 60.28645800007507
+              },
+              "latencyP99Ms": {
+                "median": 59.30300000007264,
+                "min": 58.999374999897555,
+                "max": 66.53133300016634
+              },
+              "errorRate": {
+                "median": 0,
+                "min": 0,
+                "max": 0
+              }
+            }
+          },
+          "resources": {
+            "sampleCount": {
+              "median": 291,
+              "min": 289,
+              "max": 291
+            },
+            "runnerCpuPercent": {
+              "median": 44.2,
+              "min": 41.3,
+              "max": 48
+            },
+            "runnerRssBytes": {
+              "median": 180961280,
+              "min": 178356224,
+              "max": 197246976
+            },
+            "backendCpuPercent": {
+              "median": 186.8,
+              "min": 134.1,
+              "max": 188.6
+            },
+            "backendRssBytes": {
+              "median": 220004352,
+              "min": 219889664,
+              "max": 220872704
+            },
+            "eventLoopP99Ms": {
+              "median": 17.022975,
+              "min": 15.605759,
+              "max": 19.283967
+            },
+            "eventLoopMaxMs": {
+              "median": 20.496383,
+              "min": 19.873791,
+              "max": 44.138495
+            },
+            "supabaseCpuPercent": null,
+            "supabaseMemoryBytes": null,
+            "supabaseBlockReadBytes": null,
+            "supabaseBlockWriteBytes": null
+          }
+        },
+        {
+          "requestedUsers": 50,
+          "achievedUsers": {
+            "median": 50,
+            "min": 50,
+            "max": 50
+          },
+          "elapsedSeconds": {
+            "median": 300.005279417,
+            "min": 300.003484833,
+            "max": 300.00755275000006
+          },
+          "workflowTransactionsPerSecond": {
+            "median": 16.663040096209482,
+            "min": 16.65958058117588,
+            "max": 16.66313977246879
+          },
+          "sdkOperationsPerSecond": {
+            "median": 72.4287253951862,
+            "min": 72.41151031321826,
+            "max": 72.42915865492586
+          },
+          "readOperationsPerSecond": {
+            "median": 46.629179417058296,
+            "min": 46.61215983336605,
+            "max": 46.6294583470826
+          },
+          "writeOperationsPerSecond": {
+            "median": 25.799545978127902,
+            "min": 25.799350479852205,
+            "max": 25.799700307843256
+          },
+          "operationClasses": {
+            "read": {
+              "latencyP50Ms": {
+                "median": 11.595750000094995,
+                "min": 11.395500000100583,
+                "max": 12.035832999972627
+              },
+              "latencyP95Ms": {
+                "median": 21.430666000116616,
+                "min": 21.16537499986589,
+                "max": 22.560250000096858
+              },
+              "latencyP99Ms": {
+                "median": 37.29745800001547,
+                "min": 31.87466700002551,
+                "max": 59.343333000084385
+              },
+              "errorRate": {
+                "median": 0,
+                "min": 0,
+                "max": 0
+              }
+            },
+            "write": {
+              "latencyP50Ms": {
+                "median": 11.949167000129819,
+                "min": 11.82458300003782,
+                "max": 12.648917000042275
+              },
+              "latencyP95Ms": {
+                "median": 21.865583000006154,
+                "min": 21.709207999985665,
+                "max": 23.67708299984224
+              },
+              "latencyP99Ms": {
+                "median": 57.44637500005774,
+                "min": 46.324666999978945,
+                "max": 102.41008300008252
+              },
+              "errorRate": {
+                "median": 0,
+                "min": 0,
+                "max": 0
+              }
+            },
+            "authSearch": {
+              "latencyP50Ms": {
+                "median": 13.48720799991861,
+                "min": 13.36283400002867,
+                "max": 14.910957999993116
+              },
+              "latencyP95Ms": {
+                "median": 52.88712499989197,
+                "min": 51.777874999912456,
+                "max": 53.84199999994598
+              },
+              "latencyP99Ms": {
+                "median": 58.12274999986403,
+                "min": 56.157541000051424,
+                "max": 83.58683399995789
+              },
+              "errorRate": {
+                "median": 0,
+                "min": 0,
+                "max": 0
+              }
+            }
+          },
+          "resources": {
+            "sampleCount": {
+              "median": 291,
+              "min": 291,
+              "max": 291
+            },
+            "runnerCpuPercent": {
+              "median": 43.4,
+              "min": 30.7,
+              "max": 48.4
+            },
+            "runnerRssBytes": {
+              "median": 196657152,
+              "min": 187547648,
+              "max": 199294976
+            },
+            "backendCpuPercent": {
+              "median": 298.8,
+              "min": 294.3,
+              "max": 334.8
+            },
+            "backendRssBytes": {
+              "median": 227033088,
+              "min": 221216768,
+              "max": 228343808
+            },
+            "eventLoopP99Ms": {
+              "median": 25.673727,
+              "min": 14.499839,
+              "max": 34.799615
+            },
+            "eventLoopMaxMs": {
+              "median": 44.040191,
+              "min": 20.660223,
+              "max": 54.624255
+            },
+            "supabaseCpuPercent": null,
+            "supabaseMemoryBytes": null,
+            "supabaseBlockReadBytes": null,
+            "supabaseBlockWriteBytes": null
+          }
+        },
+        {
+          "requestedUsers": 100,
+          "achievedUsers": {
+            "median": 100,
+            "min": 100,
+            "max": 100
+          },
+          "elapsedSeconds": {
+            "median": 300.0085937079999,
+            "min": 300.005800334,
+            "max": 300.0111803339999
+          },
+          "workflowTransactionsPerSecond": {
+            "median": 33.38268789753459,
+            "min": 33.22542842870959,
+            "max": 33.385710309847425
+          },
+          "sdkOperationsPerSecond": {
+            "median": 145.00719636609557,
+            "min": 144.37461947844375,
+            "max": 145.01917915839974
+          },
+          "readOperationsPerSecond": {
+            "median": 93.77064720812976,
+            "min": 93.40651894640138,
+            "max": 93.7748535817614
+          },
+          "writeOperationsPerSecond": {
+            "median": 51.23234278433416,
+            "min": 50.96810053204237,
+            "max": 51.248531950269985
+          },
+          "operationClasses": {
+            "read": {
+              "latencyP50Ms": {
+                "median": 8.990499999839813,
+                "min": 8.926250000018626,
+                "max": 10.99779099994339
+              },
+              "latencyP95Ms": {
+                "median": 19.341584000037983,
+                "min": 19.128665999975055,
+                "max": 25.33233300014399
+              },
+              "latencyP99Ms": {
+                "median": 57.22916699992493,
+                "min": 56.63241700013168,
+                "max": 196.6085000000894
+              },
+              "errorRate": {
+                "median": 0,
+                "min": 0,
+                "max": 0.000333889816360601
+              }
+            },
+            "write": {
+              "latencyP50Ms": {
+                "median": 9.170916000148281,
+                "min": 9.105290999868885,
+                "max": 11.656874999869615
+              },
+              "latencyP95Ms": {
+                "median": 19.970292000100017,
+                "min": 19.586374999955297,
+                "max": 30.608041000086814
+              },
+              "latencyP99Ms": {
+                "median": 110.48408399987966,
+                "min": 105.18804200016893,
+                "max": 224.12358299992047
+              },
+              "errorRate": {
+                "median": 0,
+                "min": 0,
+                "max": 0.0009055236945366737
+              }
+            },
+            "authSearch": {
+              "latencyP50Ms": {
+                "median": 10.39220800017938,
+                "min": 10.092958000022918,
+                "max": 12.599959000013769
+              },
+              "latencyP95Ms": {
+                "median": 49.78595900000073,
+                "min": 49.16691700019874,
+                "max": 60.500499999849126
+              },
+              "latencyP99Ms": {
+                "median": 66.76370899984613,
+                "min": 59.05158400000073,
+                "max": 116.7593750001397
+              },
+              "errorRate": {
+                "median": 0,
+                "min": 0,
+                "max": 0
+              }
+            }
+          },
+          "resources": {
+            "sampleCount": {
+              "median": 292,
+              "min": 288,
+              "max": 292
+            },
+            "runnerCpuPercent": {
+              "median": 36,
+              "min": 32.5,
+              "max": 38.1
+            },
+            "runnerRssBytes": {
+              "median": 202440704,
+              "min": 187056128,
+              "max": 205651968
+            },
+            "backendCpuPercent": {
+              "median": 456.1,
+              "min": 433.3,
+              "max": 465.5
+            },
+            "backendRssBytes": {
+              "median": 231751680,
+              "min": 226164736,
+              "max": 252542976
+            },
+            "eventLoopP99Ms": {
+              "median": 33.619967,
+              "min": 19.841023,
+              "max": 1605.369855
+            },
+            "eventLoopMaxMs": {
+              "median": 46.366719,
+              "min": 35.684351,
+              "max": 1605.369855
+            },
+            "supabaseCpuPercent": null,
+            "supabaseMemoryBytes": null,
+            "supabaseBlockReadBytes": null,
+            "supabaseBlockWriteBytes": null
+          }
+        },
+        {
+          "requestedUsers": 200,
+          "achievedUsers": {
+            "median": 200,
+            "min": 200,
+            "max": 200
+          },
+          "elapsedSeconds": {
+            "median": 300.0118109170003,
+            "min": 300.01112666699987,
+            "max": 300.01252379200025
+          },
+          "workflowTransactionsPerSecond": {
+            "median": 66.75085761811776,
+            "min": 66.4840492080432,
+            "max": 66.76387954353156
+          },
+          "sdkOperationsPerSecond": {
+            "median": 289.8592494421821,
+            "min": 288.741965642031,
+            "max": 289.8845651533398
+          },
+          "readOperationsPerSecond": {
+            "median": 186.53641490476002,
+            "min": 185.7193549470446,
+            "max": 186.54887900213834
+          },
+          "writeOperationsPerSecond": {
+            "median": 103.32283453742207,
+            "min": 103.02261069498643,
+            "max": 103.33568615120146
+          },
+          "operationClasses": {
+            "read": {
+              "latencyP50Ms": {
+                "median": 6.586957999970764,
+                "min": 6.579249999951571,
+                "max": 7.910209000110626
+              },
+              "latencyP95Ms": {
+                "median": 15.989207999780774,
+                "min": 15.832417000085115,
+                "max": 20.835500000044703
+              },
+              "latencyP99Ms": {
+                "median": 57.3579580001533,
+                "min": 55.90083299996331,
+                "max": 178.04858299996704
+              },
+              "errorRate": {
+                "median": 0,
+                "min": 0,
+                "max": 0.00016711229946524063
+              }
+            },
+            "write": {
+              "latencyP50Ms": {
+                "median": 6.750291999895126,
+                "min": 6.59741699998267,
+                "max": 8.197916999924928
+              },
+              "latencyP95Ms": {
+                "median": 16.621625000145286,
+                "min": 16.470625000074506,
+                "max": 22.05533399991691
+              },
+              "latencyP99Ms": {
+                "median": 212.07562500005588,
+                "min": 202.53395799989812,
+                "max": 219.34800000023097
+              },
+              "errorRate": {
+                "median": 0.00014934289127837514,
+                "min": 0,
+                "max": 0.0002977519726068185
+              }
+            },
+            "authSearch": {
+              "latencyP50Ms": {
+                "median": 7.949041999876499,
+                "min": 7.874041999690235,
+                "max": 9.28433300042525
+              },
+              "latencyP95Ms": {
+                "median": 43.894000000320375,
+                "min": 43.344249999616295,
+                "max": 52.1107919998467
+              },
+              "latencyP99Ms": {
+                "median": 61.72654199972749,
+                "min": 57.01495800027624,
+                "max": 217.8348750001751
+              },
+              "errorRate": {
+                "median": 0,
+                "min": 0,
+                "max": 0
+              }
+            }
+          },
+          "resources": {
+            "sampleCount": {
+              "median": 292,
+              "min": 289,
+              "max": 293
+            },
+            "runnerCpuPercent": {
+              "median": 38,
+              "min": 34.5,
+              "max": 49.6
+            },
+            "runnerRssBytes": {
+              "median": 239779840,
+              "min": 224133120,
+              "max": 259850240
+            },
+            "backendCpuPercent": {
+              "median": 482.6,
+              "min": 459,
+              "max": 538.4
+            },
+            "backendRssBytes": {
+              "median": 252477440,
+              "min": 242057216,
+              "max": 265486336
+            },
+            "eventLoopP99Ms": {
+              "median": 17.547263,
+              "min": 16.695295,
+              "max": 1123.024895
+            },
+            "eventLoopMaxMs": {
+              "median": 42.139647,
+              "min": 28.540927,
+              "max": 1123.024895
+            },
+            "supabaseCpuPercent": null,
+            "supabaseMemoryBytes": null,
+            "supabaseBlockReadBytes": null,
+            "supabaseBlockWriteBytes": null
+          }
+        },
+        {
+          "requestedUsers": 400,
+          "achievedUsers": {
+            "median": 400,
+            "min": 400,
+            "max": 400
+          },
+          "elapsedSeconds": {
+            "median": 300.0249901669999,
+            "min": 300.02134574999985,
+            "max": 300.02607554199966
+          },
+          "workflowTransactionsPerSecond": {
+            "median": 133.6617156610651,
+            "min": 133.65553308635904,
+            "max": 133.68048829905638
+          },
+          "sdkOperationsPerSecond": {
+            "median": 579.5350577404159,
+            "min": 579.532961213099,
+            "max": 579.5987600992223
+          },
+          "readOperationsPerSecond": {
+            "median": 373.63341504843595,
+            "min": 373.5975274732713,
+            "max": 373.63887567366424
+          },
+          "writeOperationsPerSecond": {
+            "median": 205.93543373982766,
+            "min": 205.89618206675172,
+            "max": 205.96534505078637
+          },
+          "operationClasses": {
+            "read": {
+              "latencyP50Ms": {
+                "median": 4.602124999742955,
+                "min": 4.56691600009799,
+                "max": 4.650832999963313
+              },
+              "latencyP95Ms": {
+                "median": 11.802792000118643,
+                "min": 11.357832999899983,
+                "max": 11.82175000011921
+              },
+              "latencyP99Ms": {
+                "median": 54.754625000059605,
+                "min": 54.72112500015646,
+                "max": 66.53970899991691
+              },
+              "errorRate": {
+                "median": 0,
+                "min": 0,
+                "max": 0.000041788549937317175
+              }
+            },
+            "write": {
+              "latencyP50Ms": {
+                "median": 4.734707999974489,
+                "min": 4.7051250003278255,
+                "max": 4.759250000119209
+              },
+              "latencyP95Ms": {
+                "median": 12.844874999951571,
+                "min": 12.76595799997449,
+                "max": 12.945999999996275
+              },
+              "latencyP99Ms": {
+                "median": 301.53229200001806,
+                "min": 262.8922500000335,
+                "max": 307.6569579998031
+              },
+              "errorRate": {
+                "median": 0.00007462129691814044,
+                "min": 0,
+                "max": 0.0002985520226899537
+              }
+            },
+            "authSearch": {
+              "latencyP50Ms": {
+                "median": 5.155375000089407,
+                "min": 5.131916000042111,
+                "max": 5.431542000267655
+              },
+              "latencyP95Ms": {
+                "median": 32.74166699964553,
+                "min": 32.69345899997279,
+                "max": 32.82995800022036
+              },
+              "latencyP99Ms": {
+                "median": 54.512457999866456,
+                "min": 48.86370899993926,
+                "max": 68.79429099988192
+              },
+              "errorRate": {
+                "median": 0,
+                "min": 0,
+                "max": 0
+              }
+            }
+          },
+          "resources": {
+            "sampleCount": {
+              "median": 294,
+              "min": 294,
+              "max": 294
+            },
+            "runnerCpuPercent": {
+              "median": 43.2,
+              "min": 29.9,
+              "max": 44.1
+            },
+            "runnerRssBytes": {
+              "median": 311197696,
+              "min": 273645568,
+              "max": 325238784
+            },
+            "backendCpuPercent": {
+              "median": 499,
+              "min": 439.2,
+              "max": 585
+            },
+            "backendRssBytes": {
+              "median": 279609344,
+              "min": 254738432,
+              "max": 292159488
+            },
+            "eventLoopP99Ms": {
+              "median": 36.438015,
+              "min": 20.299775,
+              "max": 40.894463
+            },
+            "eventLoopMaxMs": {
+              "median": 45.711359,
+              "min": 21.561343,
+              "max": 48.824319
+            },
+            "supabaseCpuPercent": null,
+            "supabaseMemoryBytes": null,
+            "supabaseBlockReadBytes": null,
+            "supabaseBlockWriteBytes": null
+          }
+        },
+        {
+          "requestedUsers": 800,
+          "achievedUsers": {
+            "median": 800,
+            "min": 800,
+            "max": 800
+          },
+          "elapsedSeconds": {
+            "median": 300.04873245899984,
+            "min": 300.04826416599985,
+            "max": 300.050734625
+          },
+          "workflowTransactionsPerSecond": {
+            "median": 267.16148554072214,
+            "min": 267.13993871296486,
+            "max": 267.2003459938191
+          },
+          "sdkOperationsPerSecond": {
+            "median": 1157.9375082491517,
+            "min": 1157.7985920919361,
+            "max": 1158.1103492328616
+          },
+          "readOperationsPerSecond": {
+            "median": 748.763372570263,
+            "min": 748.6650523701026,
+            "max": 748.8561902684096
+          },
+          "writeOperationsPerSecond": {
+            "median": 409.1741356788888,
+            "min": 409.1335397218335,
+            "max": 409.254158964452
+          },
+          "operationClasses": {
+            "read": {
+              "latencyP50Ms": {
+                "median": 3.5802499996498227,
+                "min": 3.560750000178814,
+                "max": 3.611583999823779
+              },
+              "latencyP95Ms": {
+                "median": 8.759374999906868,
+                "min": 8.702040999662131,
+                "max": 8.92366599990055
+              },
+              "latencyP99Ms": {
+                "median": 52.47508300002664,
+                "min": 49.7242499999702,
+                "max": 132.96791600016877
+              },
+              "errorRate": {
+                "median": 0.00008328995314940135,
+                "min": 0.00006247657128576784,
+                "max": 0.0001457392100934813
+              }
+            },
+            "write": {
+              "latencyP50Ms": {
+                "median": 3.7558339997194707,
+                "min": 3.7404169999063015,
+                "max": 3.8268329999409616
+              },
+              "latencyP95Ms": {
+                "median": 11.18654099991545,
+                "min": 11.099665999878198,
+                "max": 11.986000000033528
+              },
+              "latencyP99Ms": {
+                "median": 561.2685409998521,
+                "min": 552.1766659999266,
+                "max": 574.7245829999447
+              },
+              "errorRate": {
+                "median": 0.0001501557866286272,
+                "min": 0.00015011070664615154,
+                "max": 0.00030025521693439425
+              }
+            },
+            "authSearch": {
+              "latencyP50Ms": {
+                "median": 4.0740420003421605,
+                "min": 4.022832999937236,
+                "max": 4.081791999749839
+              },
+              "latencyP95Ms": {
+                "median": 24.69491699989885,
+                "min": 24.36316700000316,
+                "max": 25.677500000223517
+              },
+              "latencyP99Ms": {
+                "median": 58.17274999991059,
+                "min": 50.39716699998826,
+                "max": 58.67341700010002
+              },
+              "errorRate": {
+                "median": 0,
+                "min": 0,
+                "max": 0
+              }
+            }
+          },
+          "resources": {
+            "sampleCount": {
+              "median": 295,
+              "min": 295,
+              "max": 295
+            },
+            "runnerCpuPercent": {
+              "median": 46.7,
+              "min": 44.6,
+              "max": 55.4
+            },
+            "runnerRssBytes": {
+              "median": 355057664,
+              "min": 341950464,
+              "max": 376733696
+            },
+            "backendCpuPercent": {
+              "median": 427.1,
+              "min": 404.8,
+              "max": 482.2
+            },
+            "backendRssBytes": {
+              "median": 330547200,
+              "min": 321437696,
+              "max": 349339648
+            },
+            "eventLoopP99Ms": {
+              "median": 109.445119,
+              "min": 78.315519,
+              "max": 139.591679
+            },
+            "eventLoopMaxMs": {
+              "median": 127.139839,
+              "min": 89.128959,
+              "max": 148.766719
+            },
+            "supabaseCpuPercent": null,
+            "supabaseMemoryBytes": null,
+            "supabaseBlockReadBytes": null,
+            "supabaseBlockWriteBytes": null
+          }
+        },
+        {
+          "requestedUsers": 1000,
+          "achievedUsers": {
+            "median": 1000,
+            "min": 1000,
+            "max": 1000
+          },
+          "elapsedSeconds": {
+            "median": 300.0646977499998,
+            "min": 300.0642199579999,
+            "max": 300.07005387499976
+          },
+          "workflowTransactionsPerSecond": {
+            "median": 333.3814365705406,
+            "min": 332.77562592632796,
+            "max": 333.53526793034007
+          },
+          "sdkOperationsPerSecond": {
+            "median": 1445.3849561515115,
+            "min": 1442.6897799683022,
+            "max": 1446.1237666414786
+          },
+          "readOperationsPerSecond": {
+            "median": 936.4547116239373,
+            "min": 934.7117327370468,
+            "max": 937.0094176485103
+          },
+          "writeOperationsPerSecond": {
+            "median": 508.930244527574,
+            "min": 507.97804723125546,
+            "max": 509.1143489929684
+          },
+          "operationClasses": {
+            "read": {
+              "latencyP50Ms": {
+                "median": 3.489167000167072,
+                "min": 3.4179589999839664,
+                "max": 3.491791999898851
+              },
+              "latencyP95Ms": {
+                "median": 8.762291999999434,
+                "min": 8.651041999924928,
+                "max": 11.52487500011921
+              },
+              "latencyP99Ms": {
+                "median": 189.37741599977016,
+                "min": 92.40345800016075,
+                "max": 797.2758329999633
+              },
+              "errorRate": {
+                "median": 0.0000666922320222752,
+                "min": 0.000050111079559690645,
+                "max": 0.00011664722546242292
+              }
+            },
+            "write": {
+              "latencyP50Ms": {
+                "median": 3.71591700008139,
+                "min": 3.69912499981001,
+                "max": 3.761374999769032
+              },
+              "latencyP95Ms": {
+                "median": 13.8709169998765,
+                "min": 12.957291000057012,
+                "max": 25.238333999644965
+              },
+              "latencyP99Ms": {
+                "median": 710.9281660001725,
+                "min": 667.2487500002608,
+                "max": 1164.5752079999074
+              },
+              "errorRate": {
+                "median": 0.00033178500331785003,
+                "min": 0.00012088609507691378,
+                "max": 0.00036181631791593803
+              }
+            },
+            "authSearch": {
+              "latencyP50Ms": {
+                "median": 4.047125000040978,
+                "min": 4.007207999937236,
+                "max": 4.071415999904275
+              },
+              "latencyP95Ms": {
+                "median": 23.79170800000429,
+                "min": 23.61849999986589,
+                "max": 27.160083000082523
+              },
+              "latencyP99Ms": {
+                "median": 743.9902079999447,
+                "min": 656.7304999995977,
+                "max": 837.4238750003278
+              },
+              "errorRate": {
+                "median": 0,
+                "min": 0,
+                "max": 0
+              }
+            }
+          },
+          "resources": {
+            "sampleCount": {
+              "median": 295,
+              "min": 295,
+              "max": 296
+            },
+            "runnerCpuPercent": {
+              "median": 87.4,
+              "min": 82.6,
+              "max": 95.8
+            },
+            "runnerRssBytes": {
+              "median": 399720448,
+              "min": 377077760,
+              "max": 401866752
+            },
+            "backendCpuPercent": {
+              "median": 380.3,
+              "min": 357.2,
+              "max": 402.4
+            },
+            "backendRssBytes": {
+              "median": 377339904,
+              "min": 373768192,
+              "max": 391479296
+            },
+            "eventLoopP99Ms": {
+              "median": 282.066943,
+              "min": 142.999551,
+              "max": 576.192511
+            },
+            "eventLoopMaxMs": {
+              "median": 282.066943,
+              "min": 179.961855,
+              "max": 576.192511
+            },
+            "supabaseCpuPercent": null,
+            "supabaseMemoryBytes": null,
+            "supabaseBlockReadBytes": null,
+            "supabaseBlockWriteBytes": null
+          }
+        }
+      ],
+      "missingStages": [],
+      "compatibilityMismatches": []
+    }
+  }
+}

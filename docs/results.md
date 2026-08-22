@@ -1,10 +1,24 @@
 # Results index
 
-No publishable three-backend comparison exists yet. Raw local artifacts under `results/` are gitignored and are not present in this repository. Do not reconstruct or publish a ranking from the setup observations or quick smoke result below.
+## First publishable local comparison
+
+The first three-backend comparison is published in [results/first-comparison.md](results/first-comparison.md), with a [machine-readable aggregate](results/first-comparison.json) and [SHA-256 manifest](results/first-comparison.sha256).
+
+Nine valid full medium-profile runs were collected on one Apple M1 host using three rotated orders and fixed 600-second cooldowns. Every selected run used clean workload commit `79480b382f101f7867b93a5e4ae43e74e0169412`, passed 15/15 correctness checks, met integrity and sampling gates, and completed owned cleanup.
+
+| Backend | Repeated capacity result | Interpretation |
+| --- | ---: | --- |
+| PocketBase 0.39.11 | 75 / 75 / 75 | Read p95 crossed the 500 ms SLO at 100 users. |
+| Supabase CLI 2.115.0 | 600 / 600 / 600 | 800 users failed achieved-user, latency, and/or error SLO evidence. |
+| TrailBase 0.33.1 | 1,000 / 1,000 / 1,000 | Passed the configured maximum; actual saturation was not observed. |
+
+These are local, machine-qualified outcomes—not a universal vendor ranking. The detailed report names the clients, hardware, deterministic dataset, workload mix, think time, SLOs, stage curves, resource spread, exclusions, and limitations.
+
+Raw selected and rejected full-run evidence is attached to the [`first-comparison-2026-08-22` release](https://github.com/burggraf/real-world-baas-benchmark/releases/tag/first-comparison-2026-08-22). The evidence archive SHA-256 is `e58d2fa52398e9d2f54b77b024f3c7898c77bfa937b2b99530360997ee78a1ed`.
 
 ## Task 15 medium-seed validation
 
-Host: Apple M1 macOS development machine. These are setup/seed validation observations, not load-test scores and not post-Task-16 clean-clone verification.
+Host: Apple M1 macOS development machine. These are setup/seed validation observations, not load-test scores.
 
 Each backend produced the canonical **626,000 application records** for the medium profile (1,000 organizations, 10,000 users, 10,000 memberships, 5,000 projects, 100,000 tasks, 300,000 comments, and 200,000 activities). Cleanup checks passed for all three.
 
@@ -16,23 +30,25 @@ Each backend produced the canonical **626,000 application records** for the medi
 
 These elapsed values include backend-specific administrative setup and are not ordinary-user workflow TPS. The Supabase size is reported as unavailable, not zero.
 
-## Existing PocketBase quick smoke result
+## Nonpublishable quick evidence
 
-One local PocketBase `configs/quick.json` run exists only as nonpublishable diagnostic evidence:
-
-- correctness: **15/15 passed**;
-- workflow errors: none;
-- workflow TPS at requested users 1/5/10: **0.2666 / 1.7330 / 3.5168**;
-- selected capacity: **0**;
-- relevant capacity evidence: missing auth/search workflow samples prevented a contiguous passing capacity stage, and read p95 reached **511.4 ms** at 10 users (above the committed 500 ms read SLO).
-
-A quick profile is explicitly nonpublishable, has short stages, and is not evidence of comparative capacity. Capacity zero here means the required sample/SLO contract did not establish a passing contiguous stage; it does not mean the server handled zero requests.
+Quick-profile runs use the small dataset, short stages, and a one-sample class floor. They are diagnostics, not comparative capacity evidence. The final-commit preflight passed all three backends with 15/15 correctness, exact achieved concurrency at 1/5/10 users, zero workflow and physical SDK-call failures, valid stage integrity, and clean lifecycle checks. Overall quick results remained nonpublishable because low-concurrency deterministic streams did not always exercise auth/search and may miss a quick SLO.
 
 ## Verification status
 
-- macOS ARM64 same-host clean-clone setup verification: **passed** at commit `5915981` on the recorded Apple M1 host with Node `v26.7.0`, npm `11.19.0`, Supabase CLI `2.115.0`, and Docker `29.4.0`. A clean checkout completed `npm ci`, staged and manually installed both pinned binaries, passed 208 non-live tests with 6 live tests skipped, and passed all three backend doctors. This is not evidence from a newly provisioned machine.
-- Ubuntu x64 clean-host verification: **pending** because no Ubuntu host or VPS is available.
+- Final workload commit: `79480b382f101f7867b93a5e4ae43e74e0169412`.
+- Final non-live suite before collection: 260 tests total, 254 passed, 6 live skipped, 0 failed; TypeScript build and diff checks passed.
+- macOS ARM64 same-host clean-clone setup verification: passed at commit `5915981` with Node `v26.7.0`, npm `11.19.0`, Supabase CLI `2.115.0`, and Docker `29.4.0`. A clean checkout completed `npm ci`, staged and manually installed both pinned binaries, passed its then-current non-live suite, and passed all three backend doctors. This is not evidence from a newly provisioned machine.
+- Ubuntu x64 clean-host verification: pending because no Ubuntu host or VPS was available. No Ubuntu outcome is fabricated.
 
-The Ubuntu x64 prerequisites, exact downloader support, commands, and kernel/CPU/memory/version recording checklist are in [methodology.md](methodology.md). No Ubuntu outcome is fabricated here.
+## Retained exclusions
 
-Runs before the measurement-boundary correction at commit `900038c` are semantically incompatible with corrected runs because initial session preparation and final cleanup were included in measured timing/samples. The rejected Supabase canary `full-s1-01-supabase-900038c` also remains nonpublishable: its adaptive 100-user stage started only 94/100 users after transient HTTP 500 authentication failures; retain it as rejected evidence and do not aggregate it. A first publishable comparison will require three compatible full medium runs per backend with rotated order, fixed cooldown, retained raw checksums, and all validity gates satisfied. At roughly 30–55+ minutes per backend, nine rotated runs are a multi-hour collection. That future work will create `docs/results/first-comparison.md`; this task intentionally does not create the `docs/results/` directory.
+Runs before the final physical SDK-call accounting commit are incompatible with the selected aggregate. The release archive and full-run ledger retain the important rejected and diagnostic evidence, including:
+
+- `full-s1-01-supabase-900038c`, whose adaptive stage prepared only 94/100 users;
+- Supabase canaries at `b5cc5cb` and `bf1a7b9`, which exposed superseded zero-error/global-abort semantics;
+- valid `eb06cc6` Supabase artifacts, excluded because SDK-call accounting changed afterward;
+- the rejected `eb06cc6` PocketBase attempt, whose medium correctness check exposed relation-expansion stalls;
+- the valid final-commit PocketBase canary, excluded because it was validation evidence outside the prespecified rotated sets.
+
+Invalid artifacts were retained rather than rewritten or selected away. See [methodology.md](methodology.md) for compatibility, capacity, and retention rules.
