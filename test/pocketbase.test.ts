@@ -5,7 +5,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { buildPocketBaseArgs, LOCAL_BENCHMARK_PASSWORD, LOCAL_SETUP_PASSWORD, resolvePocketBaseOptions, assertResetDataDirectorySafe, POCKETBASE_EXECUTABLE_SHA256_BY_TARGET, pocketBaseExecutableSha256, PocketBaseProcess } from "../backends/pocketbase/process.js";
-import { backend, batchRecord, mapPocketBasePage, mapPocketBaseTask, normalizePocketBaseError, taskListFilter } from "../backends/pocketbase/adapter.js";
+import { backend, batchRecord, fetchPocketBaseTaskDetail, mapPocketBasePage, mapPocketBaseTask, normalizePocketBaseError, taskListFilter } from "../backends/pocketbase/adapter.js";
 import { profileExpectedCounts } from "../src/seed.js";
 import { BenchmarkOperationError } from "../src/correctness.js";
 
@@ -84,6 +84,22 @@ test("PocketBase record and page mapping preserves nulls and zero-based pages", 
   assert.equal(task.dueDate, null);
   const page = mapPocketBasePage({ page: 2, perPage: 1, totalItems: 3, totalPages: 3, items: [task] }, (item) => item);
   assert.deepEqual(page, { items: [task], page: 1, pageSize: 1, total: 3, hasNext: true });
+});
+
+test("PocketBase task details fetch related users directly without relation expansion", async () => {
+  const calls: Array<{ collection: string; method: string; id?: string; options?: Record<string, unknown> }> = [];
+  const userRecord = (id: string) => ({ id, email: `${id}@example.test`, displayName: id, created: "2026-01-01", updated: "2026-01-01" });
+  const services = {
+    tasks: { getOne: async (id: string, options?: Record<string, unknown>) => { calls.push({ collection: "tasks", method: "getOne", id, options }); return { id, project: "project-1", creator: "user-1", assignee: "user-2", title: "Task", description: "Description", status: "todo", priority: "medium", dueDate: "", created: "2026-01-01", updated: "2026-01-01" }; } },
+    comments: { getList: async (_page: number, _pageSize: number, options?: Record<string, unknown>) => { calls.push({ collection: "comments", method: "getList", options }); return { page: 1, perPage: 10, totalItems: 0, totalPages: 0, items: [] }; } },
+    users: { getOne: async (id: string, options?: Record<string, unknown>) => { calls.push({ collection: "users", method: "getOne", id, options }); return userRecord(id); } },
+  };
+  const pb = { collection: (name: keyof typeof services) => services[name], filter: () => "bounded-filter" } as unknown as PocketBase;
+  const detail = await fetchPocketBaseTaskDetail(pb, { organizationId: "org-1", projectId: "project-1", taskId: "task-1", comments: { page: 0, pageSize: 10 } });
+  assert.equal(detail.creator.id, "user-1");
+  assert.equal(detail.assignee?.id, "user-2");
+  assert.deepEqual(calls.filter(call => call.collection === "users").map(call => call.id), ["user-1", "user-2"]);
+  assert.ok(calls.every(call => call.options?.expand === undefined));
 });
 
 test("PocketBase filters quote untrusted search values", () => {

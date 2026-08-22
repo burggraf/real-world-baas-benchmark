@@ -48,6 +48,7 @@ const COMMENT_FIELDS = "id,task,author,body,created,updated";
 const MEMBER_FIELDS = "id,organization,user,role,created";
 const PROJECT_FIELDS = "id,organization,name,status,created,updated";
 const ACTIVITY_FIELDS = "id,organization,project,actor,action,subjectType,subjectId,created";
+const USER_FIELDS = "id,email,displayName,created,updated";
 const FIXTURE_IDS = {
   owner: "fxown0000000001",
   admin: "fxadm0000000001",
@@ -241,6 +242,33 @@ export function taskListFilter(pb: PocketBase, input: TaskFilterInput): string {
 
 const newRecordId = (): string => randomBytes(8).toString("hex").slice(0, 15);
 
+export async function fetchPocketBaseTaskDetail(pb: PocketBase, input: GetTaskInput): Promise<TaskDetail> {
+  const [taskRecord, comments] = await allSettledValues([
+    sdk(() => pb.collection("tasks").getOne(input.taskId, { fields: TASK_FIELDS })),
+    sdk(() => pb.collection("comments").getList(input.comments.page + 1, input.comments.pageSize, {
+      filter: pb.filter("task = {:task} && organization = {:organization} && project = {:project}", {
+        task: input.taskId,
+        organization: input.organizationId,
+        project: input.projectId,
+      }),
+      sort: "created,id",
+      fields: COMMENT_FIELDS,
+    })),
+  ]);
+  const source = record(taskRecord);
+  const assigneeId = optionalString(source, "assignee");
+  const [creator, assignee] = await allSettledValues([
+    sdk(() => pb.collection("users").getOne(stringField(source, "creator"), { fields: USER_FIELDS })),
+    assigneeId ? sdk(() => pb.collection("users").getOne(assigneeId, { fields: USER_FIELDS })) : Promise.resolve(null),
+  ]);
+  return {
+    task: mapPocketBaseTask(source),
+    creator: mapPocketBaseUser(creator),
+    assignee: assignee ? mapPocketBaseUser(assignee) : null,
+    comments: mapPocketBasePage(comments, mapPocketBaseComment),
+  };
+}
+
 class PocketBaseSession implements AppSession {
   private closed = false;
 
@@ -359,27 +387,7 @@ class PocketBaseSession implements AppSession {
 
   async getTask(input: GetTaskInput): Promise<TaskDetail> {
     await this.requireTask(input.organizationId, input.projectId, input.taskId);
-    const [taskRecord, comments] = await allSettledValues([
-      sdk(() => this.pb.collection("tasks").getOne(input.taskId, { expand: "creator,assignee" })),
-      sdk(() => this.pb.collection("comments").getList(input.comments.page + 1, input.comments.pageSize, {
-        filter: this.pb.filter("task = {:task} && organization = {:organization} && project = {:project}", {
-          task: input.taskId,
-          organization: input.organizationId,
-          project: input.projectId,
-        }),
-        sort: "created,id",
-        fields: COMMENT_FIELDS,
-      })),
-    ]);
-    const source = record(taskRecord);
-    const expand = record(source.expand);
-    const assignee = optionalString(source, "assignee");
-    return {
-      task: mapPocketBaseTask(source),
-      creator: mapPocketBaseUser(expand.creator),
-      assignee: assignee ? mapPocketBaseUser(expand.assignee) : null,
-      comments: mapPocketBasePage(comments, mapPocketBaseComment),
-    };
+    return fetchPocketBaseTaskDetail(this.pb, input);
   }
 
   async createTask(input: CreateTaskInput): Promise<Task> {
