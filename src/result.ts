@@ -46,6 +46,10 @@ export interface BenchmarkSettings {
   measuredRequestTimeoutMs?: number;
   /** New runs record the fixed unmeasured ordinary-user session preparation batch size. */
   sessionPreparationConcurrency?: number;
+  /** New runs classify the runner and backend as sharing the recorded host. */
+  executionTopology?: "co-located";
+  /** New runs record the bounded boundary-search policy. */
+  capacityRefinement?: { method: "bounded-binary-search"; maxStages: number; minUserGap: number };
   /** New runs record that boundary preparation and final cleanup are unmeasured. */
   boundarySessionsUnmeasured?: true;
 }

@@ -28,6 +28,8 @@ const repeated = async (count: number): Promise<BenchmarkResult[]> => {
 
 test("renders deterministic valid Markdown and CSV with all required report sections", async () => {
   const result = await fixture();
+  result.settings.executionTopology = "co-located";
+  result.settings.capacityRefinement = { method: "bounded-binary-search", maxStages: 4, minUserGap: 1 };
   const report = createBenchmarkReport(result, "/tmp/results/result-pass.json");
   assert.equal(report.markdown, createBenchmarkReport(result, "/tmp/results/result-pass.json").markdown);
   for (const text of [
@@ -37,6 +39,7 @@ test("renders deterministic valid Markdown and CSV with all required report sect
     "| Dataset | small |",
     "| Seed | 42 |",
     "| Publishable | yes |",
+    "| Execution topology | co-located |",
     "Test CPU",
     "linux 6.8.0 (x64)",
     "v22.20.0",
@@ -126,6 +129,10 @@ test("rejects semantically inconsistent benchmark results", async () => {
     ["settings integer", result => { result.settings.minClassSamples = 1.5; }],
     ["session preparation integer", result => { result.settings.sessionPreparationConcurrency = 0; }],
     ["boundary session flag", result => { result.settings.boundarySessionsUnmeasured = false as never; }],
+    ["execution topology", result => { result.settings.executionTopology = "external" as never; }],
+    ["refinement method", result => { result.settings.capacityRefinement = { method: "other", maxStages: 4, minUserGap: 1 } as never; }],
+    ["refinement count", result => { result.settings.capacityRefinement = { method: "bounded-binary-search", maxStages: 0, minUserGap: 1 }; }],
+    ["refinement gap", result => { result.settings.capacityRefinement = { method: "bounded-binary-search", maxStages: 4, minUserGap: 0 }; }],
     ["measured request timeout", result => { result.settings.measuredRequestTimeoutMs = 0; }],
     ["malformed error code", result => { result.stages[0]!.errorExamples = [{ ...result.stages[0]!.errorExamples[0]!, code: "bad.code" }]; }],
     ["malformed error status", result => { result.stages[0]!.errorExamples = [{ ...result.stages[0]!.errorExamples[0]!, status: 99 }]; }],

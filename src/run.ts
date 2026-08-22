@@ -148,6 +148,8 @@ export async function runBenchmark(options: RunOptions): Promise<{ result: Bench
       maxErrorExamples: MAX_ERROR_EXAMPLES,
       measuredRequestTimeoutMs: options.config.timeoutMs,
       sessionPreparationConcurrency: SESSION_PREPARATION_CONCURRENCY,
+      executionTopology: "co-located",
+      capacityRefinement: { method: "bounded-binary-search", maxStages: CAPACITY_REFINEMENT_MAX_STAGES, minUserGap: CAPACITY_REFINEMENT_MIN_USER_GAP },
       boundarySessionsUnmeasured: true,
     },
     correctness: { findings: [], aborted: true, abortReason: "not run" },
