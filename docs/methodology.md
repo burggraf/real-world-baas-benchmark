@@ -4,7 +4,9 @@
 
 The benchmark asks:
 
-> On the recorded local host, how many concurrent active users can this project-management application support through the selected official JavaScript SDK while its configured latency, error, sampling, lifecycle, and runner-validity requirements hold?
+> On the recorded hardware and execution topology, how many concurrent active users can this project-management application support through the selected official JavaScript SDK while its configured latency, error, sampling, lifecycle, and runner-validity requirements hold?
+
+New results classify the current implementation as `co-located`: load generator and backend share the recorded host, so the result is conservative whole-machine capacity including runner cost. It is not isolated backend-server capacity. A true `external-runner` mode is deferred until a separately authenticated remote lifecycle/setup channel can preserve reset, seed, ownership, identity, and resource guarantees.
 
 The answer is qualified by the raw result's Git commit, dirty state, host name, OS/kernel release, architecture, CPU model/core count, memory, Node/npm, backend/CLI, SDK, Docker where applicable, config, dataset, seed, endpoint, known backend deviations, and resource samples. It is not a hosted-service test, a cost comparison, an isolated query microbenchmark, or a claim about other machines or configurations. Realtime and file storage are outside this suite.
 
@@ -77,12 +79,14 @@ A `run` performs this order inside one owning process:
 8. Recheck backend identity and capture the measured environment.
 9. Run an unscored warm-up at the profile's maximum configured concurrency. Warm-up writes remain in the measured database state but warm-up samples do not contribute to scores.
 10. Run measured concurrency stages in configured order. Each stage prepares ordinary-user sessions in fixed batches of ten, then starts its timer/resource collection only after all requested sessions are ready; boundary preparation and final cleanup are unmeasured. Check backend identity before and after each stage and collect resources in parallel.
-11. Evaluate SLO capacity and, where necessary, add bounded adaptive stages/refinement up to `maxConcurrency`.
+11. Evaluate SLO capacity and, where necessary, add bounded adaptive stages/refinement up to `maxConcurrency`. After a passing/failing bracket is found, run at most four integer midpoints; four halvings leave at most one-sixteenth of the initial bracket width.
 12. Stop only the owned lifecycle and atomically write the raw result. A bounded `.partial.json` is retained on failure.
 
 The quick profile has a 5-second warm-up and 15-second stages at 1/5/10 users. The full medium profile has a 120-second warm-up and 300-second configured stages at 5/10/25/50 users, with `maxConcurrency` 1,000. Five users is the publishable measurement floor because the deterministic 300-second one-user stream cannot meet the unchanged 20-sample requirement for the 7% auth/search class. Configured stage time excludes reset, seed, correctness, startup, cleanup, grace periods, and adaptive stages.
 
-The TrailBase-only `trailbase-ceiling` profile changes only the profile name and `maxConcurrency`, raising the bound to 4,000 while preserving the full medium workload and SLO contract. After its configured 5/10/25/50-user stages pass, bounded doubling adds 100/200/400/800/1,600/3,200/4,000 while stages continue to pass; the normal single midpoint refinement follows a first conclusive failure. It is a separate follow-up series and is not aggregation-compatible with `full` results. On the shared-host topology, a runner-overload failure bounds the combined runner/backend system; it must not be presented as TrailBase server saturation. A server-only endpoint above that boundary requires a separate load-generator host and a separately qualified protocol.
+The portable `server-capacity` profile changes only the full profile name and `maxConcurrency`, raising the bound to the medium dataset's 10,000 users while preserving its workload and SLO contract. It is used unchanged across exact hardware profiles. The historical TrailBase-only `trailbase-ceiling` profile retains its 4,000-user maximum and remains aggregation-incompatible with other configs.
+
+After configured 5/10/25/50-user stages pass, bounded doubling adds stages through `maxConcurrency`. A first otherwise-valid conclusive SLO failure, or a stage invalid only because of sustained co-located runner overload, creates the upper bracket. Up to four midpoint stages refine against the highest passing lower point. Other integrity failures stop without refinement. Stages are stored sorted by requested users even though midpoint execution is nonmonotonic. Runner-overload evidence bounds the combined runner/backend system and keeps the run invalid; it must not be presented as backend-server saturation.
 
 `up` is a foreground diagnostic: it owns the lifecycle until Ctrl-C (`SIGINT`) or `SIGTERM`, then stops only that handle. Cross-process `down` is intentionally unsupported because a new process cannot prove ownership. Never substitute a broad `pkill`, global Supabase stop, or Docker prune.
 
@@ -149,6 +153,12 @@ The `compare` command is useful for a sequential smoke pass, but it does not imp
 
 Use one stable normal-power mode with Low Power Mode disabled and enough charge for the set; AC and battery are treated as equivalent protocol states on this benchmark host. Record the power source as context and prevent sleep. Start from a stable cool/idle state, leave comparable thermal headroom, close browsers, IDE indexing, backups, virus scans, package updates, VMs, and other avoidable work. Record unavoidable background services. Do not use a single laptop run to generalize to servers or other cooling/power states.
 
+## Configurable local ports and occupied hosts
+
+`--port-base N` accepts integers from 1024 through 65526. PocketBase and TrailBase use `N`; explicit backend URL variables remain higher-priority loopback overrides. Supabase derives its nine service ports at offsets 0/1/2/3/4/5/6/8/9, creates a marked private `.data/supabase-N` workdir, and derives a unique project label. It refuses nonempty unowned workdirs and never performs global Docker cleanup.
+
+On an occupied host, use a clean checkout, an unused port range, and one backend at a time. Do not stop or modify unrelated services even when temporary slowdown is accepted. Their CPU, memory, disk, network, and scheduler contention remains part of the recorded co-located host state. Preserve all attempts. Publish hardware-profile capacity only from at least three compatible runs on that exact host/configuration.
+
 ## Cleanup ownership
 
 PocketBase and TrailBase use lifecycle ownership markers and exact binary/data paths; reset refuses filesystem roots, repository/home ancestors, foreign owners, live external users, and unowned nonempty depots. Supabase scopes operations to project `realworldbaasbench`, discovers containers by exact project label, and stops/removes only that project's containers with `--no-backup`. This means Supabase owned volumes can disappear at stop, so disk size must be sampled before cleanup if it is required.
@@ -196,4 +206,4 @@ unzip -v | head -n 2
 uname -a
 ```
 
-On macOS also record `sysctl -n machdep.cpu.brand_string`, `sysctl -n hw.logicalcpu`, and `sysctl -n hw.memsize`. On Ubuntu record `uname -srvm`, `lscpu`, and `free -b`. Include Docker engine state/version and all backend/SDK versions captured in the result. The macOS ARM64 clean-clone setup path passed on the recorded Apple M1 host at commit `5915981`: `npm ci`, pinned download and manual staging installation, 208 non-live tests, and all three backend doctors. This is same-host clean-checkout evidence, not a newly provisioned host. Ubuntu x64 verification remains pending for lack of a host.
+On macOS also record `sysctl -n machdep.cpu.brand_string`, `sysctl -n hw.logicalcpu`, and `sysctl -n hw.memsize`. On Ubuntu record `uname -srvm`, `lscpu`, and `free -b`. Include Docker engine state/version and all backend/SDK versions captured in the result. The macOS ARM64 clean-clone setup path passed on the recorded Apple M1 host at commit `5915981`: `npm ci`, pinned download and manual staging installation, 208 non-live tests, and all three backend doctors. This is same-host clean-checkout evidence, not a newly provisioned host. Ubuntu x64 verification remains pending until the recorded VPS clean-clone test and all three custom-port doctors complete.

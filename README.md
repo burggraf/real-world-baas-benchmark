@@ -28,7 +28,7 @@ On macOS ARM64, use a native Node 22+ build, Docker Desktop or another compatibl
 
 On Ubuntu x64, install a native x64 Node 22+ release, npm, Git, `unzip`, Docker Engine with Compose support, and the official Supabase CLI 2.115.0 x64 binary. Add the current user to Docker's permitted group only according to Docker's security guidance, then verify `docker info` works without changing benchmark commands. The pinned downloader supports the exact Linux x64 PocketBase and TrailBase release assets listed in the backend READMEs.
 
-Ubuntu clean-host verification is **pending** because no Ubuntu host or VPS is available. macOS ARM64 clean-clone verification passed on this Apple M1 host at commit `5915981`: `npm ci`, pinned download and manual staging installation, all 208 non-live tests, and all three backend doctors completed successfully. This verifies the setup path on the recorded host, not on a newly provisioned machine.
+Ubuntu clean-host verification is **pending** until the dedicated benchmark clone on the recorded VPS passes the complete test and doctor sequence. macOS ARM64 clean-clone verification passed on this Apple M1 host at commit `5915981`: `npm ci`, pinned download and manual staging installation, all 208 then-current non-live tests, and all three backend doctors completed successfully. This verifies the setup path on the recorded host, not on another machine.
 
 ## Clean setup
 
@@ -50,23 +50,11 @@ It supports macOS and Linux on ARM64 and x64. Run `node scripts/download-backend
 
 ## Local ports and paths
 
-PocketBase and TrailBase each default to `http://127.0.0.1:8090`, so run only one at a time. Their loopback HTTP endpoint, data directory, and binary can be selected with `POCKETBASE_URL`, `POCKETBASE_DATA_DIR`, `POCKETBASE_BIN`, or `TRAILBASE_URL`, `TRAILBASE_DATA_DIR`, `TRAILBASE_BIN`. URLs must remain loopback HTTP endpoints. Defaults are `.data/pocketbase` and `.data/trailbase`; logs are below `.data/`.
+PocketBase and TrailBase each default to `http://127.0.0.1:8090`, so run only one at a time. Use `--port-base 18000` on lifecycle and benchmark commands to select a shared alternative loopback base. Their explicit `POCKETBASE_URL` or `TRAILBASE_URL` remains the higher-priority override; data directories and binaries remain selectable with `POCKETBASE_DATA_DIR`, `POCKETBASE_BIN`, `TRAILBASE_DATA_DIR`, and `TRAILBASE_BIN`. URLs must remain loopback HTTP endpoints.
 
-Supabase uses a repository-scoped project and fixed reserved ports:
+Supabase's default API/database/Studio/Inbucket/SMTP/POP3/analytics/pooler/shadow ports remain 55321/55322/55323/55324/55325/55326/55327/55329/55330. With `--port-base N`, Supabase uses `N`, `N+1`, `N+2`, `N+3`, `N+4`, `N+5`, `N+6`, `N+8`, and `N+9`. The benchmark generates a marked private workdir at `.data/supabase-N` and scopes Docker operations to project `realworldbaasbench-N`; it refuses a nonempty unowned workdir. `SUPABASE_BIN` may still select the exact CLI executable.
 
-| Service | Port |
-| --- | ---: |
-| API | 55321 |
-| database | 55322 |
-| Studio | 55323 |
-| Inbucket | 55324 |
-| SMTP | 55325 |
-| POP3 | 55326 |
-| analytics | 55327 |
-| pooler | 55329 |
-| shadow database | 55330 |
-
-Do not have unrelated listeners on those ports. `SUPABASE_BIN` may select the exact CLI executable; the benchmark does not expose Supabase port overrides because consistent ports are part of the local configuration.
+The accepted base range is 1024 through 65526. All derived ports must be unused. Port separation prevents listener collisions, not CPU, memory, disk, network, or scheduler contention.
 
 ## Commands
 
@@ -74,6 +62,7 @@ Do not have unrelated listeners on those ports. `SUPABASE_BIN` may select the ex
 # Check all backends, or one backend.
 npm run bench -- doctor
 npm run bench -- doctor --backend pocketbase
+npm run bench -- doctor --backend pocketbase --port-base 18000
 
 # Foreground lifecycle check; stop with Ctrl-C.
 npm run bench -- up --backend pocketbase
@@ -89,7 +78,10 @@ npm run bench -- correctness --backend pocketbase --config configs/quick.json
 npm run bench -- run --backend pocketbase --config configs/quick.json
 npm run bench -- run --backend pocketbase --config configs/full.json
 
-# TrailBase-only ceiling probe; do not aggregate with the three-backend comparison.
+# Hardware-qualified capacity profile; use unchanged across server sizes.
+npm run bench -- run --backend pocketbase --config configs/server-capacity.json --port-base 18000
+
+# Historical TrailBase-only ceiling probe; do not aggregate with other configs.
 npm run bench -- run --backend trailbase --config configs/trailbase-ceiling.json
 
 # Sequential smoke comparison. Use explicit individual runs for controlled
@@ -114,10 +106,11 @@ Do not add `--confirm-large` to automation casually.
 
 - `configs/quick.json` uses the small dataset, a 5-second warm-up, and three 15-second stages at 1/5/10 users. Allow minutes rather than assuming the 50 measured seconds are the whole run: reset, seed, correctness, startup, and cleanup are additional work. Quick results are never publishable.
 - `configs/full.json` uses the 626,000-record medium dataset, a 120-second warm-up, and at least four 300-second stages at 5/10/25/50 users. Publishable capacity is established only within that measured range: capacity zero means no qualifying capacity was established at or above five users, not that the backend supports zero users. One-user quick evidence is separate and nonpublishable. A current full run is approximately **30–55+ minutes per backend**, based on the measured medium seed plus configured warm-up/stages; adaptive capacity stages can make it longer.
-- `configs/trailbase-ceiling.json` keeps the full medium workload and SLOs but raises `maxConcurrency` to 4,000. It is a TrailBase-only follow-up with configured stages at 5/10/25/50 users, followed by bounded doubling through 100/200/400/800/1,600/3,200/4,000 while stages pass and one midpoint refinement after the first conclusive failure. Its different config makes it incompatible with the published three-backend aggregate. Stop at runner overload: that identifies the same-host system limit, not TrailBase's server-only limit.
+- `configs/server-capacity.json` keeps the full medium workload and SLOs but raises `maxConcurrency` to the medium dataset's 10,000 users. It is the portable hardware-profile config. After a passing/failing bracket is found, at most four midpoint stages narrow that bracket; this leaves at most one-sixteenth of its original width, subject to integer users.
+- `configs/trailbase-ceiling.json` is retained as the historical 4,000-user TrailBase follow-up config. New runs use the same bounded four-midpoint scheduler, but its different config remains incompatible with other series. Runner overload identifies a co-located whole-machine limit, not TrailBase server-only capacity.
 - Observed medium setup occupied about 198 MiB for PocketBase and 234 MiB plus a 4.1 MiB log for TrailBase. Supabase size was unavailable because owned volumes were removed at stop. Docker images and engine storage can require several additional GiB. Keep comfortable free space and measure the actual run.
 - The large profile has not been characterized; expect multiple GiB and substantially longer setup/run time.
-- Three rotated full runs for each of three backends are nine runs and therefore a multi-hour exercise before cooldowns or reruns.
+- Three rotated full runs for each of three backends are nine runs and therefore a multi-hour exercise before cooldowns or reruns. Hardware-profile claims likewise require three compatible runs per backend on each exact host configuration.
 
 ## Reproducible run discipline
 

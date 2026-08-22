@@ -33,6 +33,14 @@ test("loads the publishable TrailBase ceiling profile", () => {
   });
 });
 
+test("server capacity changes only the full profile name and maximum concurrency", () => {
+  assert.deepEqual(loadConfig("configs/server-capacity.json"), {
+    ...full,
+    name: "server-capacity",
+    maxConcurrency: 10_000,
+  });
+});
+
 test("strictly parses full and large JSON through the unknown boundary", () => {
   assert.equal(parseConfig(JSON.parse(readFileSync("configs/full.json", "utf8"))).publishable, true);
   assert.equal(parseConfig(JSON.parse(readFileSync("configs/large.json", "utf8"))).publishable, false);
