@@ -15,6 +15,17 @@ test("parses a command and options", () => {
   });
 });
 
+test("parses and bounds the shared backend port base", () => {
+  for (const command of ["doctor", "up", "reset", "correctness", "run", "compare"]) {
+    assert.equal(parseArgs([command, "--port-base", "18000"]).portBase, 18000);
+  }
+  for (const value of ["1023", "65527", "1.5", "nope"]) assert.throws(() => parseArgs(["doctor", "--port-base", value]), /port base/i);
+  assert.throws(() => parseArgs(["doctor", "--port-base"]), /missing value/i);
+  assert.throws(() => parseArgs(["doctor", "--port-base", "18000", "--port-base", "18001"]), /duplicate option/i);
+  assert.throws(() => parseArgs(["report", "--port-base", "18000"]), /positional/i);
+  assert.throws(() => parseArgs(["down", "--port-base", "18000"]), /unknown option/i);
+});
+
 test("rejects an option without a value", () => {
   assert.throws(() => parseArgs(["run", "--config"]), /missing value.*--config/i);
 });

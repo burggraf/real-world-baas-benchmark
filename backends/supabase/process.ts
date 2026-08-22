@@ -1,22 +1,27 @@
 import { existsSync } from "node:fs";
+import { cp, lstat, mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
 import { dirname, isAbsolute, join, parse, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawn, spawnSync } from "node:child_process";
 import type { BackendInfo } from "../../src/backend.js";
+import { parsePortBase } from "../../src/port-base.js";
 
 export const SUPABASE_VERSION = "2.115.0";
 export const SUPABASE_PROJECT_ID = "realworldbaasbench";
-export const SUPABASE_PORTS = Object.freeze({ api: 55321, db: 55322, studio: 55323, inbucket: 55324, smtp: 55325, pop3: 55326, analytics: 55327, pooler: 55329, shadow: 55330 });
+export interface SupabasePorts { api: number; db: number; studio: number; inbucket: number; smtp: number; pop3: number; analytics: number; pooler: number; shadow: number; }
+export const SUPABASE_PORTS: Readonly<SupabasePorts> = Object.freeze({ api: 55321, db: 55322, studio: 55323, inbucket: 55324, smtp: 55325, pop3: 55326, analytics: 55327, pooler: 55329, shadow: 55330 });
 export const LOCAL_BENCHMARK_PASSWORD = "Benchmark-local-only-supabase!";
 const MAX_OUTPUT = 1_000_000;
+const OWNER_FILE = ".bench-supabase-owner.json";
 
 export interface SupabaseOptions {
   repoRoot: string;
   binary: string;
   projectId: string;
   workdir: string;
-  ports: typeof SUPABASE_PORTS;
+  ports: Readonly<SupabasePorts>;
+  generatedWorkdir: boolean;
 }
 export interface SupabaseStatus {
   API_URL: string;
@@ -39,13 +44,57 @@ function findRepoRoot(from = dirname(fileURLToPath(import.meta.url))): string {
 
 export function resolveSupabaseOptions(env: NodeJS.ProcessEnv = process.env, repoRoot = findRepoRoot()): SupabaseOptions {
   const binary = env.SUPABASE_BIN || "supabase";
+  const portBase = parsePortBase(env.BENCH_PORT_BASE);
+  const root = resolve(repoRoot);
+  const ports = portBase === undefined ? SUPABASE_PORTS : Object.freeze({ api: portBase, db: portBase + 1, studio: portBase + 2, inbucket: portBase + 3, smtp: portBase + 4, pop3: portBase + 5, analytics: portBase + 6, pooler: portBase + 8, shadow: portBase + 9 });
   return {
-    repoRoot: resolve(repoRoot),
+    repoRoot: root,
     binary: binary.includes("/") ? (isAbsolute(binary) ? binary : resolve(repoRoot, binary)) : binary,
-    projectId: SUPABASE_PROJECT_ID,
-    workdir: resolve(repoRoot, "backends/supabase"),
-    ports: SUPABASE_PORTS,
+    projectId: portBase === undefined ? SUPABASE_PROJECT_ID : `${SUPABASE_PROJECT_ID}-${portBase}`,
+    workdir: portBase === undefined ? resolve(root, "backends/supabase") : resolve(root, `.data/supabase-${portBase}`),
+    ports,
+    generatedWorkdir: portBase !== undefined,
   };
+}
+
+const generatedConfig = (options: SupabaseOptions): string => `project_id = "${options.projectId}"
+[api]
+port = ${options.ports.api}
+[db]
+port = ${options.ports.db}
+shadow_port = ${options.ports.shadow}
+[studio]
+port = ${options.ports.studio}
+[local_smtp]
+port = ${options.ports.inbucket}
+smtp_port = ${options.ports.smtp}
+pop3_port = ${options.ports.pop3}
+[analytics]
+port = ${options.ports.analytics}
+[db.pooler]
+port = ${options.ports.pooler}
+`;
+
+export async function prepareSupabaseWorkdir(options: SupabaseOptions): Promise<void> {
+  if (!options.generatedWorkdir) return;
+  await mkdir(options.workdir, { recursive: true });
+  const stat = await lstat(options.workdir);
+  if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error("Refusing non-directory Supabase workdir");
+  const markerPath = join(options.workdir, OWNER_FILE);
+  const entries = await readdir(options.workdir);
+  if (entries.length) {
+    let owner: unknown;
+    try { owner = JSON.parse(await readFile(markerPath, "utf8")); } catch { throw new Error("Refusing unowned nonempty Supabase workdir"); }
+    if (!owner || typeof owner !== "object" || (owner as { projectId?: unknown }).projectId !== options.projectId) throw new Error("Refusing unowned or mismatched Supabase workdir");
+  } else {
+    await writeFile(markerPath, JSON.stringify({ projectId: options.projectId }) + "\n", { encoding: "utf8", mode: 0o600, flag: "wx" });
+  }
+  const target = join(options.workdir, "supabase");
+  const targetStat = await lstat(target).catch(() => undefined);
+  if (targetStat && (!targetStat.isDirectory() || targetStat.isSymbolicLink())) throw new Error("Refusing unsafe generated Supabase config directory");
+  await mkdir(join(target, "migrations"), { recursive: true });
+  await cp(join(options.repoRoot, "backends/supabase/supabase/migrations"), join(target, "migrations"), { recursive: true, force: true });
+  await writeFile(join(target, "config.toml"), generatedConfig(options), { encoding: "utf8", mode: 0o600 });
 }
 
 export function buildSupabaseArgs(options: SupabaseOptions, args: readonly string[]): string[] {
@@ -161,6 +210,7 @@ export class SupabaseProcess {
 
   async start(): Promise<SupabaseStatus> {
     if (!ownContainerIds(this.options.projectId, true).length) {
+      await prepareSupabaseWorkdir(this.options);
       for (const port of Object.values(this.options.ports)) if (!(await portAvailable(port))) throw new Error(`Supabase benchmark port ${port} is unavailable`);
       await runSupabase(this.options, ["start"]);
     }

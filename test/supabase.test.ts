@@ -1,9 +1,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   buildSupabaseArgs,
   parseSupabaseStatus,
+  prepareSupabaseWorkdir,
   redactSupabaseOutput,
   resolveSupabaseOptions,
   runSynchronousProbe,
@@ -51,6 +55,29 @@ test("Supabase lifecycle uses PATH binary, absolute workdir, and scrubbed CLI ov
   assert.equal(env.KEEP, "yes");
   assert.equal(SUPABASE_PROJECT_ID, "realworldbaasbench");
   assert.equal(SUPABASE_PORTS.shadow, 55330);
+});
+
+test("Supabase derives custom ports and prepares only its owned workdir", async () => {
+  const root = await mkdtemp(join(tmpdir(), "supabase-custom-ports-"));
+  try {
+    await mkdir(join(root, "backends/supabase/supabase/migrations"), { recursive: true });
+    await writeFile(join(root, "backends/supabase/supabase/migrations/0001_benchmark.sql"), "select 1;\n");
+    const options = resolveSupabaseOptions({ SUPABASE_BIN: "supabase", BENCH_PORT_BASE: "18000" }, root);
+    assert.deepEqual(options.ports, { api: 18000, db: 18001, studio: 18002, inbucket: 18003, smtp: 18004, pop3: 18005, analytics: 18006, pooler: 18008, shadow: 18009 });
+    assert.equal(options.projectId, "realworldbaasbench-18000");
+    assert.equal(options.workdir, join(root, ".data/supabase-18000"));
+    await prepareSupabaseWorkdir(options);
+    await prepareSupabaseWorkdir(options);
+    const config = await readFile(join(options.workdir, "supabase/config.toml"), "utf8");
+    assert.match(config, /project_id = "realworldbaasbench-18000"/);
+    assert.match(config, /port = 18000/);
+    assert.equal(await readFile(join(options.workdir, "supabase/migrations/0001_benchmark.sql"), "utf8"), "select 1;\n");
+
+    const foreign = resolveSupabaseOptions({ BENCH_PORT_BASE: "18001" }, root);
+    await mkdir(foreign.workdir, { recursive: true });
+    await writeFile(join(foreign.workdir, "foreign.txt"), "keep\n");
+    await assert.rejects(prepareSupabaseWorkdir(foreign), /unowned/i);
+  } finally { await rm(root, { recursive: true, force: true }); }
 });
 
 test("page ranges reject unsafe and unbounded offsets", () => {

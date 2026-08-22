@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { DatabaseSync, type SQLOutputValue } from "node:sqlite";
 import type { BackendInfo } from "../../src/backend.js";
+import { parsePortBase } from "../../src/port-base.js";
 
 export const TRAILBASE_VERSION = "0.33.1";
 export const TRAILBASE_EXECUTABLE_SHA256_BY_TARGET = Object.freeze({
@@ -74,10 +75,11 @@ function findRepoRoot(): string {
 const absolute = (root: string, value: string): string => isAbsolute(value) ? value : resolve(root, value);
 
 export function resolveTrailBaseOptions(
-  env: { TRAILBASE_BIN?: string; TRAILBASE_URL?: string; TRAILBASE_DATA_DIR?: string } = process.env,
+  env: { TRAILBASE_BIN?: string; TRAILBASE_URL?: string; TRAILBASE_DATA_DIR?: string; BENCH_PORT_BASE?: string } = process.env,
   repoRoot = findRepoRoot(),
 ): TrailBaseProcessOptions {
-  const endpointUrl = new URL(env.TRAILBASE_URL || "http://127.0.0.1:8090");
+  const portBase = parsePortBase(env.BENCH_PORT_BASE);
+  const endpointUrl = new URL(env.TRAILBASE_URL || `http://127.0.0.1:${portBase ?? 8090}`);
   const localHosts = new Set(["127.0.0.1", "localhost", "::1"]);
   if (endpointUrl.protocol !== "http:" || !localHosts.has(endpointUrl.hostname) || endpointUrl.username || endpointUrl.password) {
     throw new Error("TRAILBASE_URL must be a local HTTP endpoint");

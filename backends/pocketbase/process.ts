@@ -7,6 +7,7 @@ import { dirname, isAbsolute, join, parse, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import type { BackendInfo } from "../../src/backend.js";
+import { parsePortBase } from "../../src/port-base.js";
 
 export const POCKETBASE_VERSION = "0.39.11";
 export const POCKETBASE_EXECUTABLE_SHA256_BY_TARGET = Object.freeze({
@@ -49,10 +50,11 @@ function findRepoRoot(): string {
 const absolute = (root: string, value: string): string => isAbsolute(value) ? value : resolve(root, value);
 
 export function resolvePocketBaseOptions(
-  env: { POCKETBASE_BIN?: string; POCKETBASE_URL?: string; POCKETBASE_DATA_DIR?: string } = process.env,
+  env: { POCKETBASE_BIN?: string; POCKETBASE_URL?: string; POCKETBASE_DATA_DIR?: string; BENCH_PORT_BASE?: string } = process.env,
   repoRoot = findRepoRoot(),
 ): PocketBaseProcessOptions {
-  const endpointUrl = new URL(env.POCKETBASE_URL || "http://127.0.0.1:8090");
+  const portBase = parsePortBase(env.BENCH_PORT_BASE);
+  const endpointUrl = new URL(env.POCKETBASE_URL || `http://127.0.0.1:${portBase ?? 8090}`);
   const localHosts = new Set(["127.0.0.1", "localhost", "::1"]);
   if (endpointUrl.protocol !== "http:" || !localHosts.has(endpointUrl.hostname) || endpointUrl.username || endpointUrl.password) {
     throw new Error("POCKETBASE_URL must be a local HTTP endpoint");

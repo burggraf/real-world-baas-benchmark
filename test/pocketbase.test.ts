@@ -76,6 +76,11 @@ test("PocketBase process options reject non-local or path-bearing endpoints", ()
   assert.throws(() => resolvePocketBaseOptions({ POCKETBASE_URL: "http://127.0.0.1:8090/base" }, "/tmp/repo"), /path/);
 });
 
+test("PocketBase derives its default endpoint from the shared port base", () => {
+  assert.equal(resolvePocketBaseOptions({ BENCH_PORT_BASE: "18000" }, "/tmp/repo").endpoint, "http://127.0.0.1:18000");
+  assert.equal(resolvePocketBaseOptions({ BENCH_PORT_BASE: "18000", POCKETBASE_URL: "http://127.0.0.1:19000" }, "/tmp/repo").endpoint, "http://127.0.0.1:19000");
+});
+
 test("PocketBase record and page mapping preserves nulls and zero-based pages", () => {
   const task = mapPocketBaseTask({
     id: "tsk000000000001",

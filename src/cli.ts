@@ -8,14 +8,15 @@ import { runCorrectness } from "./correctness.js";
 import { runBenchmark, safeErrorMessage } from "./run.js";
 import { profileExpectedCounts, type ProfileName } from "./seed.js";
 import { validateBenchmarkResult, writeBenchmarkReport } from "./report.js";
+import { parsePortBase } from "./port-base.js";
 
 export type ParsedArgs = {
-  command: string; backend?: string; backends?: string; config?: string; dataset?: string; seed?: string; result?: string; input?: string; confirmLarge?: boolean;
+  command: string; backend?: string; backends?: string; config?: string; dataset?: string; seed?: string; result?: string; input?: string; confirmLarge?: boolean; portBase?: number;
 };
 const allowedOptions = {
-  doctor: ["backend"], up: ["backend"], down: ["backend"],
-  reset: ["backend", "config", "dataset", "seed", "confirm-large"], correctness: ["backend", "config", "dataset", "seed", "confirm-large"],
-  run: ["backend", "config", "result", "confirm-large"], compare: ["backend", "backends", "config", "confirm-large"], report: [],
+  doctor: ["backend", "port-base"], up: ["backend", "port-base"], down: ["backend"],
+  reset: ["backend", "config", "dataset", "seed", "confirm-large", "port-base"], correctness: ["backend", "config", "dataset", "seed", "confirm-large", "port-base"],
+  run: ["backend", "config", "result", "confirm-large", "port-base"], compare: ["backend", "backends", "config", "confirm-large", "port-base"], report: [],
 } as const;
 const commands = new Set(Object.keys(allowedOptions));
 const backendNames = new Set(["pocketbase", "supabase", "trailbase"]);
@@ -45,7 +46,8 @@ export function parseArgs(argv: string[]): ParsedArgs {
     const value = options[index + 1];
     if (value === undefined || value === "" || value.startsWith("--")) throw new Error(`Missing value for ${option}`);
     names.add(name);
-    (parsed as unknown as Record<string, string>)[name] = value;
+    if (name === "port-base") parsed.portBase = parsePortBase(value);
+    else (parsed as unknown as Record<string, string>)[name] = value;
     index += 2;
   }
   if (unknownOption) throw new Error(`Unknown option for ${command}: ${unknownOption}`);
@@ -61,7 +63,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
   return parsed;
 }
 
-const help = `Usage: npm run bench -- <command> [options]\n\nCommands:\n  doctor\n  up\n  reset\n  correctness\n  run\n  compare\n  down\n  report\n\nLarge datasets:\n  --confirm-large\n`;
+const help = `Usage: npm run bench -- <command> [options]\n\nCommands:\n  doctor\n  up\n  reset\n  correctness\n  run\n  compare\n  down\n  report\n\nLocal backend ports:\n  --port-base <1024..65526>\n\nLarge datasets:\n  --confirm-large\n`;
 const required = (args: ParsedArgs, name: "backend" | "config"): string => { const value = args[name]; if (!value) throw new Error(`Missing --${name}`); return value; };
 const requireLargeConfirmation = (dataset: ProfileName, confirmed?: boolean): void => { if (dataset === "large" && confirmed !== true) throw new Error("Large dataset requires --confirm-large"); };
 const configPath = (value: string): string => { if (value.includes("\0") || value.includes("..")) throw new Error("Unsafe config path"); return resolve(value); };
@@ -147,6 +149,7 @@ export async function main(argv: string[]): Promise<number> {
   try {
     if (argv.length === 0) { console.error(help); return 1; }
     const args = parseArgs(argv);
+    if (args.portBase !== undefined) process.env.BENCH_PORT_BASE = String(args.portBase);
     if (args.command === "report") {
       const inputPath = await resolveReportInputPath(args.input!); let result: unknown;
       try { result = JSON.parse(await readFile(inputPath, "utf8")); } catch { throw new Error("Invalid result JSON"); }

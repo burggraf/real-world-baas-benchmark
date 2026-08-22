@@ -39,6 +39,11 @@ test("TrailBase options are local, absolute, and use the pinned trail executable
   assert.throws(() => resolveTrailBaseOptions({ TRAILBASE_URL: "http://127.0.0.1:8191/x" }, "/tmp/repo"), /path/);
 });
 
+test("TrailBase derives its default endpoint from the shared port base", () => {
+  assert.equal(resolveTrailBaseOptions({ BENCH_PORT_BASE: "18000" }, "/tmp/repo").endpoint, "http://127.0.0.1:18000");
+  assert.equal(resolveTrailBaseOptions({ BENCH_PORT_BASE: "18000", TRAILBASE_URL: "http://127.0.0.1:19000" }, "/tmp/repo").endpoint, "http://127.0.0.1:19000");
+});
+
 test("TrailBase reset safety requires strict ownership", () => {
   assert.notEqual(LOCAL_SETUP_PASSWORD, LOCAL_BENCHMARK_PASSWORD);
   assert.throws(() => assertResetDataDirectorySafe("/tmp/repo", "/tmp", false), /ancestor/);
