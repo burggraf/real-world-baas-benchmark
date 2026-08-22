@@ -1,0 +1,750 @@
+{
+  "schemaVersion": 1,
+  "title": "TrailBase same-host ceiling canary",
+  "classification": "single-run diagnostic; not a repeated publishable capacity result",
+  "sourceResult": "results/trailbase-ceiling-canary-341bcf8.json",
+  "releaseUrl": "https://github.com/burggraf/real-world-baas-benchmark/releases/tag/trailbase-ceiling-canary-2026-08-22",
+  "archive": {
+    "name": "trailbase-ceiling-canary-evidence-341bcf8.tar.gz",
+    "sha256": "e1e6298b97b11ee63295604c4c581a93cf761680e87af339c746cbcbead35b60"
+  },
+  "run": {
+    "runId": "2026-08-22T14-23-05-072Z-trailbase-trailbase-ceiling",
+    "startedAt": "2026-08-22T14:23:05.072Z",
+    "endedAt": "2026-08-22T15:23:45Z",
+    "benchmarkExit": 1,
+    "valid": false,
+    "validityReasons": [
+      "one or more benchmark prerequisites failed"
+    ],
+    "failures": [],
+    "workloadCommit": "341bcf89a7065757ff9e9ecf8147779be6534000",
+    "gitDirty": false,
+    "backend": {
+      "name": "trailbase",
+      "version": "0.33.1",
+      "endpoint": "http://127.0.0.1:8090",
+      "processIds": [
+        62763
+      ],
+      "processExecutable": "/Users/markb/dev/bench/.tools/trailbase-0.33.1/trail",
+      "deviations": [
+        "TrailBase list-rule denial returns an empty page rather than an authorization response.",
+        "The v0.33.1 release schema and CLI verify command are incompatible; setup verifies registered users with a constrained owned-depot transaction."
+      ]
+    },
+    "dataset": "medium",
+    "seed": 42,
+    "config": {
+      "name": "trailbase-ceiling",
+      "publishable": true,
+      "dataset": "medium",
+      "seed": 42,
+      "warmupSeconds": 120,
+      "stageSeconds": 300,
+      "concurrency": [
+        5,
+        10,
+        25,
+        50
+      ],
+      "maxConcurrency": 4000,
+      "timeoutMs": 5000,
+      "thinkTimeMs": {
+        "min": 1000,
+        "max": 5000
+      },
+      "weights": {
+        "dashboard": 20,
+        "taskList": 25,
+        "taskDetail": 15,
+        "createTask": 10,
+        "updateTask": 12,
+        "addComment": 10,
+        "search": 5,
+        "profileUpdate": 1,
+        "signIn": 2
+      },
+      "slos": {
+        "read": {
+          "p95Ms": 500,
+          "maxErrorRate": 0.01
+        },
+        "write": {
+          "p95Ms": 750,
+          "maxErrorRate": 0.01
+        },
+        "authSearch": {
+          "p95Ms": 1000,
+          "maxErrorRate": 0.01
+        }
+      }
+    },
+    "settings": {
+      "warmupUserCount": 50,
+      "warmupWritesUnscored": true,
+      "resourceIntervalMs": 1000,
+      "resourceMaxSamples": {
+        "stageDurationMs": 300000,
+        "graceMs": 5000,
+        "formula": "ceil((stageDurationMs + graceMs) / intervalMs) + 2",
+        "value": 307
+      },
+      "overloadThresholds": {
+        "cpuPercent": 90,
+        "p99Ms": 100,
+        "maxMs": 250,
+        "consecutiveSamples": 3
+      },
+      "minClassSamples": 20,
+      "minAchievedRatio": 0.95,
+      "saturationMaterialIncrease": 0.2,
+      "saturationMaxThroughputGain": 0.1,
+      "maxLatencySamples": 2000000,
+      "maxErrorExamples": 100,
+      "measuredRequestTimeoutMs": 5000,
+      "sessionPreparationConcurrency": 10,
+      "boundarySessionsUnmeasured": true
+    },
+    "environment": {
+      "runtime": "node",
+      "runtimeVersion": "v26.7.0",
+      "os": "darwin",
+      "architecture": "arm64",
+      "host": "Goldie.local",
+      "cpu": "Apple M1",
+      "memoryBytes": 16386818048,
+      "release": "25.6.0",
+      "logicalCores": 8,
+      "cpuModel": "Apple M1",
+      "totalMemoryBytes": 16386818048,
+      "hostname": "Goldie.local",
+      "nodeVersion": "v26.7.0",
+      "npmVersion": "11.19.0",
+      "gitCommit": "341bcf89a7065757ff9e9ecf8147779be6534000",
+      "gitDirty": false,
+      "backend": {
+        "name": "trailbase",
+        "version": "0.33.1",
+        "endpoint": "http://127.0.0.1:8090",
+        "processIds": [
+          62763
+        ],
+        "processExecutable": "/Users/markb/dev/bench/.tools/trailbase-0.33.1/trail",
+        "deviations": [
+          "TrailBase list-rule denial returns an empty page rather than an authorization response.",
+          "The v0.33.1 release schema and CLI verify command are incompatible; setup verifies registered users with a constrained owned-depot transaction."
+        ]
+      },
+      "sdkVersion": "0.14.0",
+      "dockerVersion": null,
+      "supabaseVersion": null,
+      "unavailable": {
+        "dockerVersion": "not required for selected backend",
+        "supabaseVersion": "not required for selected backend"
+      }
+    },
+    "versions": {
+      "backend": "0.33.1",
+      "sdk": "0.14.0",
+      "runtime": "v26.7.0"
+    },
+    "power": {
+      "before": " -InternalBattery-0 (id=36700259) 56%; discharging; 2:32 remaining present: true",
+      "after": " -InternalBattery-0 (id=36700259) 93%; charging; 0:31 remaining present: true"
+    },
+    "correctness": {
+      "passed": 15,
+      "total": 15,
+      "aborted": false
+    },
+    "selectedCapacity": {
+      "users": 1600,
+      "saturation": false,
+      "reasons": [
+        "cpuPercent sustained above threshold",
+        "read p95Ms 1418.4540830003098 exceeds 500",
+        "read errorRate 0.013401149634913238 is at or above 0.01",
+        "write p95Ms 1841.2052089995705 exceeds 750",
+        "write errorRate 0.016562664737829323 is at or above 0.01",
+        "authSearch p95Ms 1253.7131670000963 exceeds 1000",
+        "authSearch errorRate 0.012044026969400103 is at or above 0.01"
+      ]
+    },
+    "publishableCapacityClaim": false,
+    "saturationObserved": false,
+    "boundary": {
+      "highestValidSloPassingStageUsers": 1600,
+      "nextMeasuredStageUsers": 3200,
+      "nextStageValid": false,
+      "nextStageAchievedUsers": 3128,
+      "configuredCeilingUsers": 4000,
+      "configuredCeilingAttempted": false,
+      "interpretation": "The shared-host runner overloaded at 3,200 users while every SLO also failed. This bounds the combined setup, not TrailBase server-only capacity."
+    }
+  },
+  "stages": [
+    {
+      "requestedUsers": 5,
+      "achievedUsers": 5,
+      "elapsedSeconds": 300.00923458399996,
+      "valid": true,
+      "validityReasons": [],
+      "workflowTransactionsPerSecond": 1.6366162884313626,
+      "sdkOperationsPerSecond": 7.22977745337602,
+      "readSdkOperationsPerSecond": 4.743187328793949,
+      "writeSdkOperationsPerSecond": 2.48659012458207,
+      "sdkTransportFailures": 0,
+      "operationClasses": {
+        "read": {
+          "attempted": 304,
+          "completed": 304,
+          "failed": 0,
+          "errorRate": 0,
+          "latencyP50Ms": 15.62375000002794,
+          "latencyP95Ms": 23.545624999911524,
+          "latencyP99Ms": 26.26887499995064,
+          "latencyMinMs": 3.8734999999869615,
+          "latencyMaxMs": 59.58929100004025
+        },
+        "write": {
+          "attempted": 161,
+          "completed": 161,
+          "failed": 0,
+          "errorRate": 0,
+          "latencyP50Ms": 16.4392499999376,
+          "latencyP95Ms": 23.718541000038385,
+          "latencyP99Ms": 26.27141699998174,
+          "latencyMinMs": 3.909457999980077,
+          "latencyMaxMs": 34.809333999990486
+        },
+        "authSearch": {
+          "attempted": 26,
+          "completed": 26,
+          "failed": 0,
+          "errorRate": 0,
+          "latencyP50Ms": 16.546708000008948,
+          "latencyP95Ms": 58.206875000032596,
+          "latencyP99Ms": 58.79929200001061,
+          "latencyMinMs": 7.369249999988824,
+          "latencyMaxMs": 58.79929200001061
+        }
+      },
+      "resources": {
+        "sampleCount": 294,
+        "runnerCpuPercentMax": 39.5,
+        "runnerRssBytesMax": 178356224,
+        "backendCpuPercentMax": 21.9,
+        "backendRssBytesMax": 156090368,
+        "eventLoopP99MsMax": 19.070975,
+        "eventLoopMaxMsMax": 22.380543
+      }
+    },
+    {
+      "requestedUsers": 10,
+      "achievedUsers": 10,
+      "elapsedSeconds": 300.00296045799996,
+      "valid": true,
+      "validityReasons": [],
+      "workflowTransactionsPerSecond": 3.269967731326234,
+      "sdkOperationsPerSecond": 14.366524895021476,
+      "readSdkOperationsPerSecond": 9.093243599447469,
+      "writeSdkOperationsPerSecond": 5.273281295574008,
+      "sdkTransportFailures": 0,
+      "operationClasses": {
+        "read": {
+          "attempted": 586,
+          "completed": 584,
+          "failed": 2,
+          "errorRate": 0.0034129692832764505,
+          "latencyP50Ms": 15.102958000032231,
+          "latencyP95Ms": 23.873541999957524,
+          "latencyP99Ms": 25.147209000075236,
+          "latencyMinMs": 2.5770410001277924,
+          "latencyMaxMs": 26.805790999904275
+        },
+        "write": {
+          "attempted": 341,
+          "completed": 341,
+          "failed": 0,
+          "errorRate": 0,
+          "latencyP50Ms": 15.968999999808148,
+          "latencyP95Ms": 23.573666000040248,
+          "latencyP99Ms": 25.76350000000093,
+          "latencyMinMs": 4.86241699999664,
+          "latencyMaxMs": 42.96166700008325
+        },
+        "authSearch": {
+          "attempted": 56,
+          "completed": 56,
+          "failed": 0,
+          "errorRate": 0,
+          "latencyP50Ms": 18.00379200000316,
+          "latencyP95Ms": 58.59625000017695,
+          "latencyP99Ms": 62.71750000002794,
+          "latencyMinMs": 5.2909160000272095,
+          "latencyMaxMs": 62.71750000002794
+        }
+      },
+      "resources": {
+        "sampleCount": 294,
+        "runnerCpuPercentMax": 17.3,
+        "runnerRssBytesMax": 154189824,
+        "backendCpuPercentMax": 14.6,
+        "backendRssBytesMax": 216416256,
+        "eventLoopP99MsMax": 21.118975,
+        "eventLoopMaxMsMax": 41.484287
+      }
+    },
+    {
+      "requestedUsers": 25,
+      "achievedUsers": 25,
+      "elapsedSeconds": 300.00367604200005,
+      "valid": true,
+      "validityReasons": [],
+      "workflowTransactionsPerSecond": 8.289898419950774,
+      "sdkOperationsPerSecond": 36.04622497521016,
+      "readSdkOperationsPerSecond": 23.143049750590357,
+      "writeSdkOperationsPerSecond": 12.903175224619801,
+      "sdkTransportFailures": 0,
+      "operationClasses": {
+        "read": {
+          "attempted": 1501,
+          "completed": 1500,
+          "failed": 1,
+          "errorRate": 0.0006662225183211193,
+          "latencyP50Ms": 13.634666999801993,
+          "latencyP95Ms": 22.691334000090137,
+          "latencyP99Ms": 31.074958000099286,
+          "latencyMinMs": 2.3455000000540167,
+          "latencyMaxMs": 68.5260840000119
+        },
+        "write": {
+          "attempted": 840,
+          "completed": 837,
+          "failed": 3,
+          "errorRate": 0.0035714285714285713,
+          "latencyP50Ms": 13.841499999864027,
+          "latencyP95Ms": 21.769459000090137,
+          "latencyP99Ms": 25.89304200001061,
+          "latencyMinMs": 2.4380830000154674,
+          "latencyMaxMs": 33.503166999900714
+        },
+        "authSearch": {
+          "attempted": 150,
+          "completed": 150,
+          "failed": 0,
+          "errorRate": 0,
+          "latencyP50Ms": 14.711124999914318,
+          "latencyP95Ms": 55.10924999997951,
+          "latencyP99Ms": 59.13108399999328,
+          "latencyMinMs": 3.784375000046566,
+          "latencyMaxMs": 60.46370800002478
+        }
+      },
+      "resources": {
+        "sampleCount": 294,
+        "runnerCpuPercentMax": 65.7,
+        "runnerRssBytesMax": 174030848,
+        "backendCpuPercentMax": 131,
+        "backendRssBytesMax": 219824128,
+        "eventLoopP99MsMax": 21.659647,
+        "eventLoopMaxMsMax": 39.583743
+      }
+    },
+    {
+      "requestedUsers": 50,
+      "achievedUsers": 50,
+      "elapsedSeconds": 300.004513542,
+      "valid": true,
+      "validityReasons": [],
+      "workflowTransactionsPerSecond": 16.66308263492226,
+      "sdkOperationsPerSecond": 72.42891029690453,
+      "readSdkOperationsPerSecond": 46.62929845567663,
+      "writeSdkOperationsPerSecond": 25.799611841227904,
+      "sdkTransportFailures": 0,
+      "operationClasses": {
+        "read": {
+          "attempted": 3012,
+          "completed": 3012,
+          "failed": 0,
+          "errorRate": 0,
+          "latencyP50Ms": 11.324750000145286,
+          "latencyP95Ms": 21.225208000047132,
+          "latencyP99Ms": 40.93679100018926,
+          "latencyMinMs": 1.9438340000342578,
+          "latencyMaxMs": 72.66599999996834
+        },
+        "write": {
+          "attempted": 1670,
+          "completed": 1670,
+          "failed": 0,
+          "errorRate": 0,
+          "latencyP50Ms": 11.315292000072077,
+          "latencyP95Ms": 21.047874999931082,
+          "latencyP99Ms": 54.203625000081956,
+          "latencyMinMs": 1.7894999999552965,
+          "latencyMaxMs": 113.0566660000477
+        },
+        "authSearch": {
+          "attempted": 317,
+          "completed": 317,
+          "failed": 0,
+          "errorRate": 0,
+          "latencyP50Ms": 14.211875000037253,
+          "latencyP95Ms": 54.85083299991675,
+          "latencyP99Ms": 59.37945900019258,
+          "latencyMinMs": 2.0114170000888407,
+          "latencyMaxMs": 92.4104590001516
+        }
+      },
+      "resources": {
+        "sampleCount": 294,
+        "runnerCpuPercentMax": 35.4,
+        "runnerRssBytesMax": 183271424,
+        "backendCpuPercentMax": 334.6,
+        "backendRssBytesMax": 220626944,
+        "eventLoopP99MsMax": 27.541503,
+        "eventLoopMaxMsMax": 55.508991
+      }
+    },
+    {
+      "requestedUsers": 100,
+      "achievedUsers": 100,
+      "elapsedSeconds": 300.008662791,
+      "valid": true,
+      "validityReasons": [],
+      "workflowTransactionsPerSecond": 33.37903614795356,
+      "sdkOperationsPerSecond": 144.99247986816778,
+      "readSdkOperationsPerSecond": 93.76062590431253,
+      "writeSdkOperationsPerSecond": 51.23185396385523,
+      "sdkTransportFailures": 0,
+      "operationClasses": {
+        "read": {
+          "attempted": 6012,
+          "completed": 6012,
+          "failed": 0,
+          "errorRate": 0,
+          "latencyP50Ms": 9.073333000065759,
+          "latencyP95Ms": 19.572249999968335,
+          "latencyP99Ms": 59.49804199999198,
+          "latencyMinMs": 1.3743329998105764,
+          "latencyMaxMs": 125.19520800001919
+        },
+        "write": {
+          "attempted": 3328,
+          "completed": 3328,
+          "failed": 0,
+          "errorRate": 0,
+          "latencyP50Ms": 9.045958000002429,
+          "latencyP95Ms": 20.116292000049725,
+          "latencyP99Ms": 110.65837499988265,
+          "latencyMinMs": 0.8466250000055879,
+          "latencyMaxMs": 128.0095000001602
+        },
+        "authSearch": {
+          "attempted": 674,
+          "completed": 674,
+          "failed": 0,
+          "errorRate": 0,
+          "latencyP50Ms": 10.56533300015144,
+          "latencyP95Ms": 47.28658299986273,
+          "latencyP99Ms": 71.15187499998137,
+          "latencyMinMs": 1.6977919999044389,
+          "latencyMaxMs": 118.26691699982621
+        }
+      },
+      "resources": {
+        "sampleCount": 295,
+        "runnerCpuPercentMax": 32.9,
+        "runnerRssBytesMax": 159694848,
+        "backendCpuPercentMax": 443.9,
+        "backendRssBytesMax": 228687872,
+        "eventLoopP99MsMax": 22.446079,
+        "eventLoopMaxMsMax": 35.880959
+      }
+    },
+    {
+      "requestedUsers": 200,
+      "achievedUsers": 200,
+      "elapsedSeconds": 300.01132929200026,
+      "valid": true,
+      "validityReasons": [],
+      "workflowTransactionsPerSecond": 66.76081215754964,
+      "sdkOperationsPerSecond": 289.8790529185491,
+      "readSdkOperationsPerSecond": 186.5496217495422,
+      "writeSdkOperationsPerSecond": 103.32943116900688,
+      "sdkTransportFailures": 0,
+      "operationClasses": {
+        "read": {
+          "attempted": 11968,
+          "completed": 11968,
+          "failed": 0,
+          "errorRate": 0,
+          "latencyP50Ms": 6.758375000208616,
+          "latencyP95Ms": 16.305291999597102,
+          "latencyP99Ms": 60.43325000023469,
+          "latencyMinMs": 1.1512919999659061,
+          "latencyMaxMs": 218.57275000028312
+        },
+        "write": {
+          "attempted": 6717,
+          "completed": 6716,
+          "failed": 1,
+          "errorRate": 0.00014887598630340925,
+          "latencyP50Ms": 6.78112499974668,
+          "latencyP95Ms": 16.784417000133544,
+          "latencyP99Ms": 198.15683300001547,
+          "latencyMinMs": 0.7532500000670552,
+          "latencyMaxMs": 225.1319590001367
+        },
+        "authSearch": {
+          "attempted": 1345,
+          "completed": 1345,
+          "failed": 0,
+          "errorRate": 0,
+          "latencyP50Ms": 8.157542000059038,
+          "latencyP95Ms": 44.71762500004843,
+          "latencyP99Ms": 57.10954099986702,
+          "latencyMinMs": 1.1100419997237623,
+          "latencyMaxMs": 212.87691699992865
+        }
+      },
+      "resources": {
+        "sampleCount": 295,
+        "runnerCpuPercentMax": 35.5,
+        "runnerRssBytesMax": 200982528,
+        "backendCpuPercentMax": 539.4,
+        "backendRssBytesMax": 261750784,
+        "eventLoopP99MsMax": 19.054591,
+        "eventLoopMaxMsMax": 21.954559
+      }
+    },
+    {
+      "requestedUsers": 400,
+      "achievedUsers": 400,
+      "elapsedSeconds": 300.0189575410001,
+      "valid": true,
+      "validityReasons": [],
+      "workflowTransactionsPerSecond": 133.66488680809354,
+      "sdkOperationsPerSecond": 579.533378240737,
+      "readSdkOperationsPerSecond": 373.6297229973581,
+      "writeSdkOperationsPerSecond": 205.90365524337886,
+      "sdkTransportFailures": 0,
+      "operationClasses": {
+        "read": {
+          "attempted": 23930,
+          "completed": 23929,
+          "failed": 1,
+          "errorRate": 0.000041788549937317175,
+          "latencyP50Ms": 4.706333000212908,
+          "latencyP95Ms": 12.047625000122935,
+          "latencyP99Ms": 111.68754199985415,
+          "latencyMinMs": 1.0184579999186099,
+          "latencyMaxMs": 411.37304200045764
+        },
+        "write": {
+          "attempted": 13397,
+          "completed": 13396,
+          "failed": 1,
+          "errorRate": 0.00007464357692020602,
+          "latencyP50Ms": 4.81608400028199,
+          "latencyP95Ms": 13.503458000253886,
+          "latencyP99Ms": 320.4704169998877,
+          "latencyMinMs": 0.5679999999701977,
+          "latencyMaxMs": 428.76995899993926
+        },
+        "authSearch": {
+          "attempted": 2777,
+          "completed": 2777,
+          "failed": 0,
+          "errorRate": 0,
+          "latencyP50Ms": 5.5229170001111925,
+          "latencyP95Ms": 33.69058299995959,
+          "latencyP99Ms": 47.835540999658406,
+          "latencyMinMs": 1.2168749999254942,
+          "latencyMaxMs": 413.92337500024587
+        }
+      },
+      "resources": {
+        "sampleCount": 296,
+        "runnerCpuPercentMax": 38.7,
+        "runnerRssBytesMax": 237043712,
+        "backendCpuPercentMax": 553.8,
+        "backendRssBytesMax": 276676608,
+        "eventLoopP99MsMax": 40.763391,
+        "eventLoopMaxMsMax": 45.449215
+      }
+    },
+    {
+      "requestedUsers": 800,
+      "achievedUsers": 800,
+      "elapsedSeconds": 300.047485167,
+      "valid": true,
+      "validityReasons": [],
+      "workflowTransactionsPerSecond": 267.13105079147425,
+      "sdkOperationsPerSecond": 1157.8367330979004,
+      "readSdkOperationsPerSecond": 748.6981598094962,
+      "writeSdkOperationsPerSecond": 409.1385732884042,
+      "sdkTransportFailures": 0,
+      "operationClasses": {
+        "read": {
+          "attempted": 48022,
+          "completed": 48015,
+          "failed": 7,
+          "errorRate": 0.00014576652367664821,
+          "latencyP50Ms": 3.5832079998217523,
+          "latencyP95Ms": 8.86358299991116,
+          "latencyP99Ms": 112.24216700019315,
+          "latencyMinMs": 0.9457079996354878,
+          "latencyMaxMs": 908.996334000025
+        },
+        "write": {
+          "attempted": 26642,
+          "completed": 26631,
+          "failed": 11,
+          "errorRate": 0.00041288191577208916,
+          "latencyP50Ms": 3.7692920002155006,
+          "latencyP95Ms": 11.704834000207484,
+          "latencyP99Ms": 585.1713340003043,
+          "latencyMinMs": 0.5832080002874136,
+          "latencyMaxMs": 965.0575419999659
+        },
+        "authSearch": {
+          "attempted": 5506,
+          "completed": 5506,
+          "failed": 0,
+          "errorRate": 0,
+          "latencyP50Ms": 4.0380830001086,
+          "latencyP95Ms": 24.421333000063896,
+          "latencyP99Ms": 111.54437499959022,
+          "latencyMinMs": 0.9842079998925328,
+          "latencyMaxMs": 923.3604159997776
+        }
+      },
+      "resources": {
+        "sampleCount": 297,
+        "runnerCpuPercentMax": 51.4,
+        "runnerRssBytesMax": 320569344,
+        "backendCpuPercentMax": 454.5,
+        "backendRssBytesMax": 331792384,
+        "eventLoopP99MsMax": 49.774591,
+        "eventLoopMaxMsMax": 124.715007
+      }
+    },
+    {
+      "requestedUsers": 1600,
+      "achievedUsers": 1600,
+      "elapsedSeconds": 300.12642279199974,
+      "valid": true,
+      "validityReasons": [],
+      "workflowTransactionsPerSecond": 531.8725306322983,
+      "sdkOperationsPerSecond": 2306.4280497546783,
+      "readSdkOperationsPerSecond": 1496.5093570294353,
+      "writeSdkOperationsPerSecond": 809.918692725243,
+      "sdkTransportFailures": 0,
+      "operationClasses": {
+        "read": {
+          "attempted": 95747,
+          "completed": 95736,
+          "failed": 11,
+          "errorRate": 0.00011488610609209688,
+          "latencyP50Ms": 3.782124999910593,
+          "latencyP95Ms": 12.61566699994728,
+          "latencyP99Ms": 1106.2457920000888,
+          "latencyMinMs": 0.8886249996721745,
+          "latencyMaxMs": 1912.4911249997094
+        },
+        "write": {
+          "attempted": 52796,
+          "completed": 52778,
+          "failed": 18,
+          "errorRate": 0.0003409349193120691,
+          "latencyP50Ms": 4.354540999978781,
+          "latencyP95Ms": 27.154583000112325,
+          "latencyP99Ms": 1039.2076659998856,
+          "latencyMinMs": 0.5504999998956919,
+          "latencyMaxMs": 1988.5564999999478
+        },
+        "authSearch": {
+          "attempted": 11115,
+          "completed": 11115,
+          "failed": 0,
+          "errorRate": 0,
+          "latencyP50Ms": 4.775333000347018,
+          "latencyP95Ms": 27.081708000041544,
+          "latencyP99Ms": 288.29283299995586,
+          "latencyMinMs": 0.9116250001825392,
+          "latencyMaxMs": 1859.6329580000602
+        }
+      },
+      "resources": {
+        "sampleCount": 297,
+        "runnerCpuPercentMax": 108.7,
+        "runnerRssBytesMax": 531447808,
+        "backendCpuPercentMax": 315.7,
+        "backendRssBytesMax": 399572992,
+        "eventLoopP99MsMax": 375.390207,
+        "eventLoopMaxMsMax": 375.390207
+      }
+    },
+    {
+      "requestedUsers": 3200,
+      "achievedUsers": 3128,
+      "elapsedSeconds": 300.4220078329998,
+      "valid": false,
+      "validityReasons": [
+        "cpuPercent sustained above threshold"
+      ],
+      "workflowTransactionsPerSecond": 810.2768560661389,
+      "sdkOperationsPerSecond": 3532.75383403326,
+      "readSdkOperationsPerSecond": 2294.0463149527523,
+      "writeSdkOperationsPerSecond": 1238.7075190805076,
+      "sdkTransportFailures": 4282,
+      "operationClasses": {
+        "read": {
+          "attempted": 148047,
+          "completed": 146063,
+          "failed": 1984,
+          "errorRate": 0.013401149634913238,
+          "latencyP50Ms": 489.90095800021663,
+          "latencyP95Ms": 1418.4540830003098,
+          "latencyP99Ms": 4954.884707999881,
+          "latencyMinMs": 0.704791999887675,
+          "latencyMaxMs": 10160.50370799983
+        },
+        "write": {
+          "attempted": 81569,
+          "completed": 80218,
+          "failed": 1351,
+          "errorRate": 0.016562664737829323,
+          "latencyP50Ms": 835.6724169999361,
+          "latencyP95Ms": 1841.2052089995705,
+          "latencyP99Ms": 5336.37070899969,
+          "latencyMinMs": 0.7048749998211861,
+          "latencyMaxMs": 10652.583999999799
+        },
+        "authSearch": {
+          "attempted": 17353,
+          "completed": 17144,
+          "failed": 209,
+          "errorRate": 0.012044026969400103,
+          "latencyP50Ms": 488.1085830000229,
+          "latencyP95Ms": 1253.7131670000963,
+          "latencyP99Ms": 4923.853624999989,
+          "latencyMinMs": 0.7298749997280538,
+          "latencyMaxMs": 10026.370833000168
+        }
+      },
+      "resources": {
+        "sampleCount": 272,
+        "runnerCpuPercentMax": 168,
+        "runnerRssBytesMax": 713310208,
+        "backendCpuPercentMax": 383.9,
+        "backendRssBytesMax": 602636288,
+        "eventLoopP99MsMax": 4068.474879,
+        "eventLoopMaxMsMax": 4068.474879
+      }
+    }
+  ]
+}
