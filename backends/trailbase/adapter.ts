@@ -3,6 +3,7 @@ import { DeleteOperation, initClient, type Client, type FilterOrComposite, type 
 import type { Backend, AppSession, SessionRequestOptions } from "../../src/backend.js";
 import { createSessionRequestController, type SessionRequestController } from "../../src/session-request.js";
 import { allSettledValues } from "../../src/settle.js";
+import { measureSdkCall } from "../../src/sdk-measurement.js";
 
 import type {
   Activity, AddCommentInput, Comment, CreateTaskInput, Credentials, Dashboard, DashboardInput, DatasetProfile,
@@ -148,9 +149,12 @@ export function trailBaseTaskFilters(input: ListTasksInput | SearchTasksInput): 
   return filters;
 }
 
-async function sdk<T>(work: () => Promise<T>): Promise<T> {
-  try { return await work(); } catch (error) { throw normalizeTrailBaseError(error); }
+export async function trailBaseSdkCall<T>(work: () => Promise<T>): Promise<T> {
+  return measureSdkCall(async () => {
+    try { return await work(); } catch (error) { throw normalizeTrailBaseError(error); }
+  });
 }
+const sdk = trailBaseSdkCall;
 
 function pageInput(page: number, pageSize: number): { offset: number; limit: number } {
   if (!Number.isSafeInteger(page) || page < 0 || page > MAX_PAGE || !Number.isSafeInteger(pageSize) || pageSize < 1 || pageSize > MAX_PAGE_SIZE) {
@@ -608,12 +612,12 @@ export const createTrailBaseSession = async (credentials: Credentials, options: 
     const authId = client.user()?.id;
     if (!authId || !AUTH_ID.test(authId)) {
       request.detachParent();
-      await checkedLogout(client).catch(() => undefined);
+      await sdk(() => checkedLogout(client)).catch(() => undefined);
       throw new BenchmarkOperationError("authentication", { code: "auth_user" });
     }
     let profile: Row;
     try { profile = await oneRow(client, "profiles", [{ column: "authId", op: "equal", value: authId }], "profile_missing"); }
-    catch (error) { request.detachParent(); await checkedLogout(client).catch(() => undefined); throw error; }
+    catch (error) { request.detachParent(); await sdk(() => checkedLogout(client)).catch(() => undefined); throw error; }
     request.detachParent();
     return new TrailBaseSession(client, profile, request);
   };

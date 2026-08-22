@@ -3,6 +3,7 @@ import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import type { Backend, AppSession, BackendInfo, SessionRequestOptions } from "../../src/backend.js";
 import { createSessionRequestController, type SessionRequestController } from "../../src/session-request.js";
 import { allSettledValues } from "../../src/settle.js";
+import { measureSdkCall } from "../../src/sdk-measurement.js";
 
 import type {
   Activity, AddCommentInput, Comment, CreateTaskInput, Credentials, Dashboard, DashboardInput, DatasetProfile,
@@ -107,9 +108,18 @@ export function normalizeSupabaseError(error: unknown, responseStatus?: number):
   return new BenchmarkOperationError(classification, { code, status });
 }
 
-async function sdk<T = unknown>(operation: () => PromiseLike<unknown>): Promise<ResponseLike<T>> {
-  try { return await operation() as ResponseLike<T>; } catch (error) { throw normalizeSupabaseError(error); }
+export async function supabaseSdkCall<T = unknown>(operation: () => PromiseLike<unknown>): Promise<ResponseLike<T>> {
+  return measureSdkCall(async () => {
+    try {
+      const response = await operation() as ResponseLike<T>;
+      if (response?.error) throw normalizeSupabaseError(response.error, response.status);
+      return response;
+    } catch (error) {
+      throw normalizeSupabaseError(error);
+    }
+  });
 }
+const sdk = supabaseSdkCall;
 export function checkedSupabaseResponse<T>(response: ResponseLike<T> | null | undefined): T {
   if (!response || typeof response !== "object") throw new BenchmarkOperationError("invalid_response", { code: "response_shape" });
   if (response.error) throw normalizeSupabaseError(response.error, response.status);
@@ -436,7 +446,7 @@ export async function createSupabaseSession(credentials: Credentials, options: S
     return new SupabaseSession(client, row(required(profile, "profile_missing")), request);
   } catch (error) {
     request.detachParent();
-    if (authenticated) await client.auth.signOut().catch(() => undefined);
+    if (authenticated) await sdk(() => client.auth.signOut()).catch(() => undefined);
     throw error;
   }
 }

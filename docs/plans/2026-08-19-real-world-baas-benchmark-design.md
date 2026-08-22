@@ -97,7 +97,7 @@ A virtual user signs in, chooses an organization and project, and repeats weight
 | Profile update | 1% | Change user-visible profile data |
 | Sign out/in | 2% | Clear and recreate an authenticated session |
 
-A workflow may require multiple public SDK calls. The benchmark times both the full workflow and each SDK operation so products are compared by user-visible work without hiding extra round trips.
+A workflow may require multiple public SDK calls. The benchmark times both the full workflow and every physical remote call issued through the official SDK client, grouped under its initiating application operation; local-only SDK state changes do not count. This compares user-visible work without hiding authorization helpers, related-record reads, or other extra round trips.
 
 Think time defaults to a deterministic random value between 1 and 5 seconds. The exact distribution is configurable and included in every result.
 

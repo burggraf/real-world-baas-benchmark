@@ -3,6 +3,7 @@ import PocketBase, { BaseAuthStore, ClientResponseError, type RecordModel } from
 import type { Backend, AppSession, BackendInfo, SessionRequestOptions } from "../../src/backend.js";
 import { createSessionRequestController, type SessionRequestController } from "../../src/session-request.js";
 import { allSettledValues } from "../../src/settle.js";
+import { measureSdkCall } from "../../src/sdk-measurement.js";
 
 import type {
   Activity,
@@ -215,13 +216,16 @@ export function normalizePocketBaseError(error: unknown): BenchmarkOperationErro
   return new BenchmarkOperationError("transport/sdk", { code: "sdk_error" });
 }
 
-async function sdk<T>(work: () => Promise<T>): Promise<T> {
-  try {
-    return await work();
-  } catch (error) {
-    throw normalizePocketBaseError(error);
-  }
+export async function pocketBaseSdkCall<T>(work: () => Promise<T>): Promise<T> {
+  return measureSdkCall(async () => {
+    try {
+      return await work();
+    } catch (error) {
+      throw normalizePocketBaseError(error);
+    }
+  });
 }
+const sdk = pocketBaseSdkCall;
 
 type TaskFilterInput = Pick<ListTasksInput, "organizationId" | "projectId"> & {
   status?: TaskStatus;
@@ -738,16 +742,22 @@ export function createPocketBaseMeasuredClient(endpoint: string, options: Sessio
   return { client, request };
 }
 
+export async function authenticatePocketBaseClient(pb: PocketBase, credentials: Credentials): Promise<void> {
+  await measureSdkCall(async () => {
+    try {
+      await pb.collection("users").authWithPassword(credentials.email, credentials.password);
+    } catch (error) {
+      if (error instanceof ClientResponseError && error.status === 400) {
+        throw new BenchmarkOperationError("authentication", { code: "invalid_credentials", status: 400 });
+      }
+      throw normalizePocketBaseError(error);
+    }
+  });
+}
+
 async function createSession(credentials: Credentials, options: SessionRequestOptions = {}): Promise<AppSession> {
   const { client: pb, request } = createPocketBaseMeasuredClient(pocketBaseProcess.options.endpoint, options);
-  try {
-    await pb.collection("users").authWithPassword(credentials.email, credentials.password);
-  } catch (error) {
-    if (error instanceof ClientResponseError && error.status === 400) {
-      throw new BenchmarkOperationError("authentication", { code: "invalid_credentials", status: 400 });
-    }
-    throw normalizePocketBaseError(error);
-  }
+  await authenticatePocketBaseClient(pb, credentials);
   request.detachParent();
   return new PocketBaseSession(pb, request);
 }

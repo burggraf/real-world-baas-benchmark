@@ -6,6 +6,7 @@ import { createFakeBackend } from "./fake-backend.js";
 import { runWorkload } from "../src/workload.js";
 import { BenchmarkOperationError } from "../src/correctness.js";
 import { safeErrorDetails } from "../src/errors.js";
+import { measureSdkCall } from "../src/sdk-measurement.js";
 
 const config = loadConfig("configs/quick.json");
 
@@ -564,7 +565,7 @@ test("null task assignee remains valid while creator is required", async () => {
   assert.equal(summary.failedWorkflowCount, 0);
 });
 
-test("null task creator emits invalid-response SDK and workflow failures", async () => {
+test("null task creator keeps the remote call successful while failing workflow validation", async () => {
   const backend = createFakeBackend();
   const baseCreate = backend.createSession;
   backend.createSession = async credentials => {
@@ -579,7 +580,8 @@ test("null task creator emits invalid-response SDK and workflow failures", async
   const summary = await runWorkload(backend, { ...config, weights }, { users: [user(backend)], durationMs: 100, graceMs: 0, now: () => ++clock, sleep: async milliseconds => { if (milliseconds === 100) await new Promise<void>(() => {}); }, onSample: sample => samples.push(sample) });
   assert.ok(summary.failedWorkflowCount > 0);
   assert.equal(summary.stageFailed, true);
-  assert.ok(samples.some(sample => sample.type === "sdk" && sample.name === "getTask" && !sample.success && sample.error?.name === "Error"));
+  assert.ok(samples.some(sample => sample.type === "sdk" && sample.name === "getTask" && sample.success));
+  assert.equal(samples.some(sample => sample.type === "sdk" && sample.name === "getTask" && !sample.success), false);
   assert.ok(samples.some(sample => sample.type === "workflow" && sample.workflow === "taskDetail" && !sample.success && sample.error?.message.includes("creator")));
 });
 
@@ -630,6 +632,30 @@ test("close failures are retried during final cleanup", async () => {
   let clock = 0;
   await runWorkload(backend, { ...config, weights }, { users: [user(backend)], durationMs: 0, graceMs: 0, now: () => ++clock, sleep: async () => {} });
   assert.ok(closeCalls >= 2);
+});
+
+test("a multi-call adapter journey emits each physical SDK call plus one workflow sample", async () => {
+  const backend = createFakeBackend();
+  const baseCreate = backend.createSession;
+  backend.createSession = async credentials => {
+    const session = await baseCreate(credentials);
+    return {
+      ...session,
+      dashboard: async () => {
+        await measureSdkCall(async () => undefined);
+        await measureSdkCall(async () => undefined);
+        return { organization: { id: backend.fixture.organizationId, name: "Tenant", ownerId: "owner", createdAt: "2026-01-01" }, projects: [], recentActivity: [] };
+      },
+    };
+  };
+  const samples: any[] = [];
+  const weights = { ...config.weights, dashboard: 100, taskList: 0, taskDetail: 0, createTask: 0, updateTask: 0, addComment: 0, search: 0, profileUpdate: 0, signIn: 0 };
+  let clock = 0;
+  await runWorkload(backend, { ...config, weights }, { users: [user(backend)], durationMs: 20, graceMs: 0, now: () => ++clock, sleep: async milliseconds => { if (milliseconds === 20) await new Promise<void>(() => {}); }, onSample: sample => samples.push(sample) });
+  const workflows = samples.filter(sample => sample.type === "workflow" && sample.name === "dashboard" && sample.success);
+  const sdkCalls = samples.filter(sample => sample.type === "sdk" && sample.name === "dashboard" && sample.success);
+  assert.ok(workflows.length > 0);
+  assert.equal(sdkCalls.length, workflows.length * 2);
 });
 
 test("samples expose exact operation dimensions and failures", async () => {

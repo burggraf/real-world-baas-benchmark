@@ -3,7 +3,8 @@ import type { BenchmarkConfig, WorkflowName } from "./config.js";
 import type { Credentials } from "./domain.js";
 import { mulberry32 } from "./random.js";
 import { MAX_PAGE_SIZE, runWorkflow, selectWorkflow, type JourneyName, type WorkloadSample, type WorkflowContext } from "./workflows.js";
-import { isIntegrityError, isSessionLossError, safeErrorDetails } from "./errors.js";
+import { isIntegrityError, isSessionLossError } from "./errors.js";
+import { withSdkMeasurement } from "./sdk-measurement.js";
 
 export interface VirtualUserSpec {
   credentials: Credentials;
@@ -53,8 +54,6 @@ const defaultSleep = (milliseconds: number, signal?: AbortSignal): Promise<void>
 const abortError = (): Error => Object.assign(new Error("Workload aborted"), { name: "AbortError" });
 const isAbort = (error: unknown): boolean => error instanceof Error && error.name === "AbortError";
 const deriveSeed = (seed: number, index: number): number => (seed + Math.imul(index, 0x9e3779b9)) >>> 0;
-const asError = safeErrorDetails;
-
 const emit = (callback: ((sample: WorkloadSample) => void) | undefined, sample: WorkloadSample, enabled: boolean): void => {
   if (enabled) callback?.({ ...sample, elapsedMs: Math.max(0, sample.elapsedMs), error: sample.error && { ...sample.error } });
 };
@@ -88,16 +87,9 @@ export async function runWorkload(backend: Backend, config: BenchmarkConfig, opt
   let cleanupStarted = false;
   let measuring = false;
 
-  const call = async <T>(workflow: JourneyName, operation: string, operationClass: WorkloadSample["operationClass"], kind: WorkloadSample["kind"], action: () => Promise<T>, emitEnabled = measuring): Promise<T> => {
-    const started = now();
-    try {
-      const result = await action();
-      emit(options.onSample, { type: "sdk", name: operation, workflow, kind, operationClass, elapsedMs: Math.max(0, now() - started), success: true }, emitEnabled);
-      return result;
-    } catch (error) {
-      emit(options.onSample, { type: "sdk", name: operation, workflow, kind, operationClass, elapsedMs: Math.max(0, now() - started), success: false, error: asError(error) }, emitEnabled);
-      throw error;
-    }
+  const call = <T>(workflow: JourneyName, operation: string, operationClass: WorkloadSample["operationClass"], kind: WorkloadSample["kind"], action: () => Promise<T>, emitEnabled = measuring): Promise<T> => {
+    if (!emitEnabled || !options.onSample) return action();
+    return withSdkMeasurement({ name: operation, workflow, kind, operationClass, now, sample: sample => emit(options.onSample, sample, true) }, action);
   };
 
   const closeSession = async (session: AppSession, throwError = false, measured = false): Promise<void> => {
@@ -137,20 +129,12 @@ export async function runWorkload(backend: Backend, config: BenchmarkConfig, opt
     await workersDone;
   };
   const create = async (spec: VirtualUserSpec, workflow: JourneyName = "signOutIn", measured = false): Promise<AppSession> => {
-    const started = now();
-    let session: AppSession;
-    try {
-      session = await backend.createSession(spec.credentials, { signal: requestController.signal, timeoutMs: config.timeoutMs });
-    } catch (error) {
-      emit(options.onSample, { type: "sdk", name: "createSession", workflow, kind: "read", operationClass: "authSearch", elapsedMs: Math.max(0, now() - started), success: false, error: asError(error) }, measuring && measured);
-      throw error;
-    }
+    const session = await call(workflow, "createSession", "authSearch", "read", () => backend.createSession(spec.credentials, { signal: requestController.signal, timeoutMs: config.timeoutMs }), measuring && measured);
     if (cleanupStarted) {
       active.add(session);
       await closeSession(session, false, false);
       throw abortError();
     }
-    emit(options.onSample, { type: "sdk", name: "createSession", workflow, kind: "read", operationClass: "authSearch", elapsedMs: Math.max(0, now() - started), success: true }, measuring && measured);
     return session;
   };
 

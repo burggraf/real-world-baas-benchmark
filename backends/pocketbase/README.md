@@ -67,3 +67,10 @@ PocketBase applies non-empty list rules as filters, so an unauthorized list is
 an empty HTTP 200 page. Unauthorized protected record reads/updates/deletes are
 concealed as HTTP 404. The adapter preserves status 404 while safely classifying
 it as authorization denial; it does not rewrite it to 403.
+
+Task detail fetches the task and comments, then reads creator and optional
+assignee by exact record ID through the official SDK. PocketBase relation
+expansion was deliberately avoided because its peer-authorization expansion
+path stalled for 8–30 seconds on the medium dataset, while exact related-record
+reads completed in milliseconds. Each resulting remote call is measured and
+reported, so the workaround's call amplification is not hidden.

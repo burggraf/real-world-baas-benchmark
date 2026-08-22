@@ -5,12 +5,22 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { buildPocketBaseArgs, LOCAL_BENCHMARK_PASSWORD, LOCAL_SETUP_PASSWORD, resolvePocketBaseOptions, assertResetDataDirectorySafe, POCKETBASE_EXECUTABLE_SHA256_BY_TARGET, pocketBaseExecutableSha256, PocketBaseProcess } from "../backends/pocketbase/process.js";
-import { backend, batchRecord, fetchPocketBaseTaskDetail, mapPocketBasePage, mapPocketBaseTask, normalizePocketBaseError, taskListFilter } from "../backends/pocketbase/adapter.js";
+import { authenticatePocketBaseClient, backend, batchRecord, fetchPocketBaseTaskDetail, mapPocketBasePage, mapPocketBaseTask, normalizePocketBaseError, taskListFilter } from "../backends/pocketbase/adapter.js";
 import { profileExpectedCounts } from "../src/seed.js";
 import { BenchmarkOperationError } from "../src/correctness.js";
+import { withSdkMeasurement } from "../src/sdk-measurement.js";
 
 test("PocketBase setup and measured users use distinct passwords", () => {
   assert.notEqual(LOCAL_SETUP_PASSWORD, LOCAL_BENCHMARK_PASSWORD);
+});
+
+test("PocketBase measured authentication counts its physical SDK call", async () => {
+  const pb = { collection: () => ({ authWithPassword: async () => ({}) }) } as unknown as PocketBase;
+  const samples: any[] = [];
+  let clock = 0;
+  await withSdkMeasurement({ name: "createSession", workflow: "signOutIn", operationClass: "authSearch", kind: "read", now: () => ++clock, sample: sample => samples.push(sample) }, () => authenticatePocketBaseClient(pb, { email: "user@example.test", password: "not-recorded" }));
+  assert.equal(samples.length, 1);
+  assert.equal(samples[0].success, true);
 });
 
 test("PocketBase pins executable digests for every supported target before version probing", async () => {
@@ -95,11 +105,15 @@ test("PocketBase task details fetch related users directly without relation expa
     users: { getOne: async (id: string, options?: Record<string, unknown>) => { calls.push({ collection: "users", method: "getOne", id, options }); return userRecord(id); } },
   };
   const pb = { collection: (name: keyof typeof services) => services[name], filter: () => "bounded-filter" } as unknown as PocketBase;
-  const detail = await fetchPocketBaseTaskDetail(pb, { organizationId: "org-1", projectId: "project-1", taskId: "task-1", comments: { page: 0, pageSize: 10 } });
+  const samples: any[] = [];
+  let clock = 0;
+  const detail = await withSdkMeasurement({ name: "getTask", workflow: "taskDetail", operationClass: "read", kind: "read", now: () => ++clock, sample: sample => samples.push(sample) }, () => fetchPocketBaseTaskDetail(pb, { organizationId: "org-1", projectId: "project-1", taskId: "task-1", comments: { page: 0, pageSize: 10 } }));
   assert.equal(detail.creator.id, "user-1");
   assert.equal(detail.assignee?.id, "user-2");
   assert.deepEqual(calls.filter(call => call.collection === "users").map(call => call.id), ["user-1", "user-2"]);
   assert.ok(calls.every(call => call.options?.expand === undefined));
+  assert.equal(samples.length, 4);
+  assert.ok(samples.every(sample => sample.type === "sdk" && sample.name === "getTask" && sample.success));
 });
 
 test("PocketBase filters quote untrusted search values", () => {

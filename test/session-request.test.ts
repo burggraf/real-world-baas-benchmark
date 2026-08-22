@@ -4,6 +4,12 @@ import { createSessionRequestController, validateSessionRequestTimeout } from ".
 import { createPocketBaseMeasuredClient } from "../backends/pocketbase/adapter.js";
 import { createSupabaseClient, createSupabaseSession } from "../backends/supabase/adapter.js";
 import { createTrailBaseMeasuredClient, createTrailBaseSession } from "../backends/trailbase/adapter.js";
+import { withSdkMeasurement } from "../src/sdk-measurement.js";
+
+const measuredSession = <T>(samples: unknown[], work: () => Promise<T>): Promise<T> => {
+  let clock = 0;
+  return withSdkMeasurement({ name: "createSession", workflow: "signOutIn", operationClass: "authSearch", kind: "read", now: () => ++clock, sample: sample => samples.push(sample) }, work);
+};
 
 test("request controller aborts injected pending fetch and rotation permits cleanup", async () => {
   const controller = createSessionRequestController({ timeoutMs: 1000 });
@@ -94,12 +100,14 @@ test("Supabase post-auth setup failure signs out the authenticated client", asyn
     requestCount++;
     if (requestCount === 1) return new Response(JSON.stringify({ access_token: "access", token_type: "bearer", expires_in: 3600, expires_at: Math.floor(Date.now() / 1000) + 3600, refresh_token: "refresh", user: { id: "auth-user", aud: "authenticated", role: "authenticated", email: "user@example.test", app_metadata: {}, user_metadata: {}, created_at: new Date().toISOString(), updated_at: new Date().toISOString() } }), { status: 200, headers: { "content-type": "application/json" } });
     if (requestCount === 2) return new Response(JSON.stringify({ message: "profile unavailable" }), { status: 500, headers: { "content-type": "application/json" } });
-    return new Response(JSON.stringify({}), { status: 204 });
+    return new Response(null, { status: 204 });
   }) as typeof fetch;
+  const samples: any[] = [];
   try {
-    await assert.rejects(createSupabaseSession({ email: "user@example.test", password: "not-recorded" }, { timeoutMs: 1000 }, { url: "http://127.0.0.1:54321", publicKey: "public-key" }), /profile|supabase/i);
+    await assert.rejects(measuredSession(samples, () => createSupabaseSession({ email: "user@example.test", password: "not-recorded" }, { timeoutMs: 1000 }, { url: "http://127.0.0.1:54321", publicKey: "public-key" })), /profile|supabase/i);
   } finally { globalThis.fetch = original; }
   assert.ok(paths.some(path => path.endsWith("/auth/v1/logout")), paths.join(","));
+  assert.deepEqual(samples.map(sample => sample.success), [true, false, true]);
 });
 
 test("TrailBase post-auth setup failure logs out after parent cancellation", async () => {
@@ -122,11 +130,13 @@ test("TrailBase post-auth setup failure logs out after parent cancellation", asy
     logoutSignal = init?.signal ?? undefined;
     return new Response(null, { status: 204 });
   }) as typeof fetch;
+  const samples: any[] = [];
   try {
-    await assert.rejects(createTrailBaseSession({ email: "user@example.test", password: "not-recorded" }, { signal: parent.signal, timeoutMs: 1000 }));
+    await assert.rejects(measuredSession(samples, () => createTrailBaseSession({ email: "user@example.test", password: "not-recorded" }, { signal: parent.signal, timeoutMs: 1000 })));
   } finally { globalThis.fetch = original; }
   assert.ok(paths.some(path => path.endsWith("/api/auth/v1/logout")), paths.join(","));
   assert.equal(logoutSignal?.aborted, false);
+  assert.deepEqual(samples.map(sample => sample.success), [true, false, true]);
 });
 
 test("TrailBase measured close reports SDK-swallowed transport failures", async () => {
@@ -143,13 +153,17 @@ test("TrailBase measured close reports SDK-swallowed transport failures", async 
     if (requestCount === 2) return new Response(JSON.stringify({ records: [{ id: 1, publicId: "usrsmall0000001", authId: subject }], total_count: 1 }), { status: 200, headers: { "content-type": "application/json" } });
     throw Object.assign(new Error("logout timed out"), { name: "TimeoutError" });
   }) as typeof fetch;
+  const samples: any[] = [];
   try {
     const session = await createTrailBaseSession({ email: "user@example.test", password: "not-recorded" }, { timeoutMs: 1000 });
-    await assert.rejects(session.close(), error => (error as { classification?: string }).classification === "timeout");
+    let clock = 0;
+    await assert.rejects(withSdkMeasurement({ name: "close", workflow: "signOutIn", operationClass: "authSearch", kind: "read", now: () => ++clock, sample: sample => samples.push(sample) }, () => session.close()), error => (error as { classification?: string }).classification === "timeout");
   } finally {
     globalThis.fetch = originalFetch;
     console.debug = originalDebug;
   }
+  assert.equal(samples.length, 1);
+  assert.equal(samples[0].error.classification, "timeout");
 });
 
 test("request timeout validation rejects invalid values", () => {

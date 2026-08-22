@@ -1,6 +1,7 @@
 import type { Backend, AppSession, BackendInfo, SessionRequestOptions } from "../src/backend.js";
 import type { Comment, Credentials, DatasetProfile, Membership, Organization, Page, Project, Task, TaskDetail, User } from "../src/domain.js";
 import { BenchmarkOperationError } from "../src/correctness.js";
+import { measureSdkCall } from "../src/sdk-measurement.js";
 
 export interface FakeFixture {
   owner: Credentials;
@@ -150,7 +151,7 @@ export function createFakeBackend(options: FakeOptions = {}): FakeBackend {
       hasNext: (pagination.page + 1) * pagination.pageSize < items.length,
     });
 
-    return {
+    const session: AppSession = {
       dashboard: async (input) => {
         checkProject(input.organizationId, input.projectId);
         return { organization, projects: projects.filter((candidate) => candidate.organizationId === input.organizationId), recentActivity: [] };
@@ -294,6 +295,13 @@ export function createFakeBackend(options: FakeOptions = {}): FakeBackend {
         if (options.closeFailure) throw new Error("close failed");
       },
     };
+    return new Proxy(session, {
+      get(target, property, receiver) {
+        const value = Reflect.get(target, property, receiver) as unknown;
+        if (property === "cancelPending" || typeof value !== "function") return value;
+        return (...args: unknown[]) => measureSdkCall(() => Promise.resolve(value.apply(target, args)));
+      },
+    });
   };
 
   const backend = {
@@ -302,7 +310,7 @@ export function createFakeBackend(options: FakeOptions = {}): FakeBackend {
     start: async () => { health = true; },
     reset: async () => {},
     seed: async (_profile: DatasetProfile, _seed: number) => {},
-    createSession: async (credentials: Credentials, _options?: SessionRequestOptions) => createSession(credentials),
+    createSession: async (credentials: Credentials, _options?: SessionRequestOptions) => measureSdkCall(async () => createSession(credentials)),
     stop: async () => { health = false; },
     fixture,
     sessions,
