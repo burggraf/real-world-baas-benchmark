@@ -89,6 +89,9 @@ npm run bench -- correctness --backend pocketbase --config configs/quick.json
 npm run bench -- run --backend pocketbase --config configs/quick.json
 npm run bench -- run --backend pocketbase --config configs/full.json
 
+# TrailBase-only ceiling probe; do not aggregate with the three-backend comparison.
+npm run bench -- run --backend trailbase --config configs/trailbase-ceiling.json
+
 # Sequential smoke comparison. Use explicit individual runs for controlled
 # publishable rotations and cooldowns described in docs/methodology.md.
 npm run bench -- compare --backends supabase,pocketbase,trailbase --config configs/quick.json
@@ -111,6 +114,7 @@ Do not add `--confirm-large` to automation casually.
 
 - `configs/quick.json` uses the small dataset, a 5-second warm-up, and three 15-second stages at 1/5/10 users. Allow minutes rather than assuming the 50 measured seconds are the whole run: reset, seed, correctness, startup, and cleanup are additional work. Quick results are never publishable.
 - `configs/full.json` uses the 626,000-record medium dataset, a 120-second warm-up, and at least four 300-second stages at 5/10/25/50 users. Publishable capacity is established only within that measured range: capacity zero means no qualifying capacity was established at or above five users, not that the backend supports zero users. One-user quick evidence is separate and nonpublishable. A current full run is approximately **30–55+ minutes per backend**, based on the measured medium seed plus configured warm-up/stages; adaptive capacity stages can make it longer.
+- `configs/trailbase-ceiling.json` keeps the full medium workload and SLOs but raises `maxConcurrency` to 4,000. It is a TrailBase-only follow-up with configured stages at 5/10/25/50 users, followed by bounded doubling through 100/200/400/800/1,600/3,200/4,000 while stages pass and one midpoint refinement after the first conclusive failure. Its different config makes it incompatible with the published three-backend aggregate. Stop at runner overload: that identifies the same-host system limit, not TrailBase's server-only limit.
 - Observed medium setup occupied about 198 MiB for PocketBase and 234 MiB plus a 4.1 MiB log for TrailBase. Supabase size was unavailable because owned volumes were removed at stop. Docker images and engine storage can require several additional GiB. Keep comfortable free space and measure the actual run.
 - The large profile has not been characterized; expect multiple GiB and substantially longer setup/run time.
 - Three rotated full runs for each of three backends are nine runs and therefore a multi-hour exercise before cooldowns or reruns.

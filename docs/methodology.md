@@ -82,6 +82,8 @@ A `run` performs this order inside one owning process:
 
 The quick profile has a 5-second warm-up and 15-second stages at 1/5/10 users. The full medium profile has a 120-second warm-up and 300-second configured stages at 5/10/25/50 users, with `maxConcurrency` 1,000. Five users is the publishable measurement floor because the deterministic 300-second one-user stream cannot meet the unchanged 20-sample requirement for the 7% auth/search class. Configured stage time excludes reset, seed, correctness, startup, cleanup, grace periods, and adaptive stages.
 
+The TrailBase-only `trailbase-ceiling` profile changes only the profile name and `maxConcurrency`, raising the bound to 4,000 while preserving the full medium workload and SLO contract. After its configured 5/10/25/50-user stages pass, bounded doubling adds 100/200/400/800/1,600/3,200/4,000 while stages continue to pass; the normal single midpoint refinement follows a first conclusive failure. It is a separate follow-up series and is not aggregation-compatible with `full` results. On the shared-host topology, a runner-overload failure bounds the combined runner/backend system; it must not be presented as TrailBase server saturation. A server-only endpoint above that boundary requires a separate load-generator host and a separately qualified protocol.
+
 `up` is a foreground diagnostic: it owns the lifecycle until Ctrl-C (`SIGINT`) or `SIGTERM`, then stops only that handle. Cross-process `down` is intentionally unsupported because a new process cannot prove ownership. Never substitute a broad `pkill`, global Supabase stop, or Docker prune.
 
 ## TPS and latency definitions

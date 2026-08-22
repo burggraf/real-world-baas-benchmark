@@ -25,6 +25,14 @@ test("loads every required value from the approved quick, full, and large config
   assert.equal(large.maxConcurrency <= 100_000, true);
 });
 
+test("loads the publishable TrailBase ceiling profile", () => {
+  assert.deepEqual(loadConfig("configs/trailbase-ceiling.json"), {
+    ...full,
+    name: "trailbase-ceiling",
+    maxConcurrency: 4000,
+  });
+});
+
 test("strictly parses full and large JSON through the unknown boundary", () => {
   assert.equal(parseConfig(JSON.parse(readFileSync("configs/full.json", "utf8"))).publishable, true);
   assert.equal(parseConfig(JSON.parse(readFileSync("configs/large.json", "utf8"))).publishable, false);
