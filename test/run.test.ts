@@ -229,16 +229,38 @@ test("configured stages after a conclusive failure are not executed", async () =
   const output = await run.output;
   assert.ok(requested.includes(1)); assert.ok(requested.includes(10));
   assert.ok(!requested.includes(20)); assert.ok(!requested.includes(40));
-  assert.deepEqual(output.result.stages.map(stage => stage.requestedUsers), [1, 5, 10]);
+  assert.deepEqual(output.result.stages.map(stage => stage.requestedUsers), [1, 5, 7, 8, 9, 10]);
 });
 
-test("schedule runs configured stages, extends after passes, stops at failure, and refines once", async () => {
+test("schedule doubles after configured passes and runs at most four binary refinements", async () => {
   const requested: number[] = [];
-  const run = await fakeRun({ config: measuredConfig({ concurrency: [1, 4], maxConcurrency: 16 }), workload: async opts => { const users = opts.users.length; if (opts.onSample) { requested.push(users); opts.onSample({ type: "workflow", name: "dashboard", workflow: "dashboard", operationClass: "read", kind: "read", elapsedMs: users === 16 ? 2000 : 1, success: true }); } return summary(users); } });
+  const run = await fakeRun({ config: measuredConfig({ concurrency: [5, 10, 25, 50], maxConcurrency: 3200 }), workload: async opts => { const users = opts.users.length; if (opts.onSample) { requested.push(users); opts.onSample({ type: "workflow", name: "dashboard", workflow: "dashboard", operationClass: "read", kind: "read", elapsedMs: users > 2500 ? 2000 : 1, success: true }); } return summary(users); } });
   const output = await run.output;
-  assert.deepEqual(requested, [1, 4, 8, 16, 12]);
-  assert.deepEqual(output.result.stages.map(stage => stage.requestedUsers), [1, 4, 8, 12, 16]);
-  assert.equal(new Set(output.result.stages.map(stage => stage.requestedUsers)).size, output.result.stages.length); assert.equal(output.result.capacity.users, 12);
+  assert.deepEqual(requested, [5, 10, 25, 50, 100, 200, 400, 800, 1600, 3200, 2400, 2800, 2600, 2500]);
+  assert.deepEqual(output.result.stages.map(stage => stage.requestedUsers), [...requested].sort((a, b) => a - b));
+  assert.equal(new Set(output.result.stages.map(stage => stage.requestedUsers)).size, output.result.stages.length);
+  assert.equal(output.result.capacity.users, 2500);
+});
+
+test("runner overload bounds and refines co-located capacity", async () => {
+  const requested: number[] = []; let resourceCalls = 0;
+  const run = await fakeRun({
+    config: measuredConfig({ concurrency: [100, 200], maxConcurrency: 400 }),
+    workload: async opts => { const users = opts.users.length; if (opts.onSample) { requested.push(users); opts.onSample({ type: "workflow", name: "dashboard", workflow: "dashboard", operationClass: "read", kind: "read", elapsedMs: 1, success: true }); } return summary(users); },
+    resources: async () => ({ samples: ++resourceCalls >= 3 ? [snapshot(91, 1), snapshot(91, 2), snapshot(91, 3)] : [snapshot()], valid: true, validityReasons: [] }),
+  });
+  const output = await run.output;
+  assert.deepEqual(requested, [100, 200, 400, 300, 250, 225, 212]);
+  assert.equal(output.result.capacity.users, 200);
+  assert.equal(output.result.valid, false);
+  assert.match(output.result.stages.find(stage => stage.requestedUsers === 212)!.validityReasons.join(" "), /cpuPercent sustained above threshold/);
+});
+
+test("non-boundary integrity failures stop without refinement", async () => {
+  const requested: number[] = [];
+  const run = await fakeRun({ config: measuredConfig({ concurrency: [100, 200], maxConcurrency: 400 }), workload: async opts => { if (opts.onSample) { requested.push(opts.users.length); opts.onSample({ type: "workflow", name: "dashboard", workflow: "dashboard", operationClass: "read", kind: "read", elapsedMs: 1, success: true }); } return summary(opts.users.length); }, resources: async () => ({ samples: [snapshot()], valid: false, validityReasons: ["resource unavailable"] }) });
+  await run.output;
+  assert.deepEqual(requested, [100]);
 });
 
 test("safeErrorMessage does not inspect arbitrary objects", () => {

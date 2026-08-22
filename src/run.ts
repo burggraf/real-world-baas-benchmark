@@ -35,6 +35,8 @@ const SATURATION_MATERIAL_INCREASE = 0.2;
 const SATURATION_MAX_TPS_GAIN = 0.1;
 const DEFAULT_OVERLOAD = { cpuPercent: 90, p99Ms: 100, maxMs: 250, consecutiveSamples: 3 } as const;
 const RESOURCE_SAMPLE_FORMULA = "ceil((stageDurationMs + graceMs) / intervalMs) + 2" as const;
+export const CAPACITY_REFINEMENT_MAX_STAGES = 4;
+export const CAPACITY_REFINEMENT_MIN_USER_GAP = 1;
 
 export function safeErrorMessage(error: unknown): string {
   if (!(error instanceof Error)) return "command failed";
@@ -193,9 +195,9 @@ export async function runBenchmark(options: RunOptions): Promise<{ result: Bench
     const resourceFn = d.resources ?? collectResources;
     const workloadFn = d.workload ?? runWorkload;
     const stages = [...options.config.concurrency];
-    let refined = false;
-    let refinementStage: number | undefined;
-    let conclusiveFailureSeen = false;
+    let lowerPass: number | undefined;
+    let upperFailure: number | undefined;
+    let refinementStages = 0;
     for (let stageIndex = 0; stageIndex < stages.length; stageIndex++) {
       const requestedUsers = stages[stageIndex]!;
       const stageInfo = await backend.doctor().catch(() => { throw new Error("pre-stage backend doctor failed"); });
@@ -252,21 +254,29 @@ export async function runBenchmark(options: RunOptions): Promise<{ result: Bench
       const evaluation = evaluateCapacity(result.stages, options.config, { minSamples: minClassSamples, minAchievedRatio: MIN_ACHIEVED_RATIO, materialIncrease: SATURATION_MATERIAL_INCREASE, maxThroughputGain: SATURATION_MAX_TPS_GAIN });
       result.capacity = mapCapacity(evaluation);
       const currentEvaluation = evaluation.stages.find(item => item.requestedUsers === requestedUsers);
-      const previous = stageIndex > 0 ? stages[stageIndex - 1]! : undefined;
-      const previousEvaluation = previous === undefined ? undefined : evaluation.stages.find(item => item.requestedUsers === previous);
       const currentFailedConclusively = Boolean(currentEvaluation && !currentEvaluation.passed && conclusive(currentEvaluation));
-      if (currentFailedConclusively) conclusiveFailureSeen = true;
-      if (currentFailedConclusively && previousEvaluation?.passed && previous !== undefined && requestedUsers - previous > 1 && !refined) {
-        const midpoint = Math.floor((previous + requestedUsers) / 2);
-        if (midpoint <= options.config.maxConcurrency && !stages.includes(midpoint)) { stages.splice(stageIndex + 1, 0, midpoint); refinementStage = midpoint; refined = true; }
+      const runnerBoundary = Boolean(overload && /sustained above threshold$/.test(overload) && stage.validityReasons.length === 1 && stage.validityReasons[0] === overload);
+      const boundaryFailure = currentFailedConclusively || runnerBoundary;
+      if (currentEvaluation?.passed) lowerPass = lowerPass === undefined ? requestedUsers : Math.max(lowerPass, requestedUsers);
+      if (boundaryFailure) upperFailure = upperFailure === undefined ? requestedUsers : Math.min(upperFailure, requestedUsers);
+
+      let refinementInserted = false;
+      if (lowerPass !== undefined && upperFailure !== undefined && lowerPass < upperFailure && refinementStages < CAPACITY_REFINEMENT_MAX_STAGES && upperFailure - lowerPass > CAPACITY_REFINEMENT_MIN_USER_GAP) {
+        const midpoint = Math.floor((lowerPass + upperFailure) / 2);
+        if (!stages.includes(midpoint)) {
+          stages.splice(stageIndex + 1, 0, midpoint);
+          refinementStages++;
+          refinementInserted = true;
+        }
       }
       const configuredDone = options.config.concurrency.every(count => result.stages.some(item => item.requestedUsers === count));
-      if (configuredDone && !conclusiveFailureSeen && currentEvaluation?.passed && requestedUsers < options.config.maxConcurrency) {
+      if (!refinementInserted && upperFailure === undefined && configuredDone && currentEvaluation?.passed && requestedUsers < options.config.maxConcurrency) {
         const next = Math.min(options.config.maxConcurrency, requestedUsers * 2);
         if (next > requestedUsers && !stages.includes(next)) stages.push(next);
       }
       await savePartial();
-      if (refinementStage === requestedUsers || (currentFailedConclusively && refinementStage === undefined)) break;
+      if (refinementInserted) continue;
+      if ((lowerPass !== undefined && upperFailure !== undefined) || boundaryFailure || currentEvaluation?.invalid) break;
     }
     result.valid = result.correctness.findings.every(finding => finding.passed) && result.stages.length > 0 && result.stages.every(stage => stage.valid) && result.capacity.users > 0;
     result.validityReasons = result.valid ? [] : ["one or more benchmark prerequisites failed"];
